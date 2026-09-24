@@ -6,9 +6,9 @@ defmodule Sim.Fixtures.Anonymizer do
 
   Rules are by field name and context:
 
-    * **ids** of people and channels (`user_id`, `broadcaster_user_id`,
-      `chatroom_id`, `id` outside category/emote/badge/gift contexts…) become
-      fake integers (or numeric strings, if they were strings);
+    * **ids**: `id` and every `*_id` key (except category, emote, badge,
+      gift and reward ids), outside category/emote/badge/gift contexts,
+      become fake integers (or numeric strings, if they were strings);
     * **names** (`username`, `slug`, `channel_slug`, `display_name`, and
       `name` directly inside a person) become `user0001`-style pseudonyms,
       case-insensitively consistent;
@@ -27,11 +27,15 @@ defmodule Sim.Fixtures.Anonymizer do
   @type t :: %__MODULE__{}
 
   @keep_contexts ~w(category categories subcategory subcategories recent_categories
-                    parent_category emote emotes badge badges gift reward identity_badges)
+                    parent_category emote emotes badge badges badges_v2 gift reward identity_badges)
   @people ~w(user sender broadcaster follower gifter giftees subscriber redeemer
              moderator banned_user host hosted raider channel recipient chatroom owner)
   @id_keys ~w(id user_id broadcaster_user_id channel_id chatroom_id sender_id
               livestream_id owner_id)
+  # Numbers under any other `*_id` key are mapped too (a missed id is a leak,
+  # an extra mapping is harmless), except these, which identify no one.
+  @safe_id_keys ~w(category_id subcategory_id parent_category_id emote_id badge_id
+                   gift_id reward_id)
   @name_keys ~w(username slug channel_slug display_name)
   @text_keys ~w(content message stream_title session_title title channel_description
                 description bio reason offline_banner_text)
@@ -40,7 +44,9 @@ defmodule Sim.Fixtures.Anonymizer do
                 event_type kind direction access_token token_type playback_url
                 code error message_id subscription_id duration tier gift_id
                 created_at updated_at started_at ended_at expires_at
-                redeemed_at start_time date at recorded_at)
+                redeemed_at start_time date at recorded_at
+                chat_mode chat_mode_old chatable_type socket_id message_ref
+                lang_iso followers_count public_key)
 
   @first_id 900_000_001
 
@@ -86,13 +92,15 @@ defmodule Sim.Fixtures.Anonymizer do
     cond do
       is_binary(value) and url?(value) -> url(value, state)
       kept? -> anonymize(value, [k | path], state)
-      k in @id_keys and id_like?(value) -> id(value, state)
-      String.ends_with?(k, "_user_id") and id_like?(value) -> id(value, state)
+      person_id_key?(k) and id_like?(value) -> id(value, state)
       k in @name_keys and is_binary(value) -> name(value, state)
+      k == "channel" and is_binary(value) and pusher_channel?(value) -> channel_name(value, state)
+      id_key?(k) and is_binary(value) and uuid?(value) -> {value, state}
       k == "name" and is_binary(value) and person?(path) -> name(value, state)
       k == "message" and path == [] -> {value, state}
       k in @text_keys and is_binary(value) -> text(value, "text", state)
       k in @social_keys and is_binary(value) -> text(value, "handle", state)
+      is_binary(value) and nested_json?(value) -> nested(value, [k | path], state)
       is_binary(value) -> {value, note_unknown(k, value, path, state)}
       true -> anonymize(value, [k | path], state)
     end
@@ -171,13 +179,30 @@ defmodule Sim.Fixtures.Anonymizer do
     do: {"#{kind}-#{state.texts + 1}", %{state | texts: state.texts + 1}}
 
   defp note_unknown(key, value, path, state) do
-    if key in @safe_keys or timestamp?(value) or value == "" do
+    if key in @safe_keys or timestamp?(value) or event_name?(value) or value == "" do
       state
     else
       at = [key | path] |> Enum.reverse() |> Enum.join(".")
       %{state | unknown: Map.update(state.unknown, at, 1, &(&1 + 1))}
     end
   end
+
+  # JSON stored as a string (Pusher's data, recorded bodies) is anonymized
+  # inside and re-encoded. Checked after the text rules, so chat text that
+  # happens to look like JSON is still replaced as text.
+  defp nested(value, path, state) do
+    {decoded, state} = value |> Jason.decode!() |> anonymize(path, state)
+    {Jason.encode!(decoded), state}
+  end
+
+  defp nested_json?(<<c, _::binary>> = value) when c in [?{, ?[] do
+    case Jason.decode(value) do
+      {:ok, decoded} -> is_map(decoded) or is_list(decoded)
+      _ -> false
+    end
+  end
+
+  defp nested_json?(_), do: false
 
   defp keep_context?(path), do: Enum.any?(path, &(&1 in @keep_contexts))
   defp person?([parent | _]), do: parent in @people
@@ -188,5 +213,20 @@ defmodule Sim.Fixtures.Anonymizer do
   defp id_like?(_), do: false
 
   defp url?(value), do: value =~ ~r{^https?://}i
+
+  # Kick event names, e.g. `livestream.status.updated`.
+  defp event_name?(value), do: value =~ ~r/^[a-z_]+(\.[a-z_]+)+$/
+
+  # Message and thread ids are random UUIDs: not personal, and needed to link
+  # replies to their parent.
+  defp id_key?(k), do: k in @id_keys or String.ends_with?(k, "_id")
+
+  defp person_id_key?(k),
+    do: k in @id_keys or (String.ends_with?(k, "_id") and k not in @safe_id_keys)
+
+  defp uuid?(value),
+    do: value =~ ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  defp pusher_channel?(value), do: value =~ ~r/^[a-z_]+[._]\d+/
   defp timestamp?(value), do: value =~ ~r/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/
 end
