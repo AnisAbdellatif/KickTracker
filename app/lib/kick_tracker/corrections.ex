@@ -5,6 +5,11 @@ defmodule KickTracker.Corrections do
   stream, a rebroadcast), or **merge** a stream into the one before it
   (the sessionizer split one broadcast in two). Revoking keeps the row.
 
+  Merges are resolved transitively (`merge_groups`): a stream belongs to
+  the **root** of its group, the one nothing is merged above, and a new
+  merge always goes into that root. Excluding a root excludes the streams
+  merged into it (`excluded_streams`).
+
   The web role writes these (admin tables) and queues the collector's
   `Workers.Reprocess` to recompute the figures they change.
   """
@@ -45,40 +50,69 @@ defmodule KickTracker.Corrections do
     end)
   end
 
-  @doc "Excludes a stream from statistics."
+  @doc "Excludes a stream (and the streams merged into it) from statistics."
   @spec exclude(integer(), String.t(), map()) :: {:ok, integer()} | {:error, String.t()}
   def exclude(stream_id, note, admin) do
     with {:ok, stream} <- fetch_stream(stream_id),
          :ok <- not_already(stream_id, "exclude") do
-      insert(%{kind: "exclude", stream_id: stream_id}, note, admin, [stream])
+      insert(%{kind: "exclude", stream_id: stream_id}, note, admin, [
+        stream | group_streams(stream_id)
+      ])
     end
   end
 
   @doc """
-  Merges `other_id` into `stream_id`: the same channel, and the next
-  stream after it (nothing in between).
+  Merges `other_id` into `stream_id`'s group: the same channel, later, and
+  no stream in between that isn't already part of the group. The merge is
+  recorded into the group's root, so a broadcast split in three ends up as
+  one stream whichever way it is merged (`a <- b` then `a <- d`, or
+  `a <- b` then `b <- d`).
   """
   @spec merge(integer(), integer(), String.t(), map()) :: {:ok, integer()} | {:error, String.t()}
   def merge(stream_id, other_id, note, admin) do
-    with {:ok, a} <- fetch_stream(stream_id),
+    with {:ok, _} <- fetch_stream(stream_id),
+         {:ok, a} <- fetch_stream(root_of(stream_id)),
          {:ok, b} <- fetch_stream(other_id),
          :ok <- mergeable(a, b) do
-      insert(%{kind: "merge", stream_id: stream_id, other_stream_id: other_id}, note, admin, [
-        a,
-        b
-      ])
+      streams = Enum.uniq_by([a, b | group_streams(a.id) ++ group_streams(b.id)], & &1.id)
+      insert(%{kind: "merge", stream_id: a.id, other_stream_id: b.id}, note, admin, streams)
     end
+  end
+
+  @doc "The root of a stream's merge group: the stream it is shown as part of, or itself."
+  @spec root_of(integer()) :: integer()
+  def root_of(stream_id) do
+    Repo.one(
+      from g in "merge_groups", where: g.stream_id == ^stream_id, select: g.root_id, limit: 1
+    ) || stream_id
+  end
+
+  @doc "The streams merged into `root_id`, at any depth (without `root_id` itself)."
+  @spec members(integer()) :: [integer()]
+  def members(root_id) do
+    Repo.all(from g in "merge_groups", where: g.root_id == ^root_id, select: g.stream_id)
   end
 
   @doc "Revokes a correction; the figures are recomputed."
   @spec revoke(integer(), map()) :: :ok | {:error, String.t()}
   def revoke(id, admin) do
+    # The group as it is before the revocation: the parts that leave it
+    # are recomputed too.
+    before =
+      case Repo.query!("SELECT stream_id, other_stream_id FROM stream_overrides WHERE id = $1", [
+             id
+           ]).rows do
+        [[sid, oid]] -> members(root_of(sid)) ++ if(oid, do: members(oid), else: [])
+        [] -> []
+      end
+
     case Repo.query!(
            "UPDATE stream_overrides SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING kind, stream_id, other_stream_id",
            [id]
          ).rows do
       [[kind, sid, oid]] ->
-        streams = for id <- [sid, oid], id, {:ok, s} = fetch_stream(id), do: s
+        ids = Enum.uniq([sid, oid | before]) |> Enum.reject(&is_nil/1)
+        streams = for id <- ids, {:ok, s} = fetch_stream(id), do: s
         recompute(streams)
         Audit.log(admin, "correction.revoke", "#{kind} #{sid}", %{"id" => id})
         :ok
@@ -147,6 +181,10 @@ defmodule KickTracker.Corrections do
     end
   end
 
+  defp group_streams(root_id) do
+    for id <- members(root_id), {:ok, s} = fetch_stream(id), do: s
+  end
+
   defp not_already(stream_id, kind) do
     if Repo.exists?(
          from o in "stream_overrides",
@@ -157,12 +195,17 @@ defmodule KickTracker.Corrections do
   end
 
   defp mergeable(a, b) do
+    # A stream between them that isn't already part of `a`'s group.
     between? =
       Repo.exists?(
         from s in "streams",
           where:
             s.channel_id == ^a.channel_id and s.started_at > ^a.started_at and
-              s.started_at < ^b.started_at
+              s.started_at < ^b.started_at,
+          where:
+            s.id not in subquery(
+              from g in "merge_groups", where: g.root_id == ^a.id, select: g.stream_id
+            )
       )
 
     cond do
@@ -172,11 +215,11 @@ defmodule KickTracker.Corrections do
       DateTime.compare(b.started_at, a.started_at) != :gt ->
         {:error, "merge a stream into the one before it"}
 
-      between? ->
-        {:error, "another stream lies between them"}
-
       Repo.exists?(from m in "merged_streams", where: m.other_stream_id == ^b.id) ->
         {:error, "already merged"}
+
+      between? ->
+        {:error, "another stream lies between them"}
 
       true ->
         :ok

@@ -365,7 +365,9 @@ defmodule KickTracker.Bulk do
 
   # The whole range was "collected": one period per source.
   defp coverage(channel, from, to, opts) do
-    sources = ["api", "subscribers", "followers"] ++ if(Keyword.get(opts, :chat, true), do: ["chat"], else: [])
+    sources =
+      ["api", "subscribers", "followers", "ingress"] ++
+        if(Keyword.get(opts, :chat, true), do: ["chat"], else: [])
 
     unless Repo.exists?(from c in "coverage", where: c.channel_id == ^channel.id and c.from_at == ^from) do
       Repo.insert_all(

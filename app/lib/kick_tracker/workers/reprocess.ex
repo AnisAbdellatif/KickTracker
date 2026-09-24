@@ -10,7 +10,11 @@ defmodule KickTracker.Workers.Reprocess do
       `webhook_events` through the current handlers again: facts are
       upserts, so existing rows stay as they are and missing ones appear;
       stream status and metadata go to the channel's process, whose rules
-      don't depend on arrival order.
+      don't depend on arrival order. When it is done it queues the
+      `"rollups"` job for the same range (a minute later, so the channel
+      processes have applied what they were sent): facts replayed into
+      the past reach `hourly_stats` and `stream_stats` even beyond the
+      nightly job's two days, and never before they are written.
   """
 
   use Oban.Worker, queue: :kick, max_attempts: 3
@@ -36,7 +40,9 @@ defmodule KickTracker.Workers.Reprocess do
           select: s.id
       )
 
-    (ids ++ Map.get(args, "stream_ids", [])) |> Enum.uniq() |> Enum.each(&Rollups.stream_stats/1)
+    ids = ids ++ Map.get(args, "stream_ids", [])
+    # A part of a merged stream changes its root's figures too.
+    (ids ++ Rollups.roots(ids)) |> Enum.uniq() |> Enum.each(&Rollups.stream_stats/1)
     Logger.info("reprocess: rollups from #{from} to #{to}, #{length(ids)} streams")
     :ok
   end
@@ -70,6 +76,11 @@ defmodule KickTracker.Workers.Reprocess do
       end,
       timeout: :infinity
     )
+
+    {:ok, _} =
+      %{"kind" => "rollups", "from" => args["from"], "to" => args["to"]}
+      |> new(schedule_in: 60)
+      |> Oban.insert()
 
     :ok
   end
