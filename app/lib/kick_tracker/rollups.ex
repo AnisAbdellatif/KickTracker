@@ -58,7 +58,7 @@ defmodule KickTracker.Rollups do
         samples: viewers.samples,
         avg_viewers: viewers.avg,
         peak_viewers: viewers.peak,
-        hours_watched: Metrics.hours_watched(started_at, samples),
+        hours_watched: if(samples != [], do: Metrics.hours_watched(started_at, samples)),
         followers_start: gain.start,
         followers_end: gain.end,
         follower_gain: gain.gain
@@ -161,22 +161,22 @@ defmodule KickTracker.Rollups do
           FROM weighted WHERE observed_at >= $1
           GROUP BY 1, 2
           UNION ALL
-          SELECT channel_id, date_trunc('hour', minute, 'UTC'), 0, NULL, NULL, 0,
+          SELECT channel_id, date_trunc('hour', minute, 'UTC'), 0, NULL, NULL, NULL,
                  count(*), sum(messages), NULL, 0, 0, 0, 0
           FROM chat_minutes WHERE minute >= $1 AND minute < $2
           GROUP BY 1, 2
           UNION ALL
-          SELECT channel_id, date_trunc('hour', observed_at, 'UTC'), 0, NULL, NULL, 0, 0, 0,
+          SELECT channel_id, date_trunc('hour', observed_at, 'UTC'), 0, NULL, NULL, NULL, 0, 0,
                  last(followers, observed_at), 0, 0, 0, 0
           FROM follower_samples WHERE observed_at >= $1 AND observed_at < $2
           GROUP BY 1, 2
           UNION ALL
-          SELECT channel_id, date_trunc('hour', occurred_at, 'UTC'), 0, NULL, NULL, 0, 0, 0,
+          SELECT channel_id, date_trunc('hour', occurred_at, 'UTC'), 0, NULL, NULL, NULL, 0, 0,
                  NULL, count(*), 0, 0, 0
           FROM follows WHERE occurred_at >= $1 AND occurred_at < $2
           GROUP BY 1, 2
           UNION ALL
-          SELECT channel_id, date_trunc('hour', occurred_at, 'UTC'), 0, NULL, NULL, 0, 0, 0, NULL, 0,
+          SELECT channel_id, date_trunc('hour', occurred_at, 'UTC'), 0, NULL, NULL, NULL, 0, 0, NULL, 0,
                  count(*) FILTER (WHERE kind IN ('sub', 'resub')),
                  coalesce(sum(quantity) FILTER (WHERE kind = 'gift'), 0),
                  coalesce(sum(quantity) FILTER (WHERE kind = 'kicks'), 0)

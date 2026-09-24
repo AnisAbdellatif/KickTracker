@@ -114,7 +114,7 @@ defmodule KickTracker.RollupsTest do
                avg_viewers: nil,
                peak_viewers: nil,
                airtime_s: nil,
-               hours_watched: +0.0,
+               hours_watched: nil,
                follower_gain: nil
              }
            ] =
@@ -144,7 +144,7 @@ defmodule KickTracker.RollupsTest do
 
       hourly = rows("hourly_stats", ["hour"])
 
-      assert_in_delta Enum.sum_by(hourly, & &1.hours_watched),
+      assert_in_delta Enum.sum_by(hourly, &(&1.hours_watched || 0)),
                       Metrics.hours_watched(@s, samples),
                       1.0e-6
 
@@ -167,8 +167,10 @@ defmodule KickTracker.RollupsTest do
 
     Rollups.hourly(at(0), at(3 * 3600))
 
-    assert [%{hour: h1, samples: 1, followers_last: 7}, %{hour: h3, follows: 1, samples: 0}] =
-             rows("hourly_stats", ["hour"])
+    assert [
+             %{hour: h1, samples: 1, followers_last: 7},
+             %{hour: h3, follows: 1, samples: 0, hours_watched: nil, avg_viewers: nil}
+           ] = rows("hourly_stats", ["hour"])
 
     assert h1 == ~U[2026-01-05 20:00:00.000000Z]
     assert h3 == ~U[2026-01-05 22:00:00.000000Z]

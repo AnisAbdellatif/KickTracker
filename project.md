@@ -1533,7 +1533,9 @@ Tests are written alongside every step (§17.3), not as a step of their own.
 11. `FollowerPoll` (v2), `follows`, support events.
 12. `ChatSocket`, the three chat tables, raids and hosts.
 13. `Metrics`; `stream_stats`; hourly rollups (job-maintained, see §12.6).
-13b. Bulk mode: months of history written straight into the raw tables.
+13b. Bulk mode: months of history written straight into the raw tables
+    (`mix kick_tracker.bulk`, dev only; 14 days of the default scenario,
+    2.4M chat messages, in about a minute).
 
 **Phase 3: admin core**
 
