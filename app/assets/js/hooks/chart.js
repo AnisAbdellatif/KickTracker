@@ -9,6 +9,13 @@
 // A LiveView appends live points with push_event("chart:append", {id, t, values}).
 // Inside the element's <figure>, buttons with data-chart-action="table" or
 // "csv" switch to a table view or download the same data (§13.7).
+//
+// Zoom: a time chart opens on the stretch that has data (not the whole
+// requested period, which may be mostly empty before a channel was
+// tracked), and the reader zooms from there: wheel or pinch, drag to pan,
+// zoom out to the whole period. Their zoom survives live points and theme
+// changes; double-click, or data-chart-action="fit", goes back to all
+// the data.
 
 let loading = null
 const load = () => (loading ||= import("../charts/index.js"))
@@ -28,6 +35,7 @@ export const Chart = {
       if (!btn || !this.data) return
       if (btn.dataset.chartAction === "table") this.toggleTable(btn)
       if (btn.dataset.chartAction === "csv") this.downloadCsv()
+      if (btn.dataset.chartAction === "fit") this.fit()
     }
     this.figure.addEventListener("click", this.onAction)
 
@@ -47,6 +55,9 @@ export const Chart = {
       this.echarts = echarts
       this.kind = kinds[this.el.dataset.kind]
       this.chart = echarts.init(this.canvas, null, {renderer: "canvas"})
+      // Only the reader's own zooming fires this (setOption doesn't).
+      this.chart.on("datazoom", () => this.keepZoom())
+      this.chart.getZr().on("dblclick", () => this.fit())
       this.resize = new ResizeObserver(() => this.chart && this.chart.resize())
       this.resize.observe(this.el)
       this.fetch()
@@ -99,8 +110,25 @@ export const Chart = {
   render() {
     if (!this.chart || !this.kind || !this.data) return
     load().then(({tokens}) => {
-      this.chart.setOption(this.kind.option(this.data, this.opts, tokens()), true)
+      const option = this.kind.option(this.data, this.opts, tokens())
+      const window = option.dataZoom && (this.zoom || dataExtent(this.data, this.opts))
+      if (window) {
+        option.dataZoom = option.dataZoom.map((z) => ({...z, startValue: window[0], endValue: window[1]}))
+      }
+      this.chart.setOption(option, true)
     })
+  },
+
+  // The window the reader zoomed to, as axis values (ms).
+  keepZoom() {
+    const z = (this.chart.getOption().dataZoom || [])[0]
+    if (z && z.startValue != null && z.endValue != null) this.zoom = [z.startValue, z.endValue]
+  },
+
+  // Back to all the data.
+  fit() {
+    this.zoom = null
+    this.render()
   },
 
   append(t, values) {
@@ -153,6 +181,38 @@ export const Chart = {
     a.click()
     URL.revokeObjectURL(a.href)
   },
+}
+
+// The stretch of a time chart that has data: first to last time where any
+// drawn column has a value, and a little room either side (2%, at least a
+// minute). Null when there is nothing: the whole axis is shown (the
+// period, or a stream from Kick's start to its end).
+
+export function dataExtent(data, opts) {
+  const spans = data.series
+    ? data.series.map((s) => span(s.t, [s.v]))
+    : data.stream
+      ? [span(data.viewers.t, [data.viewers.avg]), span(data.chat.t, [data.chat.messages])]
+      : data.t
+        ? [span(data.t, (opts.columns || [{key: "v"}]).map((c) => data[c.key]).filter(Boolean))]
+        : []
+  const found = spans.filter(Boolean)
+  if (!found.length) return null
+  const first = Math.min(...found.map((s) => s[0]))
+  const last = Math.max(...found.map((s) => s[1]))
+  const room = Math.max((last - first) * 0.02, 60)
+  return [(first - room) * 1000, (last + room) * 1000]
+}
+
+function span(t, columns) {
+  let first = null, last = null
+  for (let i = 0; i < t.length; i++) {
+    if (columns.some((c) => c[i] != null)) {
+      if (first == null) first = t[i]
+      last = t[i]
+    }
+  }
+  return first == null ? null : [first, last]
 }
 
 const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c])

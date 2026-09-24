@@ -856,7 +856,7 @@ msgstr ""
 msgid "Kicks"
 msgstr ""
 
-#: lib/kick_tracker_web/components/site_components.ex:276
+#: lib/kick_tracker_web/components/site_components.ex:287
 #, elixir-autogen, elixir-format
 msgid "LIVE"
 msgstr ""
@@ -979,7 +979,7 @@ msgstr ""
 msgid "Methodology"
 msgstr ""
 
-#: lib/kick_tracker_web/components/site_components.ex:266
+#: lib/kick_tracker_web/components/site_components.ex:277
 #, elixir-autogen, elixir-format
 msgid "Modeled, not measured"
 msgstr ""
@@ -1432,7 +1432,7 @@ msgstr ""
 msgid "Share"
 msgstr ""
 
-#: lib/kick_tracker_web/components/site_components.ex:253
+#: lib/kick_tracker_web/components/site_components.ex:264
 #, elixir-autogen, elixir-format
 msgid "Share of the period our collection was running"
 msgstr ""
@@ -1848,7 +1848,7 @@ msgstr ""
 msgid "consumers"
 msgstr ""
 
-#: lib/kick_tracker_web/components/site_components.ex:255
+#: lib/kick_tracker_web/components/site_components.ex:266
 #, elixir-autogen, elixir-format
 msgid "coverage"
 msgstr ""
@@ -1883,7 +1883,7 @@ msgstr ""
 msgid "ended"
 msgstr ""
 
-#: lib/kick_tracker_web/components/site_components.ex:268
+#: lib/kick_tracker_web/components/site_components.ex:279
 #, elixir-autogen, elixir-format
 msgid "estimate"
 msgstr ""
@@ -2096,8 +2096,8 @@ msgstr ""
 msgid "Change against the previous period of the same length"
 msgstr ""
 
-#: lib/kick_tracker_web/components/site_components.ex:214
-#: lib/kick_tracker_web/components/site_components.ex:215
+#: lib/kick_tracker_web/components/site_components.ex:225
+#: lib/kick_tracker_web/components/site_components.ex:226
 #, elixir-autogen, elixir-format
 msgid "Download CSV"
 msgstr ""
@@ -2117,8 +2117,8 @@ msgstr ""
 msgid "Rank by"
 msgstr ""
 
-#: lib/kick_tracker_web/components/site_components.ex:205
-#: lib/kick_tracker_web/components/site_components.ex:206
+#: lib/kick_tracker_web/components/site_components.ex:216
+#: lib/kick_tracker_web/components/site_components.ex:217
 #, elixir-autogen, elixir-format
 msgid "Show as a table"
 msgstr ""
@@ -2439,4 +2439,10 @@ msgstr ""
 #: lib/kick_tracker_web/live/admin/health_live.ex:321
 #, elixir-autogen, elixir-format
 msgid "shadow, on another machine"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:206
+#: lib/kick_tracker_web/components/site_components.ex:207
+#, elixir-autogen, elixir-format
+msgid "Show all the data (or double-click the chart)"
 msgstr ""

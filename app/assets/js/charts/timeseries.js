@@ -1,7 +1,7 @@
 // Time series (project.md §13.7): a line per column, a peak band above an
 // average, bars, or one line per channel (compare). Gaps break the line
 // (nulls) and coverage gaps are shaded "no data"; never drawn as zero.
-import {baseOption, timeAxis, valueAxis, gapAreas, dayFormatter, zip, line, bar, alpha} from "./theme"
+import {baseOption, timeAxis, valueAxis, gapAreas, dayFormatter, zip, line, bar, alpha, fmt} from "./theme"
 
 export function option(data, opts, t) {
   const o = baseOption(t)
@@ -37,7 +37,9 @@ export function option(data, opts, t) {
         showSymbol: false, silent: true, tooltip: {show: false}})
       o.series.push({name: c.label, type: "line", stack: "band", data: upper, lineStyle: {opacity: 0},
         showSymbol: false, itemStyle: {color: alpha(color, 0.35)}, areaStyle: {color: alpha(color, 0.14)},
-        tooltip: {valueFormatter: (v) => v}})
+        // The band is drawn as peak minus average, stacked on the average;
+        // the tooltip shows the peak itself.
+        tooltip: {valueFormatter: (_v, i) => fmt(data[c.key][i])}})
     } else if (c.style === "bar") {
       o.series.push(bar(c.label, zip(data.t, data[c.key]), t.palette[slot++], {stack: c.stack}))
     } else {

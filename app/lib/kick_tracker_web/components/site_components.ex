@@ -176,7 +176,8 @@ defmodule KickTrackerWeb.SiteComponents do
 
   @doc """
   A chart: a figure with a title, the chart hook, and buttons for the
-  table view and a CSV download of the same data (§13.7).
+  table view and a CSV download of the same data (§13.7), and, on time
+  charts, one that zooms back out to all the data.
   """
   attr :id, :string, required: true
   attr :kind, :string, required: true
@@ -197,6 +198,16 @@ defmodule KickTrackerWeb.SiteComponents do
         <span class="flex-1"></span>
         {render_slot(@controls)}
         <div class="flex items-center">
+          <button
+            :if={@kind in ~w(timeseries bars stream)}
+            type="button"
+            class="btn btn-ghost btn-xs btn-square"
+            data-chart-action="fit"
+            aria-label={gettext("Show all the data (or double-click the chart)")}
+            title={gettext("Show all the data (or double-click the chart)")}
+          >
+            <.icon name="hero-arrows-pointing-out-micro" class="size-4" />
+          </button>
           <button
             type="button"
             class="btn btn-ghost btn-xs btn-square"

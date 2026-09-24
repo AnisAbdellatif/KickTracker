@@ -88,6 +88,8 @@ defmodule KickTrackerWeb.PublicSiteTest do
     assert has_element?(view, "#stream-cards")
     assert has_element?(view, "#timeline li")
     assert has_element?(view, "#stream-chart[data-kind=stream]")
+    # Time charts can be zoomed back out to all their data.
+    assert has_element?(view, "figure:has(#stream-chart) [data-chart-action=fit]")
   end
 
   test "channel series come in columns, with the resolution chosen by range", %{conn: conn} do

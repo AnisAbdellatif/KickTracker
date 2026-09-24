@@ -1264,6 +1264,15 @@ once in JS (`timeseries`, `stream`, `bars`, `share`, `heatmap`, `sparkline`;
 server sends data and a kind, never ECharts options, so every chart of a
 kind looks and behaves the same and the payload stays small.
 
+**Zoom.** A time chart opens on the stretch that has data, first to last
+point with a little room, rather than the whole requested period (a 30-day
+view of a channel tracked since yesterday would otherwise be a sliver at
+the edge), and a stream opens on what we recorded rather than Kick's own
+start. The axis still spans the whole period or stream: the reader zooms
+in or out from there (wheel or pinch, drag to pan). Their zoom is kept
+across live points and theme changes; double-click, or the chart's "show
+all" button, fits the data again.
+
 (Chart.js was the earlier pick; it lacks bands, markers, linked zoom and
 heatmaps without plugins. uPlot is faster but too narrow for heatmaps and
 shares.)
