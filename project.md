@@ -1786,6 +1786,10 @@ phase:
   TimescaleDB and RabbitMQ in containers.
 - A change to a metric or the sessionizer comes with a test showing the
   before and after.
+- Unknown figures: one test sets every nullable column of the collected and
+  derived tables (read from the schema) to NULL and loads every page and data
+  endpoint, so a reader that adds, rounds or compares a figure without
+  handling "unknown" fails in CI, not in production.
 
 ## 18. Operations and legal
 

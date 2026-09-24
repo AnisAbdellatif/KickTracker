@@ -130,6 +130,14 @@ one, stop and ask.
 
 - **Gaps are gaps.** A failed poll, a dropped socket or a missing event writes nothing,
   never a zero, and is recorded in `coverage`. No answer is not the same as offline.
+- **Unknown stays unknown all the way to the page.** A figure that can be missing is
+  `nil` in Elixir and `null` in JSON, and every reader must handle it: never `+`, `round`,
+  compare or sum it bare (in Elixir `nil > 0` is true; in JS `null - 5` is `-5`), and
+  never turn it into 0 with `|| 0` or `coalesce(…, 0)` unless 0 is really what was
+  recorded. Combine figures with `known_sum/1` (unknown if any part is), and render
+  them with `<.num>`, which shows "–". Making a column nullable means checking every
+  reader of it in the same change; `unknown_figures_test.exs` sets every nullable
+  figure to NULL and loads every page, so it has to keep passing.
 - **Raw facts are append-only.** Never update or delete raw fact rows to "fix" data;
   corrections are layered on top (`stream_overrides`, annotations, §13.8), and derived
   data is rebuilt.
