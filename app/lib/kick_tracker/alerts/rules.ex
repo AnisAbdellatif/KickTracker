@@ -27,7 +27,8 @@ defmodule KickTracker.Alerts.Rules do
     Enum.flat_map(channels, &channel_problems(&1, now)) ++
       no_webhooks(channels, snapshot, now) ++
       queue_problems(snapshot, now) ++
-      drift(snapshot)
+      drift(snapshot) ++
+      payload_problems(snapshot)
   end
 
   defp channel_problems(c, now) do
@@ -62,7 +63,7 @@ defmodule KickTracker.Alerts.Rules do
       Enum.filter(channels, &(&1.live_since && DateTime.diff(now, &1.live_since) > @live_for_s))
 
     if long_live != [] and older_than?(snapshot.last_webhook_at, now, @no_webhooks_s) do
-      names = long_live |> Enum.map(& &1.slug) |> Enum.join(", ")
+      names = Enum.map_join(long_live, ", ", & &1.slug)
 
       [
         %{
@@ -95,6 +96,17 @@ defmodule KickTracker.Alerts.Rules do
         }
     ]
     |> Enum.filter(& &1)
+  end
+
+  # Kick changed a payload we parse (§19.2): one alert per kind of change.
+  defp payload_problems(snapshot) do
+    for i <- Map.get(snapshot, :payload_issues, []) do
+      %{
+        key: "payload:#{i.event_type}:#{i.event_version}:#{i.problem}",
+        message:
+          "#{i.event_type} (v#{i.event_version}) changed shape: #{i.problem} (#{i.count} events)"
+      }
+    end
   end
 
   # Our clock against Kick's, from the events' own timestamps (§19.2).

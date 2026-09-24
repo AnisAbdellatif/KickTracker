@@ -60,7 +60,8 @@ defmodule KickTracker.Rollups do
           select: {type(f.observed_at, :utc_datetime_usec), f.followers}
       )
 
-    viewers = Metrics.viewers(samples)
+    flagged = flag_outliers(channel_id, ids, samples)
+    viewers = Metrics.viewers(samples, flagged)
     gain = Metrics.follower_gain(started_at, ended_at, followers)
     counts = counts(channel_id, ids, started_at, until)
 
@@ -85,6 +86,55 @@ defmodule KickTracker.Rollups do
     )
 
     :ok
+  end
+
+  @doc """
+  Recomputes the outlier flags of these streams' samples (`viewer_flags`,
+  derived) and returns the flagged moments.
+  """
+  @spec flag_outliers(integer(), [integer()], [{DateTime.t(), integer()}]) :: MapSet.t()
+  def flag_outliers(channel_id, stream_ids, samples) do
+    flags = Metrics.Outliers.flags(samples)
+
+    Repo.transaction(fn ->
+      Repo.query!("DELETE FROM viewer_flags WHERE stream_id = ANY($1)", [stream_ids])
+
+      Repo.insert_all(
+        "viewer_flags",
+        for(
+          {at, reason} <- flags,
+          do: %{
+            channel_id: channel_id,
+            observed_at: at,
+            stream_id: hd(stream_ids),
+            reason: to_string(reason)
+          }
+        ),
+        on_conflict: :nothing
+      )
+    end)
+
+    MapSet.new(flags, &elem(&1, 0))
+  end
+
+  defp flag_range(from, to) do
+    Repo.query!(
+      """
+      SELECT s.id, s.channel_id FROM streams s
+      WHERE s.started_at < $2 AND (s.ended_at IS NULL OR s.ended_at > $1)
+      """,
+      [from, to]
+    ).rows
+    |> Enum.each(fn [stream_id, channel_id] ->
+      samples =
+        Repo.all(
+          from v in "viewer_samples",
+            where: v.channel_id == ^channel_id and v.stream_id == ^stream_id,
+            select: {type(v.observed_at, :utc_datetime_usec), v.viewers}
+        )
+
+      flag_outliers(channel_id, [stream_id], samples)
+    end)
   end
 
   defp counts(channel_id, stream_ids, from, until) do
@@ -153,6 +203,9 @@ defmodule KickTracker.Rollups do
     from = truncate_hour(from)
     to = to |> truncate_hour() |> DateTime.add(3600)
 
+    # The peaks below leave flagged readings out: flag first.
+    flag_range(from, to)
+
     Repo.transaction(fn ->
       Repo.query!("DELETE FROM hourly_stats WHERE hour >= $1 AND hour < $2", [from, to])
 
@@ -160,6 +213,8 @@ defmodule KickTracker.Rollups do
         """
         WITH weighted AS (
           SELECT v.channel_id, v.observed_at, v.viewers,
+                 EXISTS (SELECT 1 FROM viewer_flags f
+                         WHERE f.channel_id = v.channel_id AND f.observed_at = v.observed_at) AS flagged,
                  LEAST(
                    EXTRACT(EPOCH FROM v.observed_at - coalesce(
                      lag(v.observed_at) OVER (PARTITION BY v.stream_id ORDER BY v.observed_at),
@@ -177,7 +232,8 @@ defmodule KickTracker.Rollups do
         parts AS (
           SELECT channel_id, date_trunc('hour', observed_at, 'UTC') AS hour,
                  count(*) AS samples, avg(viewers)::float AS avg_viewers,
-                 max(viewers) AS peak_viewers,
+                 -- a flagged reading (a glitch) is never a peak (§19.2)
+                 max(viewers) FILTER (WHERE NOT flagged) AS peak_viewers,
                  (sum(viewers * greatest(weight_s, 0)) / 3600)::float AS hours_watched,
                  0 AS chat_minutes, 0 AS messages, NULL::bigint AS followers_last,
                  0 AS follows, 0 AS subs, 0 AS gifted_subs, 0 AS kicks

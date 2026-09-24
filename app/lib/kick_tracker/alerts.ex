@@ -101,6 +101,7 @@ defmodule KickTracker.Alerts do
 
     %{
       channels: channels,
+      payload_issues: KickTracker.Health.payload_issues(DateTime.add(now, -1, :day)),
       last_webhook_at: last_webhook,
       oldest_unprocessed_at: oldest_unprocessed,
       clock_drift_s: drift,

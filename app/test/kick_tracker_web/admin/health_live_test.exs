@@ -41,6 +41,19 @@ defmodule KickTrackerWeb.Admin.HealthLiveTest do
     assert html =~ "Open alerts" and html =~ "dead-letter queue"
   end
 
+  test "failed jobs are listed with how long ago they failed", %{conn: conn} do
+    {:ok, job} = KickTracker.Workers.SubscriptionSync.new(%{}) |> Oban.insert()
+
+    KickTracker.Repo.query!(
+      "UPDATE oban_jobs SET state = 'retryable', attempted_at = now() at time zone 'utc' - interval '5 minutes', errors = ARRAY['{\"error\": \"Kick said no\"}'::jsonb] WHERE id = $1",
+      [job.id]
+    )
+
+    {:ok, _view, html} = live(conn, ~p"/admin")
+    assert html =~ "Kick said no"
+    assert html =~ "5m ago"
+  end
+
   test "/healthz answers while the database does", %{conn: conn} do
     assert response(get(conn, "/healthz"), 200) == "ok"
   end

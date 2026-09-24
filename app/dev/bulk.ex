@@ -135,7 +135,7 @@ defmodule KickTracker.Bulk do
           observed_at: Sessionizer.norm(at),
           stream_id: stream_id,
           viewers: Payloads.viewers(sim, window, at),
-          category_id: segment.category && segment.category.id
+          category_id: segment.category.id
         }
       end)
 
@@ -152,7 +152,7 @@ defmodule KickTracker.Bulk do
     initial =
       for {field, value} <- [
             {"title", first.title},
-            {"category", first.category && Integer.to_string(first.category.id)},
+            {"category", Integer.to_string(first.category.id)},
             {"language", sim.language},
             {"mature", "false"}
           ] do

@@ -7,6 +7,8 @@ defmodule KickTracker.Events.WebhookEvent do
 
   use Ecto.Schema
 
+  @type t :: %__MODULE__{}
+
   @primary_key {:message_id, :string, autogenerate: false}
   schema "webhook_events" do
     field :subscription_id, :string

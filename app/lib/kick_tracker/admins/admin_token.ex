@@ -7,6 +7,8 @@ defmodule KickTracker.Admins.AdminToken do
 
   use Ecto.Schema
 
+  @type t :: %__MODULE__{}
+
   schema "admin_tokens" do
     field :token, :binary
     field :context, :string

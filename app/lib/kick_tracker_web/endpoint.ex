@@ -41,6 +41,8 @@ defmodule KickTrackerWeb.Endpoint do
     cookie_key: "request_logger"
 
   plug Plug.RequestId
+  # The visitor's address behind Caddy (and Cloudflare), for rate limits.
+  plug KickTrackerWeb.Plugs.RemoteIp
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug Plug.Parsers,

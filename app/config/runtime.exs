@@ -78,6 +78,12 @@ config :kick_tracker, :amqp_url, setting.("AMQP_URL")
 # The public name (never Kick's, project.md §18.3).
 config :kick_tracker, :site_name, System.get_env("SITE_NAME", "Stream Tracker")
 
+# How many proxies of ours stand in front of the web role (Caddy: 1; with
+# Cloudflare in front of Caddy: 2), for the visitor's address (§19.3).
+config :kick_tracker,
+       :trusted_proxy_hops,
+       String.to_integer(System.get_env("TRUSTED_PROXY_HOPS", "1"))
+
 # Where alerts go (project.md §18.2); all optional.
 config :kick_tracker, :alerts,
   webhook_url: System.get_env("ALERT_WEBHOOK_URL"),

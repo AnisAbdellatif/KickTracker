@@ -217,7 +217,8 @@ defmodule KickTrackerWeb.StreamLive do
       chatters: gettext("Active chatters"),
       subs: gettext("Subs"),
       gifts: gettext("Gifted subs"),
-      gifted: gettext("gifted subs")
+      gifted: gettext("gifted subs"),
+      flagged: gettext("flagged reading, not counted as a peak")
     }
   end
 end

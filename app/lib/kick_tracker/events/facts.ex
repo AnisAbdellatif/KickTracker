@@ -38,9 +38,8 @@ defmodule KickTracker.Events.Facts do
   """
   @spec parse(Envelope.t(), integer()) :: {fact(), [user()]} | :none
   def parse(%Envelope{} = e, channel_id) do
-    with {:ok, body} when is_map(body) <- Envelope.payload(e) do
-      parse(e.event_type, body, e, channel_id)
-    else
+    case Envelope.payload(e) do
+      {:ok, body} when is_map(body) -> parse(e.event_type, body, e, channel_id)
       _ -> :none
     end
   end

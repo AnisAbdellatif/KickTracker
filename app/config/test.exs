@@ -54,3 +54,6 @@ config :kick_tracker, :cache, false
 
 # Tests raise on purpose; nothing to track.
 config :error_tracker, enabled: false
+
+# Rate limits out of the way, except where a test lowers them.
+config :kick_tracker, :rate_limits, pages: 1_000_000, data: 1_000_000, login: 1_000_000

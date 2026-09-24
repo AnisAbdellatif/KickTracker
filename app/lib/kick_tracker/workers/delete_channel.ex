@@ -22,6 +22,7 @@ defmodule KickTracker.Workers.DeleteChannel do
                  channel_group_members channel_slugs)
 
   @impl Oban.Worker
+  # sobelow_skip ["SQL.Query"]
   def perform(%Oban.Job{args: %{"channel_id" => id}}) do
     case Repo.query!("SELECT kick_user_id, slug FROM channels WHERE id = $1", [id]).rows do
       [[kick_user_id, slug]] ->

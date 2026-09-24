@@ -31,11 +31,11 @@ export function option(data, opts, t) {
   const titles = (data.titles || []).slice(1).map(x => ({xAxis: x.at * 1000, name: x.title,
     label: {show: false}, lineStyle: {color: t.muted, type: "dotted", width: 1}}))
   const markers = (data.markers || []).map(m => ({
-    coord: [m.at * 1000, nearest(data.viewers, m.at)],
+    coord: [m.at * 1000, m.kind === "flagged" ? m.value : nearest(data.viewers, m.at)],
     value: m.value, name: markerName(m, L),
-    symbol: m.kind === "gift" ? "diamond" : m.kind === "kicks" ? "triangle" : "pin",
-    symbolSize: m.kind === "gift" || m.kind === "kicks" ? 9 : 22,
-    itemStyle: {color: m.kind === "gift" ? palette[3] : m.kind === "kicks" ? palette[2] : palette[5]},
+    symbol: m.kind === "gift" ? "diamond" : m.kind === "kicks" ? "triangle" : m.kind === "flagged" ? "emptyCircle" : "pin",
+    symbolSize: m.kind === "gift" || m.kind === "kicks" || m.kind === "flagged" ? 9 : 22,
+    itemStyle: {color: m.kind === "gift" ? palette[3] : m.kind === "kicks" ? palette[2] : m.kind === "flagged" ? palette[7] : palette[5]},
     label: {show: false},
   }))
 
@@ -68,6 +68,7 @@ function nearest(v, at) {
 }
 
 function markerName(m, L) {
+  if (m.kind === "flagged") return `${m.value}: ${L.flagged || "flagged reading, not counted as a peak"}`
   if (m.kind === "gift") return `${m.value} ${L.gifted || "gifted subs"}`
   if (m.kind === "kicks") return `${m.value} Kicks`
   return `${m.kind}${m.other ? " · " + m.other : ""}${m.value ? " · " + m.value : ""}`

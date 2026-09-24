@@ -48,18 +48,29 @@ defmodule KickTracker.Metrics do
 
   @doc """
   Average and peak viewers, and how many samples: `nil` averages and peaks
-  when there are none (no data is not zero viewers).
+  when there are none (no data is not zero viewers). Readings in `flagged`
+  (their times) are never the peak.
   """
-  @spec viewers([{DateTime.t(), non_neg_integer()}]) :: %{
+  @spec viewers([{DateTime.t(), non_neg_integer()}], MapSet.t()) :: %{
           samples: non_neg_integer(),
           avg: float() | nil,
           peak: non_neg_integer() | nil
         }
-  def viewers([]), do: %{samples: 0, avg: nil, peak: nil}
+  def viewers(samples, flagged \\ MapSet.new())
+  def viewers([], _flagged), do: %{samples: 0, avg: nil, peak: nil}
 
-  def viewers(samples) do
+  # A flagged reading (Metrics.Outliers: a glitch) counts in the average but
+  # is never the peak (project.md §19.2).
+  def viewers(samples, flagged) do
     counts = Enum.map(samples, &elem(&1, 1))
-    %{samples: length(counts), avg: Enum.sum(counts) / length(counts), peak: Enum.max(counts)}
+
+    peak =
+      samples
+      |> Enum.reject(fn {at, _} -> MapSet.member?(flagged, at) end)
+      |> Enum.map(&elem(&1, 1))
+      |> Enum.max(fn -> nil end)
+
+    %{samples: length(counts), avg: Enum.sum(counts) / length(counts), peak: peak}
   end
 
   # A follower reading counts for a stream's start or end if it was taken

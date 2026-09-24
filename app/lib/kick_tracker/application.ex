@@ -76,7 +76,9 @@ defmodule KickTracker.Application do
     # (On a collector the collection tree has it; `collect: false` means
     # tests start it themselves.)
     token = if :collector in roles or not collect?, do: [], else: [KickTracker.Kick.Token]
-    token ++ [KickTracker.Cache, KickTrackerWeb.Endpoint]
+
+    token ++
+      [KickTracker.Cache, KickTrackerWeb.Plugs.RateLimit.storage_child(), KickTrackerWeb.Endpoint]
   end
 
   # Tell Phoenix to update the endpoint configuration whenever the

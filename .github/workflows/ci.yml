@@ -1,0 +1,177 @@
+# Checks and tests on every push (project.md §19.1): formatting, compile
+# warnings, Credo, Sobelow, Dialyzer, vulnerable and retired dependencies,
+# and every test suite against real TimescaleDB and RabbitMQ
+# (deploy/compose.dev.yml) and the fake Kick (sim/, a path dependency).
+# On main, the images are built and pushed to GHCR.
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OTP_VERSION: "28"
+  ELIXIR_VERSION: "1.20"
+
+jobs:
+  sim:
+    name: Fake Kick (sim)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: sim
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            sim/deps
+            sim/_build
+          key: sim-${{ runner.os }}-${{ hashFiles('sim/mix.lock') }}
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors
+      - run: mix test
+
+  receiver:
+    name: Receiver
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ingress/receiver
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: RabbitMQ
+        run: docker compose -f deploy/compose.dev.yml up -d --wait rabbitmq
+        working-directory: .
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ingress/receiver/deps
+            ingress/receiver/_build
+          key: receiver-${{ runner.os }}-${{ hashFiles('ingress/receiver/mix.lock') }}
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors
+      - run: mix test
+
+  app:
+    name: App
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: TimescaleDB and RabbitMQ
+        run: docker compose -f deploy/compose.dev.yml up -d --wait
+        working-directory: .
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/assets/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: |
+            app/deps
+            app/_build
+            sim/_build
+          key: app-${{ runner.os }}-${{ hashFiles('app/mix.lock', 'sim/mix.lock') }}
+      - run: mix deps.get
+      - run: npm ci --no-audit --no-fund
+        working-directory: app/assets
+      - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors
+      - run: mix credo
+      - run: mix sobelow --config
+      - run: mix deps.audit
+      - run: mix hex.audit
+      - run: mix test
+      - name: Assets build
+        run: MIX_ENV=dev mix assets.setup && MIX_ENV=dev mix assets.build
+
+  dialyzer:
+    name: Dialyzer
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app
+    env:
+      MIX_ENV: dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            app/deps
+            app/_build
+            app/priv/plts
+          key: dialyzer-${{ runner.os }}-${{ hashFiles('app/mix.lock', 'sim/mix.lock') }}
+      - run: mix deps.get
+      - run: mix dialyzer --format github
+
+  images:
+    name: Images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [sim, receiver, app, dialyzer]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - name: app
+            context: app
+          - name: receiver
+            context: ingress/receiver
+          - name: db
+            context: deploy/db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: |
+            ${{ steps.name.outputs.image }}:${{ github.sha }}
+            ${{ steps.name.outputs.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

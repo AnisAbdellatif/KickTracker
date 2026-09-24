@@ -179,6 +179,24 @@ WAL-G over pgBackRest: one static binary and native S3/B2/R2 support. The Timesc
 
 Checked here: both releases boot in the Debian runtime image (web served pages, assets and `/healthz`; the collector ran; `bin/migrate` ran), the Caddyfile validates, the compose file parses. The first release run failed binding `::` where IPv6 is off, as it would in many Docker hosts, hence IPv4 by default. The receiver bound loopback only, which Caddy in another container couldn't reach. The image builds themselves need hex.pm and couldn't run here; CI builds them.
 
+## CI/CD
+
+**Current:** GitHub Actions. `ci.yml` on every push: per project (sim, receiver, app) format check, `--warnings-as-errors` compile and tests, with TimescaleDB and RabbitMQ from `deploy/compose.dev.yml`; for the app also Credo (defaults, nesting 3 and complexity 12), Sobelow (`.sobelow-conf`), `mix deps.audit`, `mix hex.audit`, an assets build, and Dialyzer in its own job with cached PLTs (`.dialyzer_ignore.exs` lists judged false positives with the reason). On `main`, the app, receiver and database images go to GHCR tagged with the commit and `latest`. `deploy.yml` is manual: pick a role (web, collector, receivers, migrate-only) and a tag; it runs migrations as their own step, then updates only that role, receivers one at a time waiting for each to be healthy. (updated 2026-09-24 07:45)
+
+Deploys stay manual because a deploy is the moment collection can break; the button makes it one step without making it automatic. The compose file's image names follow CI's (`ghcr.io/<owner>/<repo>-<name>`). Sobelow's SQL findings were constant table names and bucket expressions, marked with `sobelow_skip` where they occur; its HTTPS check is ignored because Caddy terminates TLS.
+
+## Security
+
+**Current:** A Content-Security-Policy on every page with a per-request nonce for the one inline script (and for LiveDashboard and ErrorTracker), styles allowed inline (Tailwind, chart styles); rate limits with PlugAttack keyed on the visitor's address, read from `X-Forwarded-For` only when the request comes from a private address and only `TRUSTED_PROXY_HOPS` entries from the right; the admin behind Caddy's `ADMIN_ALLOW` networks plus password and TOTP. (updated 2026-09-24 07:45)
+
+A browser check with the CSP on found no violations: charts (dynamic import), the LiveView socket and both dashboards work. Reading the leftmost `X-Forwarded-For` entry would let anyone choose their address and dodge limits; the rightmost-N rule trusts only what our own proxies appended. Login throttling plus a ban after repeated failures sits on top of TOTP, which already makes guessing hopeless, to keep the password hashing cost from being an easy load.
+
+## Data Quality
+
+**Current:** `Metrics.Outliers` flags a reading that is 0 between two readings of 20 or more, or more than twice (and 50 above) both steady neighbours, only when both neighbours are within 150s; flags are derived (`viewer_flags`, recomputed with the rollups) and only change peaks. `Events.Shape` checks each stored webhook's type, version and the fields its handler reads; problems are counted per kind in `payload_issues` and alerted. The clock alert compares Kick's send time with our receive time (median over an hour, more than 30s). (updated 2026-09-24 07:45)
+
+A glitch can't be told from a real event with one reading of context in general; these rules only catch the two shapes the design names and err towards not flagging (a raid that stays, a stream ending, a tiny channel's zero are all left alone, and tested). Excluding flags from averages was rejected: one reading barely moves an average, and dropping data from it would be an edit in disguise. Recorded webhooks all pass the shape check (a test), so a failure means Kick changed something.
+
 ## Development Approach
 
 **Current:** Record real payloads once (anonymized into `fixtures/`), then build a fake Kick (`sim/`) with scenarios, fault injection and a bulk history mode before any tracking logic; all development and tests run against it, switched purely by configuration. (updated 2026-09-24 04:04)

@@ -72,6 +72,19 @@ defmodule KickTracker.Alerts.RulesTest do
     assert keys(snapshot([channel(active: false, api_24h: 0.1, poll_ok: false)])) == []
   end
 
+  test "a payload that changed shape" do
+    issue = %{
+      event_type: "kicks.gifted",
+      event_version: "1",
+      problem: "gift.amount is not an integer",
+      count: 3
+    }
+
+    assert keys(snapshot([], payload_issues: [issue])) == [
+             "payload:kicks.gifted:1:gift.amount is not an integer"
+           ]
+  end
+
   test "dead letters, a consumer behind, a deep queue, clock drift" do
     s =
       snapshot([],

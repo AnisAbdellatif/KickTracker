@@ -3,6 +3,8 @@ defmodule KickTracker.Channels.Channel do
 
   use Ecto.Schema
 
+  @type t :: %__MODULE__{}
+
   schema "channels" do
     field :kick_user_id, :integer
     field :kick_channel_id, :integer

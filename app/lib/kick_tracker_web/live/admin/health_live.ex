@@ -27,7 +27,8 @@ defmodule KickTrackerWeb.Admin.HealthLive do
       rows: Health.channels(),
       ingress: Health.ingress(),
       jobs: Health.jobs(),
-      alerts: KickTracker.Alerts.open_alerts()
+      alerts: KickTracker.Alerts.open_alerts(),
+      payload_issues: Health.payload_issues(DateTime.add(DateTime.utc_now(), -7, :day))
     )
     |> assign_async([:queues, :subscriptions], fn ->
       {:ok, %{queues: Health.queues(), subscriptions: Health.subscriptions()}}
@@ -114,6 +115,22 @@ defmodule KickTrackerWeb.Admin.HealthLive do
           <.link navigate={~p"/admin/channels"} class="link">{gettext("Add one.")}</.link>
         </p>
       </div>
+
+      <section
+        :if={@payload_issues != []}
+        id="payload-issues"
+        class="mt-8 rounded-box border border-warning p-3"
+      >
+        <h2 class="font-semibold">{gettext("Webhooks with an unexpected shape (7 days)")}</h2>
+        <ul class="mt-2 space-y-1 text-sm">
+          <li :for={i <- @payload_issues}>
+            <span class="font-mono text-xs">{i.event_type} v{i.event_version}</span>: {i.problem}
+            <span class="text-xs opacity-60">({i.count}×, {gettext("last")} {ago(i.last_seen_at, @now)}, {gettext(
+              "e.g."
+            )} {i.example_message_id})</span>
+          </li>
+        </ul>
+      </section>
 
       <div class="mt-10 grid gap-6 lg:grid-cols-3">
         <section id="queue-health" class="rounded-box border border-base-300 p-4">

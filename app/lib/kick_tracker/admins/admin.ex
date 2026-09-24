@@ -2,6 +2,8 @@ defmodule KickTracker.Admins.Admin do
   @moduledoc "An admin account (project.md §13.8). No public sign-up: admins invite admins."
 
   use Ecto.Schema
+
+  @type t :: %__MODULE__{}
   import Ecto.Changeset
 
   schema "admins" do

@@ -269,6 +269,7 @@ defmodule KickTracker.Series do
 
   @doc "Subs (new and renewed), gifted subs and Kicks per bucket."
   @spec support(Channel.t(), DateTime.t(), DateTime.t(), Resolution.t() | nil) :: map()
+  # sobelow_skip ["SQL.Query"]
   def support(%Channel{} = channel, from, to, requested \\ nil) do
     res = Resolution.choose(from, to, requested)
 

@@ -47,6 +47,14 @@ defmodule KickTracker.Metrics.SessionizerTest do
       assert S.streams(state) == [{u(@s), last, :poll}]
     end
 
+    test "a stream over midnight and past 24 hours stays one stream (§17.2)" do
+      # Readings every minute for 30 hours, then Kick's end event.
+      readings = for m <- 0..(30 * 60), do: {:live, @s, at(@s, 30 + m * 60)}
+      {state, actions} = run(readings ++ [{:ended, @s, at(@s, 30 * 3600 + 60)}])
+      assert actions == [{:open, u(@s)}, {:close, u(@s), at(@s, 30 * 3600 + 60), :event}]
+      assert S.streams(state) == [{u(@s), at(@s, 30 * 3600 + 60), :event}]
+    end
+
     test "the end event corrects an end inferred from polling" do
       {state, _} = run([{:live, @s, at(@s, 30)}, {:offline, at(@s, 200)}])
       assert [{_, _, :poll}] = S.streams(state)

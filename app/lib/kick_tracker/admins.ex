@@ -75,14 +75,16 @@ defmodule KickTracker.Admins do
         else: Ecto.Changeset.add_error(changeset, :current_password, "is not valid")
 
     Repo.transaction(fn ->
-      with {:ok, admin} <- Repo.update(changeset) do
-        Repo.delete_all(
-          from t in AdminToken, where: t.admin_id == ^admin.id and t.context == "session"
-        )
+      case Repo.update(changeset) do
+        {:ok, admin} ->
+          Repo.delete_all(
+            from t in AdminToken, where: t.admin_id == ^admin.id and t.context == "session"
+          )
 
-        admin
-      else
-        {:error, changeset} -> Repo.rollback(changeset)
+          admin
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
       end
     end)
   end
@@ -170,14 +172,16 @@ defmodule KickTracker.Admins do
   @doc "The invitation behind a link, while valid."
   @spec get_invite(String.t()) :: AdminToken.t() | nil
   def get_invite(encoded) do
-    with {:ok, raw} <- Base.url_decode64(encoded, padding: false) do
-      Repo.one(
-        from t in AdminToken,
-          where: t.token == ^:crypto.hash(:sha256, raw) and t.context == "invite",
-          where: t.inserted_at > ago(@invite_days, "day")
-      )
-    else
-      _ -> nil
+    case Base.url_decode64(encoded, padding: false) do
+      {:ok, raw} ->
+        Repo.one(
+          from t in AdminToken,
+            where: t.token == ^:crypto.hash(:sha256, raw) and t.context == "invite",
+            where: t.inserted_at > ago(@invite_days, "day")
+        )
+
+      _ ->
+        nil
     end
   end
 

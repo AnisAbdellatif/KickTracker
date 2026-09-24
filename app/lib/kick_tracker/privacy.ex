@@ -20,6 +20,7 @@ defmodule KickTracker.Privacy do
 
   @doc "What is held about a Kick user id."
   @spec find(integer()) :: map()
+  # sobelow_skip ["SQL.Query"]
   def find(user_id) do
     count = fn sql, param -> Repo.query!(sql, [param]).rows |> hd() |> hd() end
     id = Integer.to_string(user_id)

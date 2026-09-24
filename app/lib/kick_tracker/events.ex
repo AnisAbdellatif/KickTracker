@@ -23,7 +23,7 @@ defmodule KickTracker.Events do
   def ingest(envelopes) do
     Repo.transaction(fn ->
       now = DateTime.utc_now()
-      new_ids = insert(envelopes, now)
+      new_ids = envelopes |> insert(now) |> MapSet.new()
 
       new =
         envelopes
@@ -32,6 +32,7 @@ defmodule KickTracker.Events do
 
       done = Handlers.write_facts(new)
       mark_processed(done, now)
+      record_shape_problems(new, now)
       new
     end)
   end
@@ -93,7 +94,44 @@ defmodule KickTracker.Events do
     }
   end
 
-  defp insert([], _now), do: MapSet.new()
+  # Counted per type, version and problem, so a change on Kick's side shows
+  # up as one alert with a count, not one per event (§19.2).
+  defp record_shape_problems(envelopes, now) do
+    rows =
+      for e <- envelopes, problem <- KickTracker.Events.Shape.check(e) do
+        %{
+          event_type: e.event_type,
+          event_version: e.event_version,
+          problem: problem,
+          count: 1,
+          first_seen_at: now,
+          last_seen_at: now,
+          example_message_id: e.message_id
+        }
+      end
+
+    if rows != [] do
+      rows
+      |> Enum.group_by(&{&1.event_type, &1.event_version, &1.problem})
+      |> Enum.map(fn {_, [first | _] = same} -> %{first | count: length(same)} end)
+      |> then(
+        &Repo.insert_all("payload_issues", &1,
+          on_conflict:
+            from(i in "payload_issues",
+              update: [
+                inc: [count: fragment("EXCLUDED.count")],
+                set: [last_seen_at: fragment("EXCLUDED.last_seen_at")]
+              ]
+            ),
+          conflict_target: [:event_type, :event_version, :problem]
+        )
+      )
+    end
+
+    :ok
+  end
+
+  defp insert([], _now), do: []
 
   defp insert(envelopes, now) do
     rows =
@@ -121,6 +159,6 @@ defmodule KickTracker.Events do
         returning: [:message_id]
       )
 
-    MapSet.new(inserted, & &1.message_id)
+    Enum.map(inserted, & &1.message_id)
   end
 end

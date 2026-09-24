@@ -96,6 +96,7 @@ defmodule KickTracker.Health do
     )
   end
 
+  # sobelow_skip ["SQL.Query"]
   defp last_by_channel(table, column) do
     Repo.query!("SELECT channel_id, max(#{column}) FROM #{table} GROUP BY channel_id").rows
     |> Map.new(fn [id, at] -> {id, at} end)
@@ -137,6 +138,24 @@ defmodule KickTracker.Health do
     %{receivers: receivers, unprocessed: unprocessed, oldest_unprocessed: oldest, lag_p95_s: lag}
   end
 
+  @doc "Webhooks that didn't have the shape we parse, seen since `since` (§19.2)."
+  @spec payload_issues(DateTime.t()) :: [map()]
+  def payload_issues(since) do
+    Repo.all(
+      from i in "payload_issues",
+        where: i.last_seen_at >= ^since,
+        order_by: [desc: i.last_seen_at],
+        select: %{
+          event_type: i.event_type,
+          event_version: i.event_version,
+          problem: i.problem,
+          count: i.count,
+          last_seen_at: i.last_seen_at,
+          example_message_id: i.example_message_id
+        }
+    )
+  end
+
   @doc "Oban job counts by queue and state, and recent failures."
   @spec jobs() :: map()
   def jobs do
@@ -156,8 +175,14 @@ defmodule KickTracker.Health do
       WHERE state IN ('retryable', 'discarded') AND attempted_at > now() - interval '24 hours'
       ORDER BY attempted_at DESC LIMIT 10
       """).rows
+      # Oban's timestamps are UTC without a zone.
       |> Enum.map(fn [w, s, at, e] ->
-        %{worker: w, state: s, at: at, error: e && String.slice(e, 0, 300)}
+        %{
+          worker: w,
+          state: s,
+          at: DateTime.from_naive!(at, "Etc/UTC"),
+          error: e && String.slice(e, 0, 300)
+        }
       end)
 
     %{counts: counts, failures: failures}

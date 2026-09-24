@@ -11,12 +11,21 @@ defmodule KickTrackerWeb.Router do
     plug :fetch_live_flash
     plug :put_root_layout, html: {KickTrackerWeb.Layouts, :root}
     plug :protect_from_forgery
-    plug :put_secure_browser_headers
+    # A strict baseline; ContentSecurityPolicy replaces it with the full
+    # policy and this request's script nonce.
+    plug :put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    }
+
+    plug KickTrackerWeb.Plugs.ContentSecurityPolicy
+    plug KickTrackerWeb.Plugs.RateLimit
     plug :fetch_current_admin
   end
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug KickTrackerWeb.Plugs.RateLimit
   end
 
   ## Public site (project.md §13.2)
@@ -98,9 +107,13 @@ defmodule KickTrackerWeb.Router do
 
     live_dashboard "/dashboard",
       metrics: KickTrackerWeb.Telemetry,
-      on_mount: [{KickTrackerWeb.AdminAuth, :require_admin}]
+      on_mount: [{KickTrackerWeb.AdminAuth, :require_admin}],
+      csp_nonce_assign_key: :csp_nonce
 
-    error_tracker_dashboard("/errors", on_mount: [{KickTrackerWeb.AdminAuth, :require_admin}])
+    error_tracker_dashboard("/errors",
+      on_mount: [{KickTrackerWeb.AdminAuth, :require_admin}],
+      csp_nonce_assign_key: :csp_nonce
+    )
   end
 
   # The Swoosh mailbox preview in development.

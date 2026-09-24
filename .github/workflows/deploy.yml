@@ -1,0 +1,77 @@
+# Deploy one role at a time (project.md §19.1, §15.3), by hand: migrations
+# first, as their own step, then only the chosen services. Receivers are
+# redeployed one after the other, so one always answers Kick.
+#
+# Needs the repository secrets DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY and
+# DEPLOY_KNOWN_HOSTS (the server's host key line), and the stack in
+# /srv/kick_tracker/deploy on the server (deploy/README.md).
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      role:
+        description: What to deploy
+        required: true
+        type: choice
+        options: [web, collector, receivers, migrate-only]
+      tag:
+        description: Image tag (a commit sha from main, or latest)
+        required: true
+        default: latest
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - name: SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519
+      - name: Deploy
+        env:
+          ROLE: ${{ inputs.role }}
+          TAG: ${{ inputs.tag }}
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: |
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          ssh "$TARGET" ROLE="$ROLE" APP_IMAGE="$prefix-app:$TAG" RECEIVER_IMAGE="$prefix-receiver:$TAG" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /srv/kick_tracker && git pull --ff-only
+          cd deploy
+          export APP_IMAGE RECEIVER_IMAGE
+          dc() { docker compose -f compose.single.yml "$@"; }
+          healthy() {
+            for _ in $(seq 1 60); do
+              [ "$(docker inspect -f '{{.State.Health.Status}}' "$(dc ps -q "$1")")" = healthy ] && return 0
+              sleep 2
+            done
+            echo "$1 did not become healthy" >&2
+            return 1
+          }
+          case "$ROLE" in
+            web|collector|migrate-only)
+              dc pull migrate
+              dc run --rm migrate
+              if [ "$ROLE" != migrate-only ]; then
+                dc pull "$ROLE"
+                dc up -d --no-deps "$ROLE"
+              fi
+              ;;
+            receivers)
+              dc pull receiver-1 receiver-2
+              dc up -d --no-deps receiver-1
+              healthy receiver-1
+              dc up -d --no-deps receiver-2
+              healthy receiver-2
+              ;;
+          esac
+          dc ps
+          REMOTE

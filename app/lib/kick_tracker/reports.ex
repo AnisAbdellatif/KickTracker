@@ -434,7 +434,21 @@ defmodule KickTracker.Reports do
       |> Enum.take(@max_markers)
       |> Enum.sort_by(& &1.at)
 
-    support ++ raids
+    flags =
+      Repo.query!(
+        """
+        SELECT f.reason, f.observed_at, v.viewers FROM viewer_flags f
+        JOIN viewer_samples v ON v.channel_id = f.channel_id AND v.observed_at = f.observed_at
+        WHERE f.stream_id = ANY($1)
+        ORDER BY f.observed_at
+        """,
+        [Map.get(stream, :stream_ids, [stream.id])]
+      ).rows
+      |> Enum.map(fn [reason, at, v] ->
+        %{kind: "flagged", reason: reason, at: DateTime.to_unix(at), value: v}
+      end)
+
+    support ++ raids ++ flags
   end
 
   @doc "The stream's top chatters and supporters, by name where we know it."
@@ -737,6 +751,7 @@ defmodule KickTracker.Reports do
 
   @doc "A channel's lifetime records: highest peak, most hours watched in a stream, longest stream."
   @spec records(Channel.t()) :: map()
+  # sobelow_skip ["SQL.Query"]
   def records(%Channel{id: id}) do
     best = fn order ->
       case Repo.query!(

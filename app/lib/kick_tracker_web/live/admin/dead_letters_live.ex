@@ -47,29 +47,23 @@ defmodule KickTrackerWeb.Admin.DeadLettersLive do
     reason = String.trim(reason)
     message = Enum.find(socket.assigns.messages, &(&1.message_id == id))
 
-    cond do
-      reason == "" ->
-        {:noreply, put_flash(socket, :error, gettext("Say why it is discarded."))}
+    if reason == "" do
+      {:noreply, put_flash(socket, :error, gettext("Say why it is discarded."))}
+    else
+      case DeadLetters.discard(id) do
+        :ok ->
+          Audit.log(socket.assigns.current_admin, "dead_letter.discard", id, %{
+            "reason" => reason,
+            "event_type" => message && message.event_type,
+            "dead_reason" => message && message.reason
+          })
 
-      true ->
-        case DeadLetters.discard(id) do
-          :ok ->
-            Audit.log(socket.assigns.current_admin, "dead_letter.discard", id, %{
-              "reason" => reason,
-              "event_type" => message && message.event_type,
-              "dead_reason" => message && message.reason
-            })
+          {:noreply,
+           socket |> assign(discarding: nil) |> put_flash(:info, gettext("Discarded.")) |> load()}
 
-            {:noreply,
-             socket
-             |> assign(discarding: nil)
-             |> put_flash(:info, gettext("Discarded."))
-             |> load()}
-
-          {:error, r} ->
-            {:noreply,
-             put_flash(socket, :error, gettext("Could not discard: %{r}", r: inspect(r)))}
-        end
+        {:error, r} ->
+          {:noreply, put_flash(socket, :error, gettext("Could not discard: %{r}", r: inspect(r)))}
+      end
     end
   end
 

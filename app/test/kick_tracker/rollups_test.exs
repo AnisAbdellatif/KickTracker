@@ -26,6 +26,21 @@ defmodule KickTracker.RollupsTest do
     id
   end
 
+  test "a glitch reading is flagged and left out of peaks, in the stream and the hour" do
+    c = channel!()
+    samples = for {v, i} <- Enum.with_index([500, 510, 9000, 505, 498]), do: {at(60 + i * 60), v}
+    id = stream_with_samples(c, at(0), samples, at(600))
+
+    Rollups.hourly(at(0), at(600))
+    Rollups.stream_stats(id)
+
+    assert [%{reason: "spike"}] = rows("viewer_flags", ["observed_at"])
+    assert [%{peak_viewers: 510}] = rows("stream_stats", ["stream_id"])
+    assert [%{peak_viewers: 510}] = rows("hourly_stats", ["hour"])
+    # The reading itself is untouched.
+    assert Enum.any?(rows("viewer_samples", ["observed_at"]), &(&1.viewers == 9000))
+  end
+
   test "new chatters are those with no earlier stream in the channel" do
     c = channel!()
     other = channel!()

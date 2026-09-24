@@ -1495,18 +1495,25 @@ Done after everything else is set up and working (§20, phase 6).
 ### 19.2 Data quality
 
 - Outlier detection on viewer readings (a sudden 0 mid-stream, a one-reading
-  spike): **flagged, never deleted**, and excluded from peaks when flagged.
+  spike): **flagged, never deleted**, and excluded from peaks when flagged
+  (`Metrics.Outliers` → `viewer_flags`, rebuilt with the rollups; drawn as
+  hollow markers on the stream chart).
 - Strict parsing, with an **alert when a payload changes shape** (missing
-  field, unknown event version); new versions handled side by side.
-- Server clocks synced (NTP); a check that event times and our times don't
-  drift apart.
+  field, unknown event version): `Events.Shape` checks every stored event,
+  counts problems in `payload_issues`, and the alerts and health page show
+  them; the event is stored anyway, to replay once handled.
+- Server clocks synced (NTP); an alert when the median delay between Kick's
+  send time and our receive time passes 30 seconds.
 - Edge cases from §17.2's fault list covered by tests and handled in the
   sessionizer.
 
 ### 19.3 Security
 
-- Rate limits on public pages and `/data` (Hammer or PlugAttack).
-- Security headers (CSP, HSTS, frame options).
+- Rate limits on public pages and `/data` (PlugAttack: pages 120/min,
+  `/data` 600/min, admin logins 10/min and a one-hour ban after 20 failures
+  in 10 minutes), keyed on the visitor's address as our own proxies saw it.
+- Security headers (CSP with a per-request script nonce, HSTS, frame
+  options), from the app and again from Caddy.
 - **Sobelow** (static security analysis) and **mix_audit** (vulnerable
   dependencies) in CI.
 - Secrets encrypted in the repo (sops + age), never committed in clear.
@@ -1626,6 +1633,15 @@ privacy page, and step 22 itself (deploy/README.md, "Going live").
 23. CI/CD.
 24. Data quality checks.
 25. Security.
+
+**Phase 6 built** (2026-09-24). CI (`.github/workflows/ci.yml`): format,
+compile warnings, Credo, Sobelow, `mix deps.audit` and `hex.audit`,
+Dialyzer, and the three test suites against real TimescaleDB and RabbitMQ;
+images pushed to GHCR from `main`; a manual per-role deploy with
+migrations first (`deploy.yml`). Outlier flags, payload shape checks and
+the clock drift alert; CSP, rate limits, the visitor's address behind the
+proxies. Everything ran locally except the workflows themselves and the
+image builds, which need GitHub and hex.pm.
 
 **Later** (not planned yet): history before tracking from v2's VOD list
 (marked as imported), streamer accounts via Kick login with private stats and

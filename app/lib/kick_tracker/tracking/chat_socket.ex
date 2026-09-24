@@ -257,12 +257,15 @@ defmodule KickTracker.Tracking.ChatSocket do
   defp send_frame(%{ws: nil} = state, _frame), do: state
 
   defp send_frame(state, frame) do
-    with {:ok, ws, data} <- Mint.WebSocket.encode(state.ws, frame),
-         {:ok, conn} <- Mint.WebSocket.stream_request_body(state.conn, state.ref, data) do
-      %{state | ws: ws, conn: conn}
-    else
-      {:error, %Mint.WebSocket{} = ws, reason} -> reconnect(%{state | ws: ws}, reason)
-      {:error, conn, reason} -> reconnect(%{state | conn: conn}, reason)
+    case Mint.WebSocket.encode(state.ws, frame) do
+      {:ok, ws, data} ->
+        case Mint.WebSocket.stream_request_body(state.conn, state.ref, data) do
+          {:ok, conn} -> %{state | ws: ws, conn: conn}
+          {:error, conn, reason} -> reconnect(%{state | ws: ws, conn: conn}, reason)
+        end
+
+      {:error, ws, reason} ->
+        reconnect(%{state | ws: ws}, reason)
     end
   end
 
