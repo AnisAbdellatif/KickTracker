@@ -18,13 +18,16 @@ defmodule KickTracker.Alerts.Rules do
   @queue_depth 1_000
   @coverage 0.95
   @drift_s 30
+  @collector_gone_s 90
+  @journal_behind_s 5 * 60
 
   @doc "The problems in a snapshot at `now`."
   @spec evaluate(map(), DateTime.t()) :: [problem()]
   def evaluate(snapshot, now) do
     channels = Enum.filter(snapshot.channels, & &1.active)
 
-    Enum.flat_map(channels, &channel_problems(&1, now)) ++
+    collector_problems(Map.get(snapshot, :collectors, []), now) ++
+      Enum.flat_map(channels, &channel_problems(&1, now)) ++
       no_webhooks(channels, snapshot, now) ++
       queue_problems(snapshot, now) ++
       drift(snapshot) ++
@@ -74,6 +77,65 @@ defmodule KickTracker.Alerts.Rules do
     else
       []
     end
+  end
+
+  # The collectors themselves (§10.1), from their heartbeat rows. Nothing
+  # is said where no collector ever reported (a site-only deployment).
+  defp collector_problems([], _now), do: []
+
+  defp collector_problems(collectors, now) do
+    alive = Enum.filter(collectors, &(not older_than?(&1.heartbeat_at, now, @collector_gone_s)))
+    leading = Enum.filter(alive, &(&1.state == "leader"))
+
+    [
+      leading == [] &&
+        %{
+          key: "no_collector",
+          message:
+            case last_leader(collectors) do
+              nil ->
+                "No collector is collecting (none has led in the last day)"
+
+              at ->
+                "No collector is collecting: the last leader was heard from #{ago(at, now)} ago"
+            end
+        },
+      (length(collectors) > 1 and length(alive) < 2) &&
+        %{
+          key: "no_standby",
+          message:
+            "Only #{length(alive)} of #{length(collectors)} collectors running: no failover (#{Enum.map_join(collectors -- alive, ", ", & &1.id)} down)"
+        }
+    ]
+    |> Enum.filter(& &1)
+    |> Kernel.++(journal_problems(alive, now))
+  end
+
+  defp journal_problems(alive, now) do
+    Enum.flat_map(alive, fn c ->
+      [
+        c.journal_oldest_at && older_than?(c.journal_oldest_at, now, @journal_behind_s) &&
+          %{
+            key: "journal_behind:#{c.id}",
+            message:
+              "#{c.id}: #{c.journal_depth} write(s) waiting for the database for #{ago(c.journal_oldest_at, now)}"
+          },
+        c.journal_buried > 0 &&
+          %{
+            key: "journal_buried:#{c.id}",
+            message:
+              "#{c.id}: #{c.journal_buried} write(s) could not be applied and were set aside"
+          }
+      ]
+      |> Enum.filter(& &1)
+    end)
+  end
+
+  defp last_leader(collectors) do
+    collectors
+    |> Enum.filter(&(&1.state == "leader"))
+    |> Enum.map(& &1.heartbeat_at)
+    |> Enum.max(DateTime, fn -> nil end)
   end
 
   defp queue_problems(snapshot, now) do

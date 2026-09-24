@@ -25,14 +25,15 @@ defmodule KickTracker.RoleTest do
     refute KickTrackerWeb.Endpoint in names.([:collector])
     assert KickTrackerWeb.Endpoint in names.([:collector, :web])
 
-    # Collection runs only on a collector.
-    assert KickTracker.Events.Consumer in names.([:collector])
-    refute KickTracker.Events.Consumer in names.([:web])
+    # Collection (the journal, the leader election and, while leading,
+    # the collection tree) runs only on a collector.
+    assert KickTracker.Collector.Supervisor in names.([:collector])
+    refute KickTracker.Collector.Supervisor in names.([:web])
 
     without_collection =
       [:collector] |> KickTracker.Application.children(collect: false) |> Enum.map(&child_name/1)
 
-    refute KickTracker.Events.Consumer in without_collection
+    refute KickTracker.Collector.Supervisor in without_collection
 
     # A web node has its own app token (admin lookups, subscriptions); a
     # node that also collects shares the collector's.

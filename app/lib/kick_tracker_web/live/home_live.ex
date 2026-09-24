@@ -8,12 +8,13 @@ defmodule KickTrackerWeb.HomeLive do
   use KickTrackerWeb, :live_view
 
   alias KickTracker.{Cache, Groups, Reports}
-  alias KickTracker.Tracking.Poller
   alias KickTrackerWeb.Period
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Phoenix.PubSub.subscribe(KickTracker.PubSub, Poller.live_topic())
+    if connected?(socket),
+      do: Phoenix.PubSub.subscribe(KickTracker.PubSub, KickTracker.Tracking.live_topic())
+
     {:ok, socket |> assign(page_title: gettext("Live now")) |> load_live()}
   end
 

@@ -75,6 +75,36 @@ config :kick_tracker, :kick,
 
 config :kick_tracker, :amqp_url, setting.("AMQP_URL")
 
+# The collector (project.md §10.1): its name among the collectors, the
+# lease they share, its journal file, and its status port (loopback; the
+# container healthcheck and the deploy script read it).
+collector_id = System.get_env("COLLECTOR_ID")
+
+config :kick_tracker, :collector,
+  id: collector_id,
+  lease: System.get_env("COLLECTOR_LEASE", "collector"),
+  journal:
+    (case System.get_env("COLLECTOR_JOURNAL") do
+       "direct" ->
+         :direct
+
+       nil ->
+         case config_env() do
+           :prod -> "/journal/collector.sqlite3"
+           :test -> :direct
+           :dev -> Path.expand("../tmp/journal/#{collector_id || "dev"}.sqlite3", __DIR__)
+         end
+
+       path ->
+         path
+     end),
+  status_port:
+    (case System.get_env("COLLECTOR_STATUS_PORT") do
+       nil -> if config_env() == :test, do: nil, else: 4101
+       "" -> nil
+       port -> String.to_integer(port)
+     end)
+
 # The public name (never Kick's, project.md §18.3).
 config :kick_tracker, :site_name, System.get_env("SITE_NAME", "Stream Tracker")
 
@@ -177,12 +207,17 @@ if config_env() == :prod do
   # want to use a different value for prod and you most likely don't want
   # to check this value into version control, so we use an environment
   # variable instead.
+  #
+  # Only the web role serves pages: a collector doesn't need it (and
+  # doesn't get it, deploy/secrets/collector.env).
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
-      raise """
-      environment variable SECRET_KEY_BASE is missing.
-      You can generate one by calling: mix phx.gen.secret
-      """
+      if String.contains?(System.get_env("ROLE", ""), "web"),
+        do:
+          raise("""
+          environment variable SECRET_KEY_BASE is missing.
+          You can generate one by calling: mix phx.gen.secret
+          """)
 
   host = System.get_env("PHX_HOST") || "example.com"
 

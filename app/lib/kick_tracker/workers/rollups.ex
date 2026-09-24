@@ -20,4 +20,8 @@ defmodule KickTracker.Workers.Rollups do
     Rollups.recent_stream_stats(since)
     :ok
   end
+
+  # A stuck job gives its slot back.
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.minutes(15)
 end

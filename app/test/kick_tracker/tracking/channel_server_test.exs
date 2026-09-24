@@ -157,4 +157,42 @@ defmodule KickTracker.Tracking.ChannelServerTest do
     assert ended == at(300)
     assert [%{end_source: "event"}] = rows("streams", ["id"])
   end
+
+  test "an event that can't be handled is skipped and marked, and the channel carries on", %{
+    channel: c
+  } do
+    pid = start(c)
+    e = envelope("livestream.status.updated", status(c, true), at(0))
+    # A body that parses but isn't the object the handler expects.
+    send(pid, {:event, %{e | body: "[1, 2]"}})
+    sync(pid)
+
+    assert Process.alive?(pid)
+    assert [%{processed_at: %DateTime{}}] = rows("webhook_events", ["message_id"])
+
+    send(pid, {:reading, livestream(c, 100), at(30)})
+    assert %{open_stream: %DateTime{}} = sync(pid)
+  end
+
+  test "restarted within the same lease term, it starts from its snapshot, not the database", %{
+    channel: c
+  } do
+    start_supervised!(KickTracker.Collector.Journal)
+    KickTracker.Collector.put_leadership(true, 9)
+    on_exit(fn -> :persistent_term.erase({KickTracker.Collector, :epoch}) end)
+
+    pid = start(c)
+    send(pid, {:reading, livestream(c, 100), at(30)})
+    sync(pid)
+    stop_supervised!(:cs)
+
+    # As if its writes were still in the journal, not yet in Postgres.
+    Repo.query!("DELETE FROM viewer_samples")
+    Repo.query!("DELETE FROM stream_changes")
+    Repo.query!("DELETE FROM streams")
+
+    pid = start(c)
+    assert %{open_stream: started_at} = ChannelServer.info(pid)
+    assert started_at == at(0)
+  end
 end

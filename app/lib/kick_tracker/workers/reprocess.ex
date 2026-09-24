@@ -79,4 +79,8 @@ defmodule KickTracker.Workers.Reprocess do
     {:ok, to, _} = DateTime.from_iso8601(to)
     {from, to}
   end
+
+  # A stuck job gives its slot back.
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.hours(2)
 end

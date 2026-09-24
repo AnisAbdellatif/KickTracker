@@ -8,7 +8,8 @@ git-ignored and live only on the server.
 | File | Used by | Holds |
 |---|---|---|
 | `stack.env` | Caddy | `SITE_HOST`, `INGRESS_HOST`, `ACME_EMAIL`, `ADMIN_ALLOW` |
-| `app.env` | collector, web, migrate | see `app.env.example` |
+| `app.env` | web, migrate | see `app.env.example` |
+| `collector.env` | both collectors | see `collector.env.example` (no web secrets) |
 | `receiver.env` | both receivers | see `receiver.env.example` |
 | `db.env` | the database and the backups | see `db.env.example` |
 | `rabbitmq.env` | `rabbitmq/make-prod-definitions.sh` | the five RabbitMQ passwords |

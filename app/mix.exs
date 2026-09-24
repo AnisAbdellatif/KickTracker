@@ -87,6 +87,8 @@ defmodule KickTracker.MixProject do
       {:broadway_rabbitmq, "~> 0.8.2"},
       {:oban, "~> 2.24"},
       {:mint_web_socket, "~> 1.0"},
+      # The collector's local journal (project.md §10.2), as the receiver's spool.
+      {:exqlite, "~> 0.41.0"},
       # Errors kept in our own database, with a dashboard under /admin (§18.2).
       {:error_tracker, "~> 0.9"},
       # Rate limits on the public site and /data (§19.3).

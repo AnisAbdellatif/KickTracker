@@ -64,4 +64,8 @@ defmodule KickTracker.Workers.DeleteChannel do
         :ok
     end
   end
+
+  # A stuck job gives its slot back.
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.hours(1)
 end

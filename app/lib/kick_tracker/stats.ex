@@ -98,6 +98,15 @@ defmodule KickTracker.Stats do
     id
   end
 
+  @doc """
+  The id of a channel's stream by its start, recording the stream if it
+  isn't yet (a sample or chat minute implies it was live). Never reopens
+  or changes a stream already there.
+  """
+  @spec ensure_stream_id(integer(), DateTime.t()) :: integer()
+  def ensure_stream_id(channel_id, started_at),
+    do: apply_stream(channel_id, {:open, started_at})
+
   @doc "The id of a channel's stream by its start."
   @spec stream_id!(integer(), DateTime.t()) :: integer()
   def stream_id!(channel_id, started_at) do
@@ -147,20 +156,41 @@ defmodule KickTracker.Stats do
   def insert_changes(_stream_id, []), do: :ok
 
   def insert_changes(stream_id, changes) do
-    rows =
-      for c <- changes do
-        %{
-          stream_id: stream_id,
-          occurred_at: c.occurred_at,
-          field: c.field,
-          old_value: c.old_value,
-          new_value: c.new_value,
-          source: Atom.to_string(c.source)
-        }
-      end
+    # A change to the value the stream already had at that moment changes
+    # nothing (a collector that restarted without its state may see the
+    # current values as new): it isn't recorded.
+    for c <- changes do
+      Repo.query!(
+        """
+        INSERT INTO stream_changes (stream_id, occurred_at, field, old_value, new_value, source)
+        SELECT $1, $2, $3, $4, $5, $6
+        WHERE NOT EXISTS (
+          SELECT 1 FROM (
+            SELECT new_value FROM stream_changes
+            WHERE stream_id = $1 AND field = $3 AND occurred_at <= $2
+            ORDER BY occurred_at DESC, id DESC LIMIT 1
+          ) latest WHERE latest.new_value IS NOT DISTINCT FROM $5
+        )
+        ON CONFLICT (stream_id, field, occurred_at) DO NOTHING
+        """,
+        [stream_id, c.occurred_at, c.field, c.old_value, c.new_value, Atom.to_string(c.source)]
+      )
+    end
 
-    Repo.insert_all("stream_changes", rows, on_conflict: :nothing)
     :ok
+  end
+
+  @doc "A stream's current values (see `current_values/1`) by its natural key; `{nil, nil}` if unknown."
+  @spec current_values(integer(), DateTime.t()) :: {map() | nil, DateTime.t() | nil}
+  def current_values(channel_id, started_at) do
+    case Repo.one(
+           from s in "streams",
+             where: s.channel_id == ^channel_id and s.started_at == ^started_at,
+             select: s.id
+         ) do
+      nil -> {nil, nil}
+      id -> current_values(id)
+    end
   end
 
   @doc """

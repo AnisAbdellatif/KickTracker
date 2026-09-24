@@ -571,12 +571,13 @@ another queue with its own Broadway producer.
 | Queue | **RabbitMQ** (quorum queues, publisher confirms, dead-lettering) | Mature, runs on the BEAM, official Broadway producer; managed options exist (CloudAMQP). |
 | Queue consumer | **Broadway** + **broadway_rabbitmq** | Batching, acks, back-pressure, concurrency; the queue is a swappable producer. |
 | Receiver | **Bandit + Plug + amqp**, **SQLite** spool (exqlite) | Tiny, separate, rarely redeployed. |
+| Collector journal | **SQLite** (exqlite), one file per collector | Collection outlives the database: writes wait on local disk (§10.2). |
 | HTTP client | **Req** | Public API, v2, token endpoint. Retries and backoff built in. |
 | Chat websocket | **Mint.WebSocket** inside our own GenServer (or WebSockex if simpler) | Maintained, the process owns the connection, reconnect logic is ours. |
 | JSON | **Jason** (or OTP's `:json`) | Chat frames, API bodies, envelopes. |
 | Database | **PostgreSQL + TimescaleDB**, one database | Hypertables, continuous aggregates, compression, retention, plain SQL. Self-hosted (see §12.1). |
 | DB access | **Ecto + Postgrex** | Schemas, migrations; Timescale features via `execute` in migrations. |
-| Background jobs | **Oban** | Follower polls, subscription management, event processing retries, rollups, retention. |
+| Background jobs | **Oban** | Subscription management, event processing retries, rollups, transfers; queues run on the leading collector. |
 | Clustering | **libcluster** | Joins the `collector` and `web` nodes so PubSub reaches live pages. |
 | Charts | **Apache ECharts** through one LiveView hook, loaded only where needed | Bands, markers, linked zoom, heatmaps, sampling in one library (§13.7). |
 | Styling | **Tailwind** (Phoenix default), logical properties, dark + light themes | RTL-ready, one set of tokens for UI and charts. |
@@ -593,35 +594,149 @@ at boot. Each role is its own service, deployed on its own.
 
 | Role | Runs | Redeployed |
 |---|---|---|
-| `collector` | Poller, channel processes, chat sockets, Broadway consumer, Oban | When tracking logic changes |
-| `web` | Public site, admin interface, `/data/v1` JSON | Often |
+| `collector` | The journal, the leader election and, on the leading node, the sources, channel processes, chat sockets, Broadway consumer and Oban queues | When tracking logic changes, standby first (§10.1) |
+| `web` | Public site, admin interface, `/data/v1` JSON, alert checks | Often |
 
 The receiver is **not** a role of the app; it is the ingress (§8.4).
 
 ```
 collector
-KickTracker.Supervisor (one_for_one)
+KickTracker.Supervisor (one_for_one, 20 restarts / 60s)
 ├─ KickTracker.Repo
-├─ Phoenix.PubSub                  (+ libcluster, shared with web)
-├─ Oban                            FollowerPoll, SubscriptionSync, ProcessEvent, rollups
-├─ Kick.Token                      app token (client credentials), refreshed before expiry
-├─ Tracking.Registry               channel id -> its processes
-├─ Tracking.ChannelsSupervisor     DynamicSupervisor
-│   └─ Tracking.ChannelSup          one per channel (rest_for_one)
-│       ├─ Tracking.ChannelServer   state, stream sessions, writes, broadcasts
-│       └─ Tracking.ChatSocket      Pusher connection for this chatroom
-├─ Tracking.Poller                 batched public API polling
-├─ Events.Consumer                 Broadway pipeline on kick_tracker.events
-└─ Tracking.Boot                   starts a ChannelSup per active channel on startup
+├─ Phoenix.PubSub                  (+ DNSCluster, shared with web)
+├─ Oban                            queues start paused; run only on the leader
+└─ Collector.Supervisor (one_for_one, 50 / 60s)
+    ├─ Collector.Status            in-memory health, for the endpoint and heartbeat
+    ├─ Collector.Journal           every write on local disk first (SQLite)
+    ├─ Collector.Writer            journal -> Postgres, exactly once, with backoff
+    ├─ Collector.Tracked           the tracked channels, cached (and kept in the journal)
+    ├─ Collector.Slot              where Collection runs while this node leads
+    ├─ Collector.Leader            the lease: collect or stand by
+    ├─ Collector.Heartbeat         this node's row in collector_nodes, every 10s
+    └─ Collector.StatusPlug        GET /healthz, /status on a loopback port
+         Collector.Collection (while leading; restarted by the Leader with backoff)
+         ├─ Tracking.Registry
+         ├─ Collector.Tasks        Task.Supervisor for the sources' requests
+         ├─ Kick.PublicKey, Kick.Token
+         ├─ Tracking.ChannelsSupervisor
+         │   └─ Tracking.ChannelSup          one per channel (rest_for_one)
+         │       ├─ Tracking.ChannelServer   state, stream sessions, writes, broadcasts
+         │       └─ Tracking.ChatSocket      Pusher connection for this chatroom
+         ├─ Tracking.Manager       a ChannelSup per tracked channel, resynced every minute
+         ├─ SourceRunner(Viewers), SourceRunner(Subscribers), SourceRunner(Followers)
+         └─ Events.Consumer        Broadway pipeline on kick_tracker.events
 
 web
-KickTrackerWeb.Supervisor
+KickTracker.Supervisor
 ├─ KickTracker.Repo
-├─ Phoenix.PubSub                  (+ libcluster)
+├─ Phoenix.PubSub
+├─ Oban                            inserts jobs, runs none
+├─ Kick.Token                      for the admin's lookups
 ├─ KickTracker.Cache               query cache for aggregates (ETS, TTL)
+├─ Alerts.Ticker                   checks alerts every minute (§18.2)
 └─ KickTrackerWeb.Endpoint         public site, /admin, /data/v1; read-only against
                                    collected data, writes admin tables (§13.8)
 ```
+
+### 10.1 Collection that doesn't stop
+
+History only exists from the moment we record it, so the collector is
+built to keep collecting through deploys, crashes and outages of what it
+depends on. The web role can restart freely.
+
+- **Two collectors** run (`collector-a`, `collector-b`), each with its own
+  journal volume. One **leads** and collects; the other **stands by**. The
+  lease is a Postgres advisory lock held on the Leader's own connection,
+  plus a `collector_lease` row with an **epoch** raised at every change of
+  holder; `collector_terms` records each holder's term and why it ended.
+- **A standby takes over** at once when the leader released the lease on a
+  clean stop (a deploy: about a second of handoff), or when the leader's
+  heartbeat is older than 15s **and** the lock has been seen free for 5s
+  (a crash: about 20s). A collector restarting takes its own lease back at
+  once. Rules in `Collector.Lease`, pure.
+- **The leader** heartbeats every 3s. Superseded, or finding the lock
+  taken by another node, it stops collecting at once. The database merely
+  unreachable, it keeps collecting into its journal: no other node can
+  take over meanwhile.
+- **Fencing**: every write carries the epoch it was made under; a write
+  made by an older holder after a newer one started is dropped by the
+  Writer, so a moment of overlap can't double chat counts.
+- **Watchdog**: leading, if the viewers source hasn't completed a cycle in
+  5 minutes, the collection tree is restarted. The tree giving up (too
+  many crashes) is restarted with a backoff (1s to 60s); nothing in
+  collection can take the node down.
+- **Deploys** update the standby first, wait for it to be healthy, then the
+  leader (§15.3). Oban queues run only on the leader, so jobs that write
+  collected data run where collection runs.
+- **Health**: each collector answers `/healthz` and `/status` on its own
+  loopback port (the container healthcheck; the deploy script reads which
+  one leads) and writes a `collector_nodes` row every 10s, which the health
+  page and the alerts read from the web role (§18.2).
+
+Scope: this protects collection on one VPS. If the VPS itself goes, the
+database goes with it; collectors on a second machine would need a
+replicated database first (stage 3, §15.2).
+
+### 10.2 Writes go through a local journal
+
+Every write the collector makes (samples, streams, changes, chat minutes,
+coverage, usernames, processed marks, learnt channel ids and slugs) is an
+**operation** (`Collector.Ops`) appended to a local SQLite journal
+(`synchronous=FULL`) and applied to Postgres by the **Writer**:
+
+- In batches, oldest first, one transaction per batch, which also moves
+  this journal's high-water mark (`collector_journal_marks`): **exactly
+  once**, even if the process dies between the commit and the journal
+  delete.
+- The database away (refused, restarting, a lock timeout during a
+  migration) is waited out with backoff up to 30s; nothing is lost, and a
+  collector restarted meanwhile finds its journal where it left it.
+- A write that can never apply is found by retrying the batch one write at
+  a time and **set aside** (`buried`), so it can't block the others; the
+  count shows on the health page and raises an alert.
+- Operations name streams by their natural key `(channel, started_at)`,
+  never by id, so they can be made without the database.
+- On shutdown the Writer keeps writing for up to 15s after collection has
+  stopped and the lease is released; what is left waits for the next start.
+
+The journal also keeps snapshots: the tracked channels (`Collector.Tracked`
+falls back on them) and each channel's stream state. A `ChannelServer`
+starting within the same term (writes may still be in the journal), or
+while the database can't be read, starts from its snapshot; otherwise the
+database is the truth. So a collector can start, and collect, during a
+database outage.
+
+### 10.3 Sources
+
+A **source** (`Collector.Source`, a behaviour) says what to ask Kick, how
+to ask it and what the answer means; the `SourceRunner` does the rest the
+same way for all of them: a steady cadence (a cycle that overruns is
+followed at once, never overlapped), requests in tasks with the source's
+concurrency and deadline, crashes isolated to the unit, **coverage
+recorded by outcome**, writes journaled, status reported. Adding a data
+source is one module.
+
+- **Viewers**: every **60s**, `GET /livestreams` for **every** tracked
+  channel, 50 per request, 4 at a time, 40s deadline; each `ChannelServer`
+  gets `{:reading, data, at}`, or `:offline` when a request that succeeded
+  didn't list it. Polling all channels (not only the live ones) notices a
+  missed start within a minute. At the end of each cycle, one aggregated
+  broadcast for the home page (§13.5). Coverage source `api`.
+- **Subscribers**: every **5 min**, `GET /channels` for subscriber totals
+  and slug renames. Coverage source `subscribers`.
+- **Followers**: v2 `followers_count`, every 15 min per live channel, daily
+  per offline channel, and on request (stream start and end, a channel
+  just added, from anywhere through the `FollowerPoll` job); one request at
+  a time, three per 15s cycle, so v2 never sees a burst; a failure is
+  retried after 10 minutes. Also learns the chatroom id. Coverage source
+  `followers`.
+
+If a request fails, nothing is written for it: a missing reading is a gap,
+never "offline" and never zero. A 429 waits Kick's `retry-after`, capped at
+10s. The app token is replaced ahead of expiry; a failed refresh keeps the
+old one and retries every minute.
+
+### 10.4 Processes
 
 **Events.Consumer** (Broadway)
 - Decodes the envelope and **re-verifies the signature**. Bad or undecodable
@@ -629,75 +744,64 @@ KickTrackerWeb.Supervisor
 - In one transaction per batch: inserts into `webhook_events`
   (`ON CONFLICT (message_id) DO NOTHING`) and, for newly inserted rows,
   writes the facts that need no channel state: `follows` and
-  `support_events`.
+  `support_events`. RabbitMQ is its buffer: with the database away, a
+  batch waits and retries holding its messages unacknowledged.
 - Then acks. Only after the commit.
 - Stream status and metadata events are handed to the channel's
   `ChannelServer` after the commit. If it is down or restarting, the event
   stays unprocessed in `webhook_events` (`processed_at` null); the
   `ChannelServer` picks up unprocessed events for its channel when it starts,
-  and the 5-minute poll repairs anything else.
-
-**Poller** (one process)
-- Every **60s**: `GET /livestreams` for **every** tracked channel, 50 per
-  request, and sends each `ChannelServer` its reading: `{:reading, data, at}`,
-  or `:offline` when a request that succeeded didn't list it. Polling all
-  channels (not only the live ones) notices a missed start within a minute,
-  at one request per 50 channels.
-- Every **5 min**: `GET /channels` for subscriber totals and slug renames.
-- If a request fails, it sends nothing. A missing reading is a gap, never
-  "offline" and never zero. Each batch's outcome goes to `coverage`.
+  and `ProcessEvents` hands over anything still waiting after 2 minutes.
 
 **ChannelServer** (one per channel)
 - Holds live/offline, the open stream, the current title and category, and
   this minute's chatters (`user_id -> messages`).
 - Feeds status events and readings to the pure `Sessionizer`, which decides
   when a stream opens, closes or reopens (keyed on `(channel_id,
-  started_at)`, rules in §3.3), and writes what it decides; asks for a
-  follower reading at start and end.
-- On a reading: writes a viewer sample carrying the current category.
-- On a metadata event or a changed title/category in a reading: writes a
-  stream change.
-- Every minute: flushes the minute's chat to `chat_minutes` (counts) and
-  `chat_minute_users`, and upserts `chat_stream_users`, so a crash loses at
-  most a minute of chat.
-- On (re)start: reloads the open stream from the DB and processes its
-  channel's unprocessed events, so a restart mid-stream continues the same
-  stream.
+  started_at)`, rules in §3.3), and journals what it decides; asks the
+  followers source for a reading at start and end.
+- On a reading: a viewer sample carrying the current category.
+- On a metadata event or a changed title/category in a reading: a stream
+  change (not recorded when the stream already had that value).
+- Every minute: the minute's chat to `chat_minutes` (counts),
+  `chat_minute_users` and `chat_stream_users`, so a crash loses at most a
+  minute of chat.
+- An event whose handling raises is logged, reported and marked processed:
+  one bad payload can't crash the channel in a loop; it stays in
+  `webhook_events` to be replayed once fixed.
 - Broadcasts readings and events on `"channel:<id>"` for LiveView pages.
 
 **ChatSocket** (one per channel)
 - Connects to Pusher, subscribes to `chatrooms.<id>.v2` and, once known,
   `channel.<kick channel id>`; answers pings, pings after the activity
-  timeout, reconnects if no pong comes. Waits until the chatroom id is known
-  (from v2).
+  timeout, reconnects if no pong comes, or if the upgrade doesn't complete
+  within 15s. Waits until the chatroom id is known (from v2).
 - Sends `{:chat, message}` (sender, id, time) to its `ChannelServer`, and
   the names of events it doesn't know (raids and hosts, until recorded).
   No message text is kept.
-- Reconnects with exponential backoff (1s up to 30s) and reports connected /
-  disconnected so chat coverage is recorded.
+- Reconnects with exponential backoff (1s up to 30s) and records chat
+  coverage when connected and disconnected.
 - `rest_for_one`: if the `ChannelServer` restarts, the socket restarts with
   it; if only the socket crashes, the channel's state is untouched.
 
-**Oban jobs**
-- `FollowerPoll`: v2 `followers_count`, every 15 min per live channel, daily
-  per offline channel, and on demand at stream start and end. Spread out, one
-  channel per job.
+**Oban jobs** (on the leader; each with a time limit)
 - `SubscriptionSync`: makes Kick's webhook subscriptions match the tracked
   channel list (the seven event types we read); subscribes new channels,
   removes dropped ones and duplicates, and **restores subscriptions Kick
   cancelled** after a long failure. Where deliveries go (the ingress URL)
   is set once in the Kick app's settings, not per subscription.
-- `ProcessEvent`: retries status/metadata events still unprocessed after a
-  while.
-- Rollup refreshes, retention and compression policies.
+- `ProcessEvents`: hands over status/metadata events still unprocessed
+  after a while.
+- `FollowerPoll`: passes a reading request to the followers source.
+- `Alerts` (its own queue), rollups, transfers, privacy and channel
+  deletions, reprocessing.
 
 **Adding or removing a channel** = insert or deactivate the row, start or stop
 its `ChannelSup`, sync its webhook subscriptions. No redeploy.
 
-**Growing past one collector:** Horde to spread the `ChannelSup`s across
-collector nodes, the `Poller` as a cluster singleton, Broadway consumers on
-every node (RabbitMQ shares the queue between them). Not needed until well
-past a thousand channels.
+**Growing past one collecting node:** partition the channels between
+collectors (a lease per partition), each with its own journal. Not needed
+until well past a thousand channels.
 
 ## 11. Project layout
 
@@ -1238,19 +1342,22 @@ written by the collector, with the deletion itself.
 |---|---|---|---|
 | `receiver` ×2 | `ingress/receiver` | Rarely, one at a time | Nothing, while the other answers |
 | `rabbitmq` | official | Rarely | Receivers spool to disk; nothing lost |
-| `collector` | `app`, `ROLE=collector` | When tracking changes | Events wait in the queue; at most one missed 60s reading and seconds of chat, recorded in `coverage` |
+| `collector-a`, `collector-b` | `app`, `ROLE=collector` | When tracking changes, standby first | One down: the other collects (about a second after a clean stop, ~20s after a crash). Both down: events wait in the queue; polls and chat are gaps, recorded in `coverage` and in `collector_terms` |
 | `web` | `app`, `ROLE=web` | Often | Site down; collection unaffected |
-| `db` | TimescaleDB | Rarely | Consumer stops acking, events wait in the queue; polling pauses |
+| `db` | TimescaleDB | Rarely | Collection continues into the leader's journal and is written when it is back; the consumer stops acking, events wait in the queue; the site is down |
 | `caddy` | official | Rarely | Ingress unreachable (see stage 2) |
 
-`docker compose up -d web` redeploys only the website; the receivers and the
-queue keep running the images they have.
+`docker compose up -d web` redeploys only the website; the receivers, the
+queue and the collectors keep running the images they have (images are
+pinned in `deploy/.env`, so a plain `docker compose up -d` doesn't swap
+the collectors' either).
 
 ### 15.2 Stages
 
 **Stage 1: one VPS.**
 Caddy → two receivers (`lb_policy first`, active health checks) → RabbitMQ
-(single node) → collector. Covers receiver crashes and receiver updates;
+(single node) → two collectors, one collecting (§10.1). Covers receiver
+crashes and updates, collector crashes and updates, and database restarts;
 app deploys never touch webhook intake.
 
 **Stage 2: backup receiver on a second VPS.**
@@ -1275,6 +1382,12 @@ change to the app beyond producer config.
   fields); a breaking change means a new `version` and a consumer that reads
   both.
 - Redeploy receivers one at a time; the other keeps answering.
+- Redeploy collectors the standby first, waiting for it to be healthy, then
+  the leader, whose clean stop hands over within a second (§10.1). The
+  deploy workflow finds the leader from the collectors' status ports.
+- Migrations run with `lock_timeout = 5s`: one that would queue behind
+  the collector's writes (and hold every later write behind it) fails and
+  is retried at a quieter moment; the collectors' journals absorb the wait.
 
 ## 16. Open questions
 
@@ -1472,6 +1585,11 @@ loses it for good.
 
 Notifications (Telegram, Discord or email), not just dashboards, when:
 
+- no collector is collecting, or the standby is gone (from the
+  collectors' heartbeat rows, checked by the web role too: a dead
+  collector can't report itself);
+- a collector's journal has writes waiting for the database for more than
+  5 minutes, or writes set aside because they can't be applied;
 - a channel is live but no viewer readings arrive;
 - no webhooks arrive while channels are live;
 - the dead-letter queue grows, or the consumer falls behind;
@@ -1479,8 +1597,10 @@ Notifications (Telegram, Discord or email), not just dashboards, when:
 - coverage for a channel drops below a threshold;
 - disk nearly full, a backup fails, a certificate is close to expiry.
 
-Plus an **external uptime check** on the ingress URL and the site, and error
-tracking (**ErrorTracker**, self-hosted in Elixir, or Sentry).
+Plus an **external uptime check** on the ingress URL and the site, a
+**dead man's switch** pinged every minute by the collecting node
+(`HEARTBEAT_URL`), and error tracking (**ErrorTracker**, self-hosted in
+Elixir, or Sentry).
 
 ### 18.3 Legal and privacy
 
@@ -1658,6 +1778,20 @@ migrations first (`deploy.yml`). Outlier flags, payload shape checks and
 the clock drift alert; CSP, rate limits, the visitor's address behind the
 proxies. Everything ran locally except the workflows themselves and the
 image builds, which need GitHub and hex.pm.
+
+**Collector hardening built** (2026-09-24, §10.1–10.3). Two collectors
+with a lease and fencing, every collected write through a local journal
+and an exactly-once writer, sources on one behaviour and runner, deploys
+standby first, collectors' health checked from web. Tried on a local run
+against the real Kick with two collector nodes: a clean stop handed
+collection over in under half a second; a 75-second database outage lost
+nothing (the leader kept polling, 362 writes waited in its journal and
+were written 14s after the database came back, the lease stayed put); a
+`kill -9` of the leader was taken over in 16s. The release image booted as
+a collector without web secrets, reported healthy, and stopped cleanly in
+a second. The run also showed the old failure for real: before the
+change, a code reload crash-looped the collector's Manager until the whole
+node stopped.
 
 **Later** (not planned yet): history before tracking from v2's VOD list
 (marked as imported), streamer accounts via Kick login with private stats and

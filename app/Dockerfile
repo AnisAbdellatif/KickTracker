@@ -35,9 +35,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 open
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8 MIX_ENV=prod
 WORKDIR /app
-RUN useradd --system --home /app app && chown app /app && mkdir /transfers && chown app /transfers
+RUN useradd --system --home /app app && chown app /app \
+    && mkdir /transfers /journal && chown app /transfers /journal
 COPY --from=build --chown=app /app/_build/prod/rel/kick_tracker ./
 USER app
 EXPOSE 4100
-HEALTHCHECK --interval=30s --timeout=5s CMD [ "$ROLE" = "collector" ] || curl -fsS http://127.0.0.1:${PORT:-4100}/healthz || exit 1
+# A collector answers on its own status port (is it collecting, or
+# standing by and checking?); the site on /healthz.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s CMD \
+    if [ "$ROLE" = "collector" ]; then curl -fsS http://127.0.0.1:${COLLECTOR_STATUS_PORT:-4101}/healthz; \
+    else curl -fsS http://127.0.0.1:${PORT:-4100}/healthz; fi || exit 1
 CMD ["/app/bin/server"]

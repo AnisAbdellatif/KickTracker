@@ -21,6 +21,22 @@ defmodule KickTracker.Health do
   @doc "The cadence one outcome of a source vouches for."
   def pad_s(source), do: Map.fetch!(@pad_s, source)
 
+  @doc "The collectors seen in the last day (their heartbeat rows), see `KickTracker.Alerts.collectors/0`."
+  @spec collectors() :: [map()]
+  def collectors, do: KickTracker.Alerts.collectors()
+
+  @doc "The latest changes of which collector collects, newest first."
+  @spec terms(pos_integer()) :: [map()]
+  def terms(limit \\ 8) do
+    Repo.query!(
+      "SELECT epoch, holder, started_at, ended_at, end_reason FROM collector_terms ORDER BY started_at DESC LIMIT $1",
+      [limit]
+    ).rows
+    |> Enum.map(fn [epoch, holder, started_at, ended_at, reason] ->
+      %{epoch: epoch, holder: holder, started_at: started_at, ended_at: ended_at, reason: reason}
+    end)
+  end
+
   @doc "One row per channel."
   @spec channels(DateTime.t()) :: [map()]
   def channels(now \\ DateTime.utc_now()) do

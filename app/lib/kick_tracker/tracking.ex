@@ -8,6 +8,12 @@ defmodule KickTracker.Tracking do
 
   @registry KickTracker.Tracking.Registry
 
+  @doc """
+  The PubSub topic of the aggregated live broadcast: after each viewers
+  poll, every channel seen live and its viewers (project.md §13.5).
+  """
+  def live_topic, do: "live"
+
   @doc "The registry that names each channel's processes by Kick broadcaster id."
   def registry, do: @registry
 

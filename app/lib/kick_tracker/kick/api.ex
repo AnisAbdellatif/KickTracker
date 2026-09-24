@@ -6,7 +6,8 @@ defmodule KickTracker.Kick.API do
   raises: a failed request is a gap for the caller to record, never a
   zero. Batched calls take at most 50 ids, Kick's limit. A 401 drops the
   token and retries once with a new one; a 429 is retried after Kick's
-  `retry-after`, a couple of times at most.
+  `retry-after`, capped at 10s, a couple of times at most (a poll cycle
+  can't be stalled by a long wait).
   """
 
   alias KickTracker.Kick.Token
@@ -107,7 +108,18 @@ defmodule KickTracker.Kick.API do
 
   # 429 and transient network errors are worth a retry; anything else is
   # answered at once.
-  defp retry?(_request, %Req.Response{status: 429}), do: true
+  defp retry?(_request, %Req.Response{status: 429} = response) do
+    wait_s =
+      with [value | _] <- Req.Response.get_header(response, "retry-after"),
+           {s, _} <- Integer.parse(value) do
+        s
+      else
+        _ -> 2
+      end
+
+    {:delay, min(max(wait_s, 1), 10) * 1_000}
+  end
+
   defp retry?(_request, %Req.Response{}), do: false
   defp retry?(_request, %{__exception__: true}), do: true
 

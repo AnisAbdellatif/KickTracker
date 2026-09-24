@@ -14,9 +14,28 @@ defmodule KickTracker.Alerts do
 
   @remind_s 6 * 3600
 
-  @doc "Checks now: opens, reminds and resolves alerts. Returns the open ones."
+  @doc """
+  Checks now: opens, reminds and resolves alerts. Returns the open ones.
+  Web nodes and the leading collector both check; a transaction lock lets
+  one check at a time, and a check that finds another running skips.
+  """
   @spec run(DateTime.t(), (String.t() -> term())) :: [map()]
   def run(now \\ DateTime.utc_now(), notify \\ &Notifier.send/1) do
+    {:ok, open} =
+      Repo.transaction(
+        fn ->
+          if Repo.query!("SELECT pg_try_advisory_xact_lock(4242, 1)").rows == [[true]],
+            do: check(now, notify)
+
+          open_alerts()
+        end,
+        timeout: 60_000
+      )
+
+    open
+  end
+
+  defp check(now, notify) do
     problems = snapshot(now) |> Rules.evaluate(now) |> Map.new(&{&1.key, &1})
 
     open =
@@ -55,7 +74,7 @@ defmodule KickTracker.Alerts do
       )
     end
 
-    open_alerts()
+    :ok
   end
 
   @doc "The open alerts, oldest first."
@@ -101,6 +120,7 @@ defmodule KickTracker.Alerts do
 
     %{
       channels: channels,
+      collectors: collectors(),
       payload_issues: KickTracker.Health.payload_issues(DateTime.add(now, -1, :day)),
       last_webhook_at: last_webhook,
       oldest_unprocessed_at: oldest_unprocessed,
@@ -116,6 +136,36 @@ defmodule KickTracker.Alerts do
           _ -> nil
         end
     }
+  end
+
+  @doc "Every collector seen in the last day, from their heartbeat rows."
+  @spec collectors() :: [map()]
+  def collectors do
+    Repo.query!("""
+    SELECT id, state, heartbeat_at, status FROM collector_nodes
+    WHERE heartbeat_at > now() - interval '1 day' ORDER BY id
+    """).rows
+    |> Enum.map(fn [id, state, heartbeat_at, status] ->
+      journal = status["journal"] || %{}
+
+      %{
+        id: id,
+        state: state,
+        heartbeat_at: heartbeat_at,
+        journal_depth: journal["depth"] || 0,
+        journal_oldest_at: parse_time(journal["oldest_at"]),
+        journal_buried: journal["buried"] || 0
+      }
+    end)
+  end
+
+  defp parse_time(nil), do: nil
+
+  defp parse_time(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, at, _} -> at
+      _ -> nil
+    end
   end
 
   @doc "Tells someone about a new kind of error (ErrorTracker's telemetry)."

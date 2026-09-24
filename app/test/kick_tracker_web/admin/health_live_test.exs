@@ -27,6 +27,34 @@ defmodule KickTrackerWeb.Admin.HealthLiveTest do
     assert html =~ "failing"
   end
 
+  test "shows the collectors: who collects, who stands by, who is down, writes waiting", %{
+    conn: conn
+  } do
+    now = DateTime.utc_now()
+
+    for {id, state, ago, journal} <- [
+          {"collector-a", "leader", 5, %{"depth" => 12, "oldest_at" => nil, "buried" => 0}},
+          {"collector-b", "standby", 400, %{"depth" => 0, "oldest_at" => nil, "buried" => 1}}
+        ] do
+      KickTracker.Repo.query!(
+        "INSERT INTO collector_nodes (id, state, epoch, started_at, heartbeat_at, status) VALUES ($1, $2, 1, $3, $3, $4)",
+        [id, state, DateTime.add(now, -ago), %{"journal" => journal}]
+      )
+    end
+
+    KickTracker.Repo.query!(
+      "INSERT INTO collector_terms (name, epoch, holder, started_at) VALUES ('collector', 1, 'collector-a', $1)",
+      [DateTime.add(now, -3600)]
+    )
+
+    {:ok, _view, html} = live(conn, ~p"/admin")
+    assert html =~ "collector-a"
+    assert html =~ "collecting"
+    # Unheard of for over 90s: down, whatever its row says.
+    assert html =~ "down"
+    assert html =~ "Recent handoffs"
+  end
+
   test "open alerts are listed first", %{conn: conn} do
     KickTracker.Repo.insert_all("alerts", [
       %{

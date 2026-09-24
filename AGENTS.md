@@ -160,6 +160,10 @@ one, stop and ask.
   through the database plus a `"channels:changed"` broadcast.
 - **OTP:** every long-lived process is supervised; no bare `spawn`. Per-channel state
   lives in its `ChannelServer`; one failing channel must never affect another.
+- **Collection never waits on Postgres:** every write of collected data from a
+  collection process goes through the journal as a `Collector.Ops` operation (naming
+  streams by `(channel, started_at)`), never straight to the Repo. New polled data is
+  a new `Collector.Source`. Nothing in collection may crash the node (§10.1–10.3).
 - **Pure core:** sessionizer, metrics, envelope decoding, signature verification and
   parsers are pure modules with no processes, database or network. GenServers only carry
   state and call them.

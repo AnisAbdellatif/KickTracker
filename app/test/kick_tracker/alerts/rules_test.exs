@@ -98,4 +98,52 @@ defmodule KickTracker.Alerts.RulesTest do
     # Unknown (not configured) is not a problem.
     assert keys(snapshot([], dead_letters: nil, queue_depth: nil, clock_drift_s: nil)) == []
   end
+
+  defp collector(id, attrs) do
+    Map.merge(
+      %{
+        id: id,
+        state: "standby",
+        heartbeat_at: ago(5),
+        journal_depth: 0,
+        journal_oldest_at: nil,
+        journal_buried: 0
+      },
+      Map.new(attrs)
+    )
+  end
+
+  test "the collectors: one leading and one standing by raises nothing" do
+    assert keys(snapshot([], collectors: [collector("a", state: "leader"), collector("b", [])])) ==
+             []
+
+    # A site that never had a collector report says nothing about them.
+    assert keys(snapshot([], collectors: [])) == []
+  end
+
+  test "no collector collecting, and a lost standby" do
+    # The leader stopped reporting: nobody collects, and no failover left.
+    s =
+      snapshot([],
+        collectors: [collector("a", state: "leader", heartbeat_at: ago(600)), collector("b", [])]
+      )
+
+    assert keys(s) == ["no_collector", "no_standby"]
+
+    # A cleanly stopped leader whose standby hasn't taken over yet.
+    s = snapshot([], collectors: [collector("a", state: "stopped"), collector("b", [])])
+    assert keys(s) == ["no_collector"]
+  end
+
+  test "writes waiting for the database, and writes set aside" do
+    s =
+      snapshot([],
+        collectors: [
+          collector("a", state: "leader", journal_depth: 900, journal_oldest_at: ago(900)),
+          collector("b", journal_buried: 2)
+        ]
+      )
+
+    assert keys(s) == ["journal_behind:a", "journal_buried:b"]
+  end
 end

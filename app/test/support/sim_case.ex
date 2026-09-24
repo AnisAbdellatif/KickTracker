@@ -54,10 +54,16 @@ defmodule KickTracker.SimCase do
     Req.request!(opts)
   end
 
-  @doc "Starts the collector's processes, except the queue consumer."
+  @doc """
+  Starts the collection processes, except the queue consumer, without the
+  leader election (`Collector.Collection` runs them in production). The
+  sources don't run on their own: `poll/1` and `run_source/1` run them.
+  """
   def start_collector(opts \\ []) do
     start = &ExUnit.Callbacks.start_supervised!/1
+    start.(KickTracker.Collector.Status)
     start.({Registry, keys: :unique, name: KickTracker.Tracking.registry()})
+    start.({Task.Supervisor, name: KickTracker.Collector.Tasks})
     start.(KickTracker.Kick.Token)
 
     start.(
@@ -68,16 +74,27 @@ defmodule KickTracker.SimCase do
       {KickTracker.Tracking.Manager, on_change: Keyword.get(opts, :on_change, fn -> :ok end)}
     )
 
-    start.({KickTracker.Tracking.Poller, interval_ms: 0})
+    for source <- [
+          KickTracker.Collector.Sources.Viewers,
+          KickTracker.Collector.Sources.Subscribers,
+          KickTracker.Collector.Sources.Followers
+        ],
+        do: start.({KickTracker.Collector.SourceRunner, {source, first_ms: nil}})
+
     :ok
   end
 
+  @doc "Runs one cycle of a source now."
+  def run_source(source), do: KickTracker.Collector.SourceRunner.run_now(source)
+
   @doc """
-  Polls now, then waits until every channel's process has handled what the
-  poll sent it (a call is answered only after earlier messages).
+  Polls now (viewers, and subscriber totals too with `channels: true`),
+  then waits until every channel's process has handled what the poll sent
+  it (a call is answered only after earlier messages).
   """
   def poll(opts \\ []) do
-    KickTracker.Tracking.Poller.poll_now(opts)
+    run_source(KickTracker.Collector.Sources.Viewers)
+    if opts[:channels], do: run_source(KickTracker.Collector.Sources.Subscribers)
     settle()
   end
 

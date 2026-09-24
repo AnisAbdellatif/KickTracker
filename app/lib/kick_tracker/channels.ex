@@ -188,21 +188,6 @@ defmodule KickTracker.Channels do
     {:ok, channel}
   end
 
-  @doc """
-  Records the slug Kick reports now. A rename closes the previous slug's
-  period in `channel_slugs` and updates the channel.
-  """
-  @spec observe_slug(Channel.t(), String.t(), DateTime.t()) :: Channel.t()
-  def observe_slug(%Channel{slug: slug} = channel, slug, _at), do: channel
-
-  def observe_slug(%Channel{} = channel, slug, at) do
-    Repo.transaction(fn ->
-      record_slug(channel, slug, at)
-      channel |> Ecto.Changeset.change(slug: slug) |> Repo.update!()
-    end)
-    |> elem(1)
-  end
-
   @doc "Stores Kick's other ids for the channel (for chat), when learnt."
   @spec put_ids(Channel.t(), integer() | nil, integer() | nil) :: Channel.t()
   def put_ids(%Channel{} = channel, kick_channel_id, chatroom_id) do
@@ -211,6 +196,41 @@ defmodule KickTracker.Channels do
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
     channel |> Ecto.Changeset.change(changes) |> Repo.update!()
+  end
+
+  @doc """
+  Stores Kick's other ids by channel id: a collector write, applied from
+  its journal (`KickTracker.Collector.Ops`). Nil leaves a value as it is.
+  """
+  @spec store_ids(integer(), integer() | nil, integer() | nil) :: :ok
+  def store_ids(channel_id, kick_channel_id, chatroom_id) do
+    changes =
+      [kick_channel_id: kick_channel_id, chatroom_id: chatroom_id]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
+    if changes != [] do
+      from(c in Channel, where: c.id == ^channel_id)
+      |> Repo.update_all(set: changes ++ [updated_at: DateTime.utc_now()])
+    end
+
+    :ok
+  end
+
+  @doc """
+  Records the slug Kick reports for a channel by id (a rename closes the
+  previous slug's period): a collector write, applied from its journal.
+  """
+  @spec store_slug(integer(), String.t(), DateTime.t()) :: :ok
+  def store_slug(channel_id, slug, at) do
+    {:ok, _} =
+      Repo.transaction(fn ->
+        record_slug(%{id: channel_id}, slug, at)
+
+        from(c in Channel, where: c.id == ^channel_id and c.slug != ^slug)
+        |> Repo.update_all(set: [slug: slug, updated_at: DateTime.utc_now()])
+      end)
+
+    :ok
   end
 
   @doc """

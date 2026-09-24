@@ -46,7 +46,15 @@ jobs:
           set -euo pipefail
           cd /srv/kick_tracker && git pull --ff-only
           cd deploy
-          export APP_IMAGE RECEIVER_IMAGE
+          touch .env
+          # Images are pinned in deploy/.env, so a plain `docker compose up -d`
+          # never swaps one by accident (compose.single.yml).
+          pin() { grep -v "^$1=" .env > .env.new || true; echo "$1=$2" >> .env.new; mv .env.new .env; }
+          # Compose needs both pins for any command; a first deploy sets
+          # whichever is missing to this tag.
+          grep -q '^APP_IMAGE=' .env || pin APP_IMAGE "$APP_IMAGE"
+          grep -q '^COLLECTOR_IMAGE=' .env || pin COLLECTOR_IMAGE "$APP_IMAGE"
+          export RECEIVER_IMAGE
           dc() { docker compose -f compose.single.yml "$@"; }
           healthy() {
             for _ in $(seq 1 60); do
@@ -56,14 +64,40 @@ jobs:
             echo "$1 did not become healthy" >&2
             return 1
           }
+          # Which collector collects now (its status port, inside the container).
+          leader() {
+            for c in collector-a collector-b; do
+              if dc exec -T "$c" curl -fsS http://127.0.0.1:4101/status 2>/dev/null | grep -q '"role":"leader"'; then
+                echo "$c"; return
+              fi
+            done
+          }
           case "$ROLE" in
-            web|collector|migrate-only)
+            web|migrate-only)
+              pin APP_IMAGE "$APP_IMAGE"
               dc pull migrate
               dc run --rm migrate
-              if [ "$ROLE" != migrate-only ]; then
-                dc pull "$ROLE"
-                dc up -d --no-deps "$ROLE"
+              if [ "$ROLE" = web ]; then
+                dc pull web
+                dc up -d --no-deps web
               fi
+              ;;
+            collector)
+              # Migrations first, from the new image (the web pin stays as
+              # it is); they wait at most 5s for a lock, which the
+              # collectors' journals absorb.
+              dc pull migrate
+              dc run --rm migrate
+              # The standby first; then the leader, whose clean stop hands
+              # collection to the updated standby within a second.
+              pin COLLECTOR_IMAGE "$APP_IMAGE"
+              dc pull collector-a collector-b
+              first=collector-b; second=collector-a
+              [ "$(leader)" = collector-b ] && { first=collector-a; second=collector-b; }
+              dc up -d --no-deps "$first"
+              healthy "$first"
+              dc up -d --no-deps "$second"
+              healthy "$second"
               ;;
             receivers)
               dc pull receiver-1 receiver-2

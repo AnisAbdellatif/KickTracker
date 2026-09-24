@@ -3,22 +3,27 @@ defmodule KickTracker.Tracking.ChannelServer do
   One per tracked channel (project.md §10): the channel's live state and
   every write that depends on it.
 
-  It hears three things: poll readings from `KickTracker.Tracking.Poller`
+  It hears three things: poll readings from the viewers source
   (`{:reading, livestream | :offline, at}`), stream status and metadata
   events from the queue consumer (`{:event, envelope}`), and chat messages
   from its `ChatSocket` (`{:chat, message}`). They go to the pure
   `Sessionizer`, `Changes` and `ChatMinutes`; this process only carries
-  their state and writes what they decide.
+  their state and records what they decide.
 
-  Chat is written minute by minute (`chat_minutes`, `chat_minute_users`,
-  `chat_stream_users`) once each minute is over, so a crash loses at most
-  the last minute or so of chat.
+  Every write goes to the collector's journal (`Collector.Ops`), naming
+  streams by `(channel, started_at)`, so nothing here waits on Postgres
+  or fails with it. Chat is written minute by minute once each minute is
+  over, so a crash loses at most the last minute or so.
 
-  On start it reloads the channel's recent streams (so a restart mid-stream
-  continues the same stream) and then handles its channel's events still
-  unprocessed in the database. A crash loses at most the reading in hand,
-  which is a gap, never a zero; an event in hand stays unprocessed and is
-  handled on restart.
+  On start it loads the channel's recent streams (so a restart mid-stream
+  continues the same stream) and then its events still unprocessed. When
+  the database can't be read, or when it restarts within the same lease
+  term (writes may still be on their way), it starts from the snapshot of
+  its state it keeps in the journal instead.
+
+  An event whose handling raises is logged, reported and marked
+  processed, so one bad payload can't crash the channel in a loop; it
+  stays in `webhook_events` to be replayed once fixed.
   """
 
   use GenServer, restart: :permanent
@@ -26,11 +31,12 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   @flush_every_ms 15_000
 
-  alias KickTracker.{Events, Stats, Tracking}
+  alias KickTracker.{Collector, Events, Stats, Tracking}
   alias KickTracker.Channels.Channel
+  alias KickTracker.Collector.{Journal, Tracked}
+  alias KickTracker.Collector.Sources.Followers
   alias KickTracker.Events.Envelope
   alias KickTracker.Metrics.{ChatMinutes, Changes, Sessionizer}
-  alias KickTracker.Workers.FollowerPoll
 
   @spec start_link(Channel.t()) :: GenServer.on_start()
   def start_link(%Channel{} = channel),
@@ -58,14 +64,10 @@ defmodule KickTracker.Tracking.ChannelServer do
     Process.flag(:trap_exit, true)
     Phoenix.PubSub.subscribe(KickTracker.PubSub, "channel_row:#{channel.id}")
     Process.send_after(self(), :flush_chat, @flush_every_ms)
-    rows = Stats.recent_streams(channel.id)
-    sessions = Sessionizer.new(rows)
-    ids = Map.new(rows, &{Sessionizer.norm(&1.started_at), &1.id})
 
     state = %{
       channel: channel,
-      sessions: sessions,
-      ids: ids,
+      sessions: Sessionizer.new(),
       changes: nil,
       changes_for: nil,
       pending_meta: nil,
@@ -73,15 +75,17 @@ defmodule KickTracker.Tracking.ChannelServer do
       unknown_events: MapSet.new()
     }
 
-    {:ok, restore_changes(state), {:continue, :catch_up}}
+    {:ok, restore(state), {:continue, :catch_up}}
   end
 
   @impl true
   def handle_continue(:catch_up, state) do
     state =
-      state.channel.kick_user_id
-      |> Events.unprocessed_for()
-      |> Enum.reduce(state, &handle_event(&2, &1))
+      case safe(fn -> Events.unprocessed_for(state.channel.kick_user_id) end) do
+        {:ok, envelopes} -> Enum.reduce(envelopes, state, &handle_event(&2, &1))
+        # They stay unprocessed; `ProcessEvents` hands them over later.
+        :error -> state
+      end
 
     {:noreply, state}
   end
@@ -100,15 +104,15 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   @impl true
   def handle_info({:reading, :offline, at}, state) do
-    {:noreply, observe(state, {:offline, at})}
+    {:noreply, state |> observe({:offline, at}) |> snapshot()}
   end
 
   def handle_info({:reading, %{} = livestream, at}, state) do
-    {:noreply, reading(state, livestream, at)}
+    {:noreply, state |> reading(livestream, at) |> snapshot()}
   end
 
   def handle_info({:event, %Envelope{} = envelope}, state) do
-    {:noreply, handle_event(state, envelope)}
+    {:noreply, state |> handle_event(envelope) |> snapshot()}
   end
 
   def handle_info({:channel, %Channel{} = channel}, state) do
@@ -144,6 +148,7 @@ defmodule KickTracker.Tracking.ChannelServer do
   def terminate(_reason, state) do
     # Everything gathered, finished minutes or not.
     flush_chat(state, DateTime.add(DateTime.utc_now(), 3600))
+    snapshot(state)
   rescue
     _ -> :ok
   end
@@ -152,6 +157,78 @@ defmodule KickTracker.Tracking.ChannelServer do
   # For tests: write every chat minute over as of `now`.
   def flush_chat_now(pid, now), do: GenServer.call(pid, {:flush_chat, now})
 
+  # --- start -----------------------------------------------------------------
+
+  # Within the same lease term, the snapshot is at least as new as the
+  # database (writes may still be in the journal); otherwise the database
+  # is the truth, and the snapshot only stands in when it can't be read.
+  defp restore(state) do
+    id = state.channel.id
+    snap = Journal.get({:channel_state, id})
+
+    if snap != nil and snap.epoch == Collector.epoch() and Collector.epoch() != 0 do
+      from_snapshot(state, snap)
+    else
+      case safe(fn -> Stats.recent_streams(id) end) do
+        {:ok, rows} ->
+          from_database(%{state | sessions: Sessionizer.new(rows)})
+
+        :error when snap != nil ->
+          Logger.warning("channel #{id}: database unreachable, starting from its snapshot")
+          from_snapshot(state, snap)
+
+        :error ->
+          Logger.warning("channel #{id}: database unreachable and no snapshot, starting afresh")
+          state
+      end
+    end
+  end
+
+  # The open stream's change log continues from its recorded values.
+  defp from_database(state) do
+    case Sessionizer.open_stream(state.sessions) do
+      nil ->
+        state
+
+      started_at ->
+        {values, as_of} =
+          case safe(fn -> Stats.current_values(state.channel.id, started_at) end) do
+            {:ok, found} -> found
+            :error -> {nil, nil}
+          end
+
+        %{state | changes: Changes.new(values, as_of), changes_for: started_at}
+    end
+  end
+
+  defp from_snapshot(state, snap) do
+    %{
+      state
+      | sessions: snap.sessions,
+        changes: snap.changes,
+        changes_for: snap.changes_for,
+        pending_meta: snap.pending_meta
+    }
+  end
+
+  # The state worth keeping across a restart, when it changed.
+  defp snapshot(state) do
+    snap = %{
+      epoch: Collector.epoch(),
+      sessions: state.sessions,
+      changes: state.changes,
+      changes_for: state.changes_for,
+      pending_meta: state.pending_meta
+    }
+
+    if Process.get(:last_snapshot) != snap do
+      Process.put(:last_snapshot, snap)
+      Journal.put({:channel_state, state.channel.id}, snap)
+    end
+
+    state
+  end
+
   # --- chat ------------------------------------------------------------------
 
   defp flush_chat(state, now) do
@@ -159,14 +236,14 @@ defmodule KickTracker.Tracking.ChannelServer do
 
     rows =
       for m <- minutes do
-        started_at =
+        Map.put(
+          m,
+          :started_at,
           Sessionizer.stream_during(state.sessions, m.minute, DateTime.add(m.minute, 60))
-
-        Map.put(m, :stream_id, started_at && Map.get(state.ids, started_at))
+        )
       end
 
-    Stats.write_chat(state.channel.id, rows)
-    KickTracker.KickUsers.upsert(users)
+    record(state, [{:chat, state.channel.id, rows}, {:kick_users, users}])
 
     for m <- rows do
       broadcast(
@@ -197,21 +274,19 @@ defmodule KickTracker.Tracking.ChannelServer do
         {snapshot, category} = Changes.from_livestream(livestream)
 
         if Sessionizer.sample?(state.sessions, started_at, at) do
-          stream_id = Map.fetch!(state.ids, Sessionizer.norm(started_at))
           viewers = livestream["viewer_count"]
           category_id = category && category.id
-          Stats.upsert_category(category, at)
 
           if is_integer(viewers) and viewers >= 0 do
-            Stats.insert_viewer_sample(%{
-              channel_id: state.channel.id,
-              observed_at: at,
-              stream_id: stream_id,
-              viewers: viewers,
-              category_id: category_id
-            })
+            record(state, [
+              {:category, category, at},
+              {:viewer_sample, state.channel.id, Sessionizer.norm(started_at), at, viewers,
+               category_id}
+            ])
 
             broadcast(state, {:viewers, %{at: at, viewers: viewers, category_id: category_id}})
+          else
+            record(state, [{:category, category, at}])
           end
         end
 
@@ -225,7 +300,9 @@ defmodule KickTracker.Tracking.ChannelServer do
   # per-channel topic uses.
   defp learn_channel_id(%{channel: %{kick_channel_id: nil} = channel} = state, id)
        when is_integer(id) do
-    channel = KickTracker.Channels.put_ids(channel, id, nil)
+    record(state, [{:channel_ids, channel.id, id, nil}])
+    channel = %{channel | kick_channel_id: id}
+    Tracked.put(channel)
     KickTracker.Channels.announce(channel)
     %{state | channel: channel}
   end
@@ -236,16 +313,27 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   defp handle_event(state, %Envelope{} = envelope) do
     state =
-      case Envelope.payload(envelope) do
-        {:ok, body} ->
-          event(state, envelope.event_type, body, envelope.occurred_at)
+      try do
+        case Envelope.payload(envelope) do
+          {:ok, body} ->
+            event(state, envelope.event_type, body, envelope.occurred_at)
 
-        {:error, _} ->
-          Logger.error("event #{envelope.message_id} has an unreadable body")
+          {:error, _} ->
+            Logger.error("event #{envelope.message_id} has an unreadable body")
+            state
+        end
+      rescue
+        error ->
+          Logger.error(
+            "event #{envelope.message_id} for channel #{state.channel.id} could not be handled, skipped: " <>
+              Exception.format(:error, error, __STACKTRACE__)
+          )
+
+          ErrorTracker.report(error, __STACKTRACE__, %{message_id: envelope.message_id})
           state
       end
 
-    Events.mark_processed([envelope.message_id])
+    record(state, [{:processed, [envelope.message_id]}])
     state
   end
 
@@ -263,7 +351,7 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   defp event(state, "livestream.metadata.updated", body, occurred_at) do
     {snapshot, category} = Changes.from_event(body)
-    Stats.upsert_category(category, occurred_at)
+    record(state, [{:category, category, occurred_at}])
 
     case Sessionizer.open_stream(state.sessions) do
       nil ->
@@ -288,14 +376,9 @@ defmodule KickTracker.Tracking.ChannelServer do
   defp observe(state, observation) do
     before = Sessionizer.open_stream(state.sessions)
     {sessions, actions} = Sessionizer.apply(state.sessions, observation)
+    record(state, Enum.map(actions, &{:stream, state.channel.id, &1}))
 
-    ids =
-      Enum.reduce(actions, state.ids, fn action, ids ->
-        id = Stats.apply_stream(state.channel.id, action)
-        Map.put(ids, elem(action, 1), id)
-      end)
-
-    state = %{state | sessions: sessions, ids: ids}
+    state = %{state | sessions: sessions}
     Enum.each(actions, &announce(state, &1))
 
     case Sessionizer.open_stream(sessions) do
@@ -309,7 +392,7 @@ defmodule KickTracker.Tracking.ChannelServer do
   # follower gain (§3.1). Only for ends that just happened: replaying an
   # old event must not trigger a reading now.
   defp announce(state, {:open, started_at}) do
-    FollowerPoll.enqueue(state.channel.id, :stream_start)
+    Followers.request(state.channel.id, :stream_start)
     broadcast(state, {:stream_started, started_at})
   end
 
@@ -318,7 +401,7 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   defp announce(state, {:close, started_at, ended_at, _source}) do
     if DateTime.diff(DateTime.utc_now(), ended_at) < 600,
-      do: FollowerPoll.enqueue(state.channel.id, :stream_end)
+      do: Followers.request(state.channel.id, :stream_end)
 
     broadcast(state, {:stream_ended, started_at, ended_at})
   end
@@ -351,25 +434,28 @@ defmodule KickTracker.Tracking.ChannelServer do
         :poll -> Changes.poll(tracker, snapshot, at)
       end
 
-    stream_id = Map.fetch!(state.ids, state.changes_for)
-    Stats.insert_changes(stream_id, changes)
-    if changes != [], do: broadcast(state, {:changes, changes})
+    if changes != [] do
+      record(state, [{:changes, state.channel.id, state.changes_for, changes}])
+      broadcast(state, {:changes, changes})
+    end
+
     %{state | changes: tracker}
   end
 
-  defp restore_changes(state) do
-    case Sessionizer.open_stream(state.sessions) do
-      nil ->
-        state
-
-      started_at ->
-        {values, as_of} = Stats.current_values(Map.fetch!(state.ids, started_at))
-        %{state | changes: Changes.new(values, as_of), changes_for: started_at}
-    end
-  end
+  defp record(_state, ops), do: Journal.append(ops)
 
   defp broadcast(state, message) do
     Phoenix.PubSub.broadcast(KickTracker.PubSub, topic(state.channel.id), message)
+  end
+
+  defp safe(fun) do
+    {:ok, fun.()}
+  rescue
+    error in [DBConnection.ConnectionError, Postgrex.Error] ->
+      Logger.warning("database read failed: #{Exception.message(error)}")
+      :error
+  catch
+    :exit, _ -> :error
   end
 
   # Kick's timestamps: `...Z`, whole seconds. An offline channel's zero

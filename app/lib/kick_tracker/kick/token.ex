@@ -2,8 +2,10 @@ defmodule KickTracker.Kick.Token do
   @moduledoc """
   The app access token (client credentials, `POST <KICK_ID_URL>/oauth/token`).
 
-  Fetched on first use and refreshed before it expires (Kick's last 60
-  days). A request that gets 401 calls `invalidate/1` with the token it
+  Fetched on first use and replaced ahead of expiry (Kick's last 60
+  days): at 90% of its life a new one is fetched while the old one keeps
+  serving, and a failed refresh is retried every minute rather than
+  dropping a token that still works. A request that gets 401 calls `invalidate/1` with the token it
   used, and the next `get/0` fetches a fresh one; invalidating a token
   that was already replaced does nothing, so many failing requests cause
   one fetch.
@@ -59,7 +61,15 @@ defmodule KickTracker.Kick.Token do
   def handle_cast({:invalidate, _other}, state), do: {:noreply, state}
 
   @impl true
-  def handle_info(:refresh, state), do: {:noreply, %{state | token: nil, refresh_timer: nil}}
+  def handle_info(:refresh, state) do
+    case fetch(state) do
+      {:ok, token, expires_in} ->
+        {:noreply, schedule_refresh(%{state | token: token, refresh_timer: nil}, expires_in)}
+
+      {:error, _} ->
+        {:noreply, %{state | refresh_timer: Process.send_after(self(), :refresh, 60_000)}}
+    end
+  end
 
   defp fetch(state) do
     form = [

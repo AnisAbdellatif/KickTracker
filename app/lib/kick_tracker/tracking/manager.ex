@@ -2,15 +2,19 @@ defmodule KickTracker.Tracking.Manager do
   @moduledoc """
   Keeps one `ChannelSup` running per active channel: at boot, whenever the
   tracked set changes (`"channels:changed"`), and every minute as a safety
-  net, so a lost broadcast only delays a change. A channel whose processes keep crashing is stopped by its
-  own supervisor without affecting the others, and restarted here on the
-  next sync.
+  net, so a lost broadcast only delays a change. A channel whose
+  processes keep crashing is stopped by its own supervisor without
+  affecting the others, and restarted here on the next sync.
+
+  The tracked set comes from `Collector.Tracked`: when the database can't
+  be read, the channels last known keep running, and nothing here fails.
   """
 
   use GenServer
   require Logger
 
   alias KickTracker.{Channels, Tracking}
+  alias KickTracker.Collector.Tracked
   alias KickTracker.Tracking.ChannelSup
 
   @resync_ms 60_000
@@ -58,7 +62,7 @@ defmodule KickTracker.Tracking.Manager do
   def handle_info(_other, state), do: {:noreply, state}
 
   defp do_sync do
-    active = Channels.list_active()
+    {freshness, active} = Tracked.refresh()
     active_ids = MapSet.new(active, & &1.id)
 
     # Each ChannelSup registers as {:channel_sup, channel id}. (A dynamic
@@ -68,7 +72,8 @@ defmodule KickTracker.Tracking.Manager do
         {{{:channel_sup, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}
       ])
 
-    for {id, pid} <- running, not MapSet.member?(active_ids, id) do
+    # Only a list the database gave stops channels: a stale one never does.
+    for {id, pid} <- running, freshness == :ok, not MapSet.member?(active_ids, id) do
       DynamicSupervisor.terminate_child(Tracking.ChannelsSupervisor, pid)
     end
 
@@ -85,6 +90,11 @@ defmodule KickTracker.Tracking.Manager do
     :ok
   end
 
-  # The webhook subscriptions follow the tracked set.
-  defp on_change, do: KickTracker.Workers.SubscriptionSync.enqueue()
+  # The webhook subscriptions follow the tracked set. (Queued in the
+  # database: if it is away, the 15-minute sync catches up.)
+  defp on_change do
+    KickTracker.Workers.SubscriptionSync.enqueue()
+  rescue
+    error -> Logger.warning("could not queue a subscription sync: #{Exception.message(error)}")
+  end
 end

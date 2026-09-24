@@ -35,4 +35,8 @@ defmodule KickTracker.Workers.ProcessEvents do
     if channel == nil or not channel.active,
       do: Events.mark_processed(Enum.map(envelopes, & &1.message_id))
   end
+
+  # A stuck job gives its slot back.
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.minutes(5)
 end

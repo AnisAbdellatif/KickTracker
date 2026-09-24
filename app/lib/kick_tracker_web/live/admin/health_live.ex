@@ -28,6 +28,8 @@ defmodule KickTrackerWeb.Admin.HealthLive do
       ingress: Health.ingress(),
       jobs: Health.jobs(),
       alerts: KickTracker.Alerts.open_alerts(),
+      collectors: Health.collectors(),
+      terms: Health.terms(),
       payload_issues: Health.payload_issues(DateTime.add(DateTime.utc_now(), -7, :day))
     )
     |> assign_async([:queues, :subscriptions], fn ->
@@ -52,6 +54,55 @@ defmodule KickTrackerWeb.Admin.HealthLive do
             <span class="text-xs opacity-60">({gettext("since")} {ago(a.first_at, @now)})</span>
           </li>
         </ul>
+      </section>
+
+      <section id="collector-health" class="mb-6 card-surface p-4">
+        <h2 class="font-semibold">{gettext("Collectors")}</h2>
+        <p :if={@collectors == []} class="mt-2 text-sm opacity-60">
+          {gettext("No collector has reported in the last day.")}
+        </p>
+        <table :if={@collectors != []} class="table table-xs mt-2">
+          <thead>
+            <tr>
+              <th>{gettext("Collector")}</th><th>{gettext("Role")}</th><th>
+                {gettext("Last heard")}
+              </th><th>{gettext("Writes waiting")}</th><th>{gettext("Set aside")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={c <- @collectors} id={"collector-#{c.id}"}>
+              <td class="font-mono">{c.id}</td>
+              <td>
+                <span class={[
+                  "badge badge-xs",
+                  collector_badge(c, @now)
+                ]}>{collector_role(c, @now)}</span>
+              </td>
+              <td>{ago(c.heartbeat_at, @now)}</td>
+              <td class="tabular-nums">
+                {c.journal_depth}
+                <span :if={c.journal_oldest_at} class="text-xs opacity-60">({gettext("oldest")} {ago(
+                  c.journal_oldest_at,
+                  @now
+                )})</span>
+              </td>
+              <td class={["tabular-nums", c.journal_buried > 0 && "text-error font-medium"]}>
+                {c.journal_buried}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <details :if={@terms != []} class="mt-3 text-sm">
+          <summary class="cursor-pointer opacity-70">{gettext("Recent handoffs")}</summary>
+          <ul class="mt-2 space-y-1">
+            <li :for={t <- @terms}>
+              <span class="font-mono">{t.holder}</span>
+              {gettext("from")} <.time at={t.started_at} />
+              <span :if={t.ended_at}>{gettext("to")} <.time at={t.ended_at} /> ({t.reason})</span>
+              <span :if={!t.ended_at} class="badge badge-success badge-xs">{gettext("now")}</span>
+            </li>
+          </ul>
+        </details>
       </section>
 
       <div class="overflow-x-auto">
@@ -253,6 +304,27 @@ defmodule KickTrackerWeb.Admin.HealthLive do
       s < 5400 -> gettext("%{n}m ago", n: div(s, 60))
       s < 172_800 -> gettext("%{n}h ago", n: div(s, 3600))
       true -> gettext("%{n}d ago", n: div(s, 86_400))
+    end
+  end
+
+  # A collector unheard of for 90s is down, whatever its row says.
+  defp collector_role(c, now) do
+    if DateTime.diff(now, c.heartbeat_at) > 90,
+      do: gettext("down"),
+      else: role_label(c.state)
+  end
+
+  defp role_label("leader"), do: gettext("collecting")
+  defp role_label("standby"), do: gettext("standing by")
+  defp role_label("stopped"), do: gettext("stopped")
+  defp role_label(other), do: other
+
+  defp collector_badge(c, now) do
+    cond do
+      DateTime.diff(now, c.heartbeat_at) > 90 -> "badge-error"
+      c.state == "leader" -> "badge-success"
+      c.state == "standby" -> "badge-info"
+      true -> "badge-ghost"
     end
   end
 end

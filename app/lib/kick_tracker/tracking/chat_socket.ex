@@ -8,6 +8,9 @@ defmodule KickTracker.Tracking.ChatSocket do
   line has been quiet for Pusher's activity timeout, and hands each
   message's sender and time to the `ChannelServer`. No text is kept.
 
+  A connection that doesn't complete its upgrade within 15s is dropped
+  and retried, like any other failure.
+
   It reconnects on its own with backoff (1s doubling to 30s), and records
   in `coverage` (source `chat`) when chat was being received and when not,
   so per-minute chat counts can say how complete they are. Chat is
@@ -21,14 +24,15 @@ defmodule KickTracker.Tracking.ChatSocket do
   require Logger
 
   alias KickTracker.Channels.Channel
+  alias KickTracker.Collector.Journal
   alias KickTracker.Kick.Pusher
-  alias KickTracker.Stats.Coverage
   alias KickTracker.Tracking.ChannelServer
 
   @max_backoff_ms 30_000
   @coverage_every_ms 60_000
   @coverage_gap_s 150
   @pong_timeout_s 30
+  @connect_timeout_ms 15_000
 
   @spec start_link(Channel.t()) :: GenServer.on_start()
   def start_link(%Channel{} = channel),
@@ -80,9 +84,15 @@ defmodule KickTracker.Tracking.ChatSocket do
     {http, ws} = if url.scheme == "wss", do: {:https, :wss}, else: {:http, :ws}
     path = (url.path || "/") <> if(url.query, do: "?" <> url.query, else: "")
 
-    with {:ok, conn} <- Mint.HTTP.connect(http, url.host, url.port, protocols: [:http1]),
+    with {:ok, conn} <-
+           Mint.HTTP.connect(http, url.host, url.port,
+             protocols: [:http1],
+             transport_opts: [timeout: 10_000]
+           ),
          {:ok, conn, ref} <-
            Mint.WebSocket.upgrade(ws, conn, path, KickTracker.Kick.UserAgent.headers()) do
+      timeout = KickTracker.Collector.config(:chat_connect_timeout_ms, @connect_timeout_ms)
+      Process.send_after(self(), {:connect_timeout, ref}, timeout)
       {:noreply, %{state | conn: conn, ref: ref, ws: nil, upgrade: %{}, last_in: now_s()}}
     else
       {:error, reason} -> {:noreply, reconnect(state, reason)}
@@ -113,6 +123,13 @@ defmodule KickTracker.Tracking.ChatSocket do
     if MapSet.member?(state.subscribed, chatroom_topic(state)), do: mark(state, true)
     {:noreply, state}
   end
+
+  # The upgrade never completed: start over.
+  def handle_info({:connect_timeout, ref}, %{ref: ref, ws: nil, conn: conn} = state)
+      when conn != nil,
+      do: {:noreply, reconnect(state, :connect_timeout)}
+
+  def handle_info({:connect_timeout, _ref}, state), do: {:noreply, state}
 
   # Quiet line: ping, and give up on the connection if no answer comes.
   def handle_info(:activity, %{ws: nil} = state), do: {:noreply, state}
@@ -307,16 +324,15 @@ defmodule KickTracker.Tracking.ChatSocket do
   end
 
   defp mark(state, ok?) do
-    Coverage.mark(
-      [state.channel.id],
-      "chat",
-      ok?,
-      KickTracker.Metrics.Sessionizer.norm(DateTime.utc_now()),
-      @coverage_gap_s
-    )
+    Journal.append([
+      {:coverage, [state.channel.id], "chat", ok?,
+       KickTracker.Metrics.Sessionizer.norm(DateTime.utc_now()), @coverage_gap_s}
+    ])
   rescue
-    # Coverage is bookkeeping: a database hiccup must not drop the socket.
+    # Coverage is bookkeeping: trouble recording it must not drop the socket.
     error -> Logger.warning("could not record chat coverage: #{Exception.message(error)}")
+  catch
+    :exit, reason -> Logger.warning("could not record chat coverage: #{inspect(reason)}")
   end
 
   defp now_s, do: System.monotonic_time(:second)

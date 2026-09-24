@@ -29,7 +29,7 @@ defmodule KickTracker.Tracking.PipelineSimTest do
 
   test "each poll sends one aggregated live broadcast with the live channels' viewers",
        %{live: live, off: off} do
-    Phoenix.PubSub.subscribe(KickTracker.PubSub, KickTracker.Tracking.Poller.live_topic())
+    Phoenix.PubSub.subscribe(KickTracker.PubSub, KickTracker.Tracking.live_topic())
     poll()
     assert_receive {:live, %{viewers: viewers}}
     assert is_integer(viewers[live.id])
@@ -92,7 +92,7 @@ defmodule KickTracker.Tracking.PipelineSimTest do
     assert %{open_stream: %DateTime{}} = ChannelServer.info(live.kick_user_id)
 
     assert rows("coverage", ["id"])
-           |> Enum.filter(&(&1.channel_id == live.id))
+           |> Enum.filter(&(&1.channel_id == live.id and &1.source == "api"))
            |> Enum.map(& &1.ok) == [true, false]
   end
 
@@ -120,7 +120,7 @@ defmodule KickTracker.Tracking.PipelineSimTest do
 end
 
 defmodule KickTracker.Tracking.FollowersSimTest do
-  @moduledoc "Follower readings from the fake Kick's v2."
+  @moduledoc "Follower readings from the fake Kick's v2, by the followers source."
 
   use KickTracker.SimCase
   @moduletag :capture_log
@@ -128,7 +128,8 @@ defmodule KickTracker.Tracking.FollowersSimTest do
 
   import KickTracker.Fixtures
   alias KickTracker.Channels
-  alias KickTracker.Workers.{FollowerPoll, FollowerSchedule}
+  alias KickTracker.Collector.Sources.Followers
+  alias KickTracker.Workers.FollowerPoll
 
   setup do
     start_sim([
@@ -140,11 +141,13 @@ defmodule KickTracker.Tracking.FollowersSimTest do
     :ok
   end
 
-  test "adding a channel queues a reading, which stores the total and learns the chatroom" do
+  test "adding a channel asks for a reading, which stores the total and learns the chatroom" do
     {:ok, c} = Channels.add("livestreamer")
     assert_enqueued(worker: FollowerPoll, args: %{channel_id: c.id, reason: "added"})
 
+    # The job, run where collection runs, hands the request to the source.
     :ok = perform_job(FollowerPoll, %{channel_id: c.id, reason: "added"})
+    run_source(Followers)
 
     sim = Sim.Scenario.channel(Sim.Server.scenario(), "livestreamer")
     assert [%{followers: n}] = rows("follower_samples", ["observed_at"])
@@ -153,11 +156,13 @@ defmodule KickTracker.Tracking.FollowersSimTest do
     assert [%{source: "followers", ok: true}] = rows("coverage", ["id"])
   end
 
-  test "v2 failing is a gap, not a zero" do
+  test "v2 failing is a gap, not a zero, and isn't retried at every cycle" do
     {:ok, c} = Channels.add("livestreamer")
     config = Application.get_env(:kick_tracker, :kick)
     Application.put_env(:kick_tracker, :kick, Keyword.put(config, :v2_url, "http://127.0.0.1:1"))
-    :ok = perform_job(FollowerPoll, %{channel_id: c.id, reason: "test"})
+    Followers.request(c.id, :test)
+    run_source(Followers)
+    run_source(Followers)
     Application.put_env(:kick_tracker, :kick, config)
 
     assert rows("follower_samples", ["observed_at"]) == []
@@ -167,9 +172,6 @@ defmodule KickTracker.Tracking.FollowersSimTest do
   test "the schedule: live channels every 15 minutes, offline ones daily" do
     {:ok, live} = Channels.add("livestreamer")
     {:ok, off} = Channels.add("offlinestreamer")
-    KickTracker.Tracking.Manager.sync()
-    poll()
-
     now = DateTime.utc_now()
 
     for {c, ago} <- [{live, 20 * 60}, {off, 3 * 3600}] do
@@ -178,11 +180,16 @@ defmodule KickTracker.Tracking.FollowersSimTest do
       ])
     end
 
-    Repo.delete_all(Oban.Job)
-    :ok = perform_job(FollowerSchedule, %{})
+    KickTracker.Tracking.Manager.sync()
+    poll()
+    run_source(Followers)
 
-    assert_enqueued(worker: FollowerPoll, args: %{channel_id: live.id, reason: "schedule"})
-    refute_enqueued(worker: FollowerPoll, args: %{channel_id: off.id})
+    count = fn c ->
+      Enum.count(rows("follower_samples", ["observed_at"]), &(&1.channel_id == c.id))
+    end
+
+    assert count.(live) == 2
+    assert count.(off) == 1
   end
 end
 

@@ -15,7 +15,13 @@ config :kick_tracker,
 # collector; a web node can insert jobs but runs none (see Application).
 config :kick_tracker, Oban,
   repo: KickTracker.Repo,
-  queues: [kick: 5, followers: 2, transfers: 1],
+  # Paused at start: only the leading collector runs them (Collector.Leader).
+  queues: [
+    kick: [limit: 5, paused: true],
+    followers: [limit: 2, paused: true],
+    alerts: [limit: 1, paused: true],
+    transfers: [limit: 1, paused: true]
+  ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 3600},
     {Oban.Plugins.Cron,
@@ -23,7 +29,6 @@ config :kick_tracker, Oban,
        {"* * * * *", KickTracker.Workers.Alerts},
        {"*/15 * * * *", KickTracker.Workers.SubscriptionSync},
        {"*/5 * * * *", KickTracker.Workers.ProcessEvents},
-       {"*/5 * * * *", KickTracker.Workers.FollowerSchedule},
        {"*/5 * * * *", KickTracker.Workers.Rollups},
        {"17 3 * * *", KickTracker.Workers.Rollups, args: %{"hours" => 48}},
        {"42 4 * * *", KickTracker.Workers.Transfer, args: %{"kind" => "prune"}}

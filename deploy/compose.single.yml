@@ -5,12 +5,18 @@
 #
 # Each service is redeployed on its own; `docker compose up -d web` touches
 # only the site, and webhook intake never stops for an app deploy (§15.3).
+# Two collectors run; one collects, the other stands by and takes over in
+# about a second on a deploy, or ~20s if the first dies (§10.1).
+#
+# Images are pinned in deploy/.env (APP_IMAGE, COLLECTOR_IMAGE; written by
+# the deploy workflow): a plain `docker compose up -d` never swaps the
+# collectors' image by accident.
 # Secrets come from env files decrypted from secrets/*.sops.env (see
 # secrets/README.md), never from this file. Images come from GHCR (§19.1).
 name: kicktracker
 
 x-app: &app
-  image: ${APP_IMAGE:-ghcr.io/anisabdellatif/kicktracker-app:latest}
+  image: ${APP_IMAGE:?pin APP_IMAGE in deploy/.env (deploy/README.md)}
   env_file: [secrets/app.env]
   restart: unless-stopped
   # Exports and imports: web takes uploads and serves downloads, the
@@ -18,6 +24,18 @@ x-app: &app
   volumes: [transfers:/transfers]
   depends_on:
     db: {condition: service_healthy}
+
+# A collector: its own image pin and env file (no web secrets), its
+# journal on its own volume, `always` restarted, and a minute to stop
+# cleanly (stop collecting, release the lease, write out its journal).
+x-collector: &collector
+  image: ${COLLECTOR_IMAGE:?pin COLLECTOR_IMAGE in deploy/.env (deploy/README.md)}
+  env_file: [secrets/collector.env]
+  restart: always
+  stop_grace_period: 60s
+  depends_on:
+    db: {condition: service_healthy}
+    rabbitmq: {condition: service_healthy}
 
 x-receiver: &receiver
   image: ${RECEIVER_IMAGE:-ghcr.io/anisabdellatif/kicktracker-receiver:latest}
@@ -74,12 +92,15 @@ services:
       timeout: 3s
       retries: 60
 
-  collector:
-    <<: *app
-    environment: {ROLE: collector}
-    depends_on:
-      db: {condition: service_healthy}
-      rabbitmq: {condition: service_healthy}
+  collector-a:
+    <<: *collector
+    environment: {ROLE: collector, COLLECTOR_ID: collector-a}
+    volumes: [journal-a:/journal, transfers:/transfers]
+
+  collector-b:
+    <<: *collector
+    environment: {ROLE: collector, COLLECTOR_ID: collector-b}
+    volumes: [journal-b:/journal, transfers:/transfers]
 
   web:
     <<: *app
@@ -95,6 +116,8 @@ services:
     command: ["/app/bin/migrate"]
 
 volumes:
+  journal-a:
+  journal-b:
   caddy_data:
   caddy_config:
   transfers:

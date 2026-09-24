@@ -14,7 +14,14 @@ defmodule KickTracker.Application do
 
     KickTracker.Role.current()
     |> children(collect: Application.get_env(:kick_tracker, :collect, true))
-    |> Supervisor.start_link(strategy: :one_for_one, name: KickTracker.Supervisor)
+    # Generous limits: a child in trouble is restarted, never the node
+    # (collection has its own, stricter isolation in `Collector.Supervisor`).
+    |> Supervisor.start_link(
+      strategy: :one_for_one,
+      name: KickTracker.Supervisor,
+      max_restarts: 20,
+      max_seconds: 60
+    )
   end
 
   @doc false
@@ -35,7 +42,8 @@ defmodule KickTracker.Application do
 
   # Both roles: telemetry, the database, PubSub (the cluster link that
   # carries live readings from the collector to the site) and Oban, which
-  # runs jobs only on a collector.
+  # runs jobs only on the leading collector (`Collector.Leader` resumes
+  # its queues; they start paused).
   defp shared(roles) do
     [
       KickTrackerWeb.Telemetry,
@@ -51,34 +59,26 @@ defmodule KickTracker.Application do
     if :collector in roles, do: config, else: Keyword.merge(config, queues: false, plugins: false)
   end
 
-  # Collection (project.md §10). The queue consumer comes last, so the
-  # channel processes it hands events to are already running.
-  defp collector do
-    [
-      {Registry, keys: :unique, name: KickTracker.Tracking.registry()},
-      KickTracker.Kick.PublicKey,
-      KickTracker.Kick.Token,
-      {DynamicSupervisor,
-       name: KickTracker.Tracking.ChannelsSupervisor,
-       strategy: :one_for_one,
-       max_restarts: 100,
-       max_seconds: 60},
-      KickTracker.Tracking.Manager,
-      KickTracker.Tracking.Poller,
-      KickTracker.Events.Consumer
-    ]
-  end
+  # Collection (project.md §10.1): the journal, the leader election, and
+  # the collection tree while this node leads.
+  defp collector, do: [KickTracker.Collector.Supervisor]
 
   # A web node needs its own app token to look channels up for the admin
   # (project.md §13.8) and to list webhook subscriptions on the health page;
-  # it is fetched on first use.
-  defp web(roles, collect?) do
-    # (On a collector the collection tree has it; `collect: false` means
-    # tests start it themselves.)
-    token = if :collector in roles or not collect?, do: [], else: [KickTracker.Kick.Token]
+  # it is fetched on first use. (A node that also collects shares it with
+  # its collection tree, which only has one while it leads; `collect:
+  # false` means tests start it themselves.)
+  defp web(_roles, collect?) do
+    token = if collect?, do: [KickTracker.Kick.Token], else: []
 
     token ++
-      [KickTracker.Cache, KickTrackerWeb.Plugs.RateLimit.storage_child(), KickTrackerWeb.Endpoint]
+      [
+        KickTracker.Cache,
+        KickTrackerWeb.Plugs.RateLimit.storage_child(),
+        # Alerts are checked from here too, so a dead collector is noticed.
+        {KickTracker.Alerts.Ticker, enabled: collect?},
+        KickTrackerWeb.Endpoint
+      ]
   end
 
   # Tell Phoenix to update the endpoint configuration whenever the

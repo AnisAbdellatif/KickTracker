@@ -1,27 +1,21 @@
 defmodule KickTracker.Workers.FollowerPoll do
   @moduledoc """
-  One follower reading for one channel, from v2 (project.md §3): every 15
-  minutes while live, daily while offline (see `FollowerSchedule`), and
-  at each stream's start and end. One channel per job, spread out.
+  Asks the collecting node for a follower reading of a channel (project.md
+  §3), from anywhere: the admin adding a channel on a web node queues this,
+  and it runs where collection runs (job queues run only on the leading
+  collector, `Collector.Leader`). The reading itself is made by
+  `Collector.Sources.Followers`, which spreads requests out.
 
-  It also stores the channel's chatroom id when it isn't known yet, which
-  chat needs. A failed request is a gap in `coverage` (source
-  `followers`), never a zero, and isn't retried: the next reading comes on
-  schedule.
+  If collection is restarting at that moment, the job waits a few seconds
+  and tries again.
   """
 
   use Oban.Worker,
     queue: :followers,
-    max_attempts: 1,
+    max_attempts: 5,
     unique: [period: 60, keys: [:channel_id, :reason], states: [:available, :scheduled]]
 
-  require Logger
-
-  alias KickTracker.{Channels, Stats}
-  alias KickTracker.Kick.V2
-  alias KickTracker.Stats.Coverage
-
-  @coverage_gap_s 1_000
+  alias KickTracker.Collector.Sources.Followers
 
   @doc "Queues a reading for a channel (`reason` for logs and uniqueness)."
   def enqueue(channel_id, reason, opts \\ []) do
@@ -29,28 +23,14 @@ defmodule KickTracker.Workers.FollowerPoll do
   end
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"channel_id" => channel_id}}) do
-    channel = Channels.get!(channel_id)
-    at = KickTracker.Metrics.Sessionizer.norm(DateTime.utc_now())
-
-    case V2.channel(channel.slug) do
-      {:ok, %{followers: followers, chatroom_id: chatroom_id}} ->
-        Stats.insert_samples("follower_samples", [
-          %{channel_id: channel.id, observed_at: at, followers: followers}
-        ])
-
-        if chatroom_id && chatroom_id != channel.chatroom_id do
-          channel = Channels.put_ids(channel, nil, chatroom_id)
-          Channels.announce(channel)
-        end
-
-        Coverage.mark([channel.id], "followers", true, at, @coverage_gap_s)
-
-      {:error, reason} ->
-        Logger.warning("follower reading failed for channel #{channel.id}: #{inspect(reason)}")
-        Coverage.mark([channel.id], "followers", false, at, @coverage_gap_s)
+  def perform(%Oban.Job{args: %{"channel_id" => channel_id, "reason" => reason}}) do
+    if GenServer.whereis(Followers) do
+      Followers.request(channel_id, reason)
+    else
+      {:snooze, 10}
     end
-
-    :ok
   end
+
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.seconds(10)
 end

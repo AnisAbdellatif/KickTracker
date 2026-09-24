@@ -11,4 +11,8 @@ defmodule KickTracker.Workers.Privacy do
     Logger.info("privacy: deleted user #{user_id}: #{inspect(result)}")
     :ok
   end
+
+  # A stuck job gives its slot back.
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.minutes(30)
 end

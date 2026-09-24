@@ -11,9 +11,27 @@ defmodule KickTracker.Release do
 
   @app :kick_tracker
 
-  @doc "Runs pending migrations."
+  @doc """
+  Runs pending migrations. Each statement waits at most 5s for a lock
+  (`lock_timeout`): a migration that would queue behind the collector's
+  writes, and hold every later write behind it, fails instead, to be
+  retried at a quieter moment (the collector's journal absorbs the 5s).
+  """
   def migrate do
     Application.load(@app)
+
+    config = Application.get_env(@app, KickTracker.Repo, [])
+
+    Application.put_env(
+      @app,
+      KickTracker.Repo,
+      Keyword.update(
+        config,
+        :parameters,
+        [lock_timeout: "5s"],
+        &Keyword.put(&1, :lock_timeout, "5s")
+      )
+    )
 
     for repo <- Application.fetch_env!(@app, :ecto_repos) do
       {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
