@@ -5,6 +5,10 @@ import Config
 # production every value must be given.
 dev? = config_env() in [:dev, :test]
 
+# A variable set to nothing (left for later in an env file) means "not
+# set", as in the app.
+for {name, ""} <- System.get_env(), do: System.delete_env(name)
+
 setting = fn name, dev_default ->
   System.get_env(name) || (dev? && dev_default) ||
     raise "#{name} is not set (see ingress/receiver/README.md)"
