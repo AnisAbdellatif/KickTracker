@@ -25,20 +25,27 @@ defmodule KickTracker.Application do
   def children(roles, opts \\ []) do
     collect? = Keyword.get(opts, :collect, true)
 
-    shared() ++
+    shared(roles) ++
       if(:collector in roles and collect?, do: collector(), else: []) ++
       if(:web in roles, do: web(), else: [])
   end
 
-  # Both roles: telemetry, the database, and PubSub (the cluster link that
-  # carries live readings from the collector to the site).
-  defp shared do
+  # Both roles: telemetry, the database, PubSub (the cluster link that
+  # carries live readings from the collector to the site) and Oban, which
+  # runs jobs only on a collector.
+  defp shared(roles) do
     [
       KickTrackerWeb.Telemetry,
       KickTracker.Repo,
       {DNSCluster, query: Application.get_env(:kick_tracker, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: KickTracker.PubSub}
+      {Phoenix.PubSub, name: KickTracker.PubSub},
+      {Oban, oban(roles)}
     ]
+  end
+
+  defp oban(roles) do
+    config = Application.fetch_env!(:kick_tracker, Oban)
+    if :collector in roles, do: config, else: Keyword.merge(config, queues: false, plugins: false)
   end
 
   # Collection (project.md §10). The queue consumer comes last, so the
@@ -47,6 +54,14 @@ defmodule KickTracker.Application do
     [
       {Registry, keys: :unique, name: KickTracker.Tracking.registry()},
       KickTracker.Kick.PublicKey,
+      KickTracker.Kick.Token,
+      {DynamicSupervisor,
+       name: KickTracker.Tracking.ChannelsSupervisor,
+       strategy: :one_for_one,
+       max_restarts: 100,
+       max_seconds: 60},
+      KickTracker.Tracking.Manager,
+      KickTracker.Tracking.Poller,
       KickTracker.Events.Consumer
     ]
   end

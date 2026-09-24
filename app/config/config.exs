@@ -11,6 +11,20 @@ config :kick_tracker,
   ecto_repos: [KickTracker.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Background jobs (project.md §10). Queues and plugins run only on a
+# collector; a web node can insert jobs but runs none (see Application).
+config :kick_tracker, Oban,
+  repo: KickTracker.Repo,
+  queues: [kick: 5, followers: 2],
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 7 * 24 * 3600},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"*/15 * * * *", KickTracker.Workers.SubscriptionSync},
+       {"*/5 * * * *", KickTracker.Workers.ProcessEvents}
+     ]}
+  ]
+
 # Configure the endpoint
 config :kick_tracker, KickTrackerWeb.Endpoint,
   url: [host: "localhost"],

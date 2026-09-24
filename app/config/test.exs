@@ -24,6 +24,7 @@ config :kick_tracker, KickTrackerWeb.Endpoint,
 
 # Tests start the collection processes they need themselves.
 config :kick_tracker, :collect, false
+config :kick_tracker, Oban, testing: :manual
 
 # In test we don't send emails
 config :kick_tracker, KickTracker.Mailer, adapter: Swoosh.Adapters.Test

@@ -4,7 +4,9 @@ defmodule KickTracker.SchemaTest do
   honest even if application code gets something wrong (AGENTS.md §7).
   """
 
-  use KickTracker.DataCase, async: true
+  # Not async: tests writing hypertables create chunks inside their
+  # sandbox transactions, and concurrent chunk creation deadlocks.
+  use KickTracker.DataCase, async: false
 
   alias KickTracker.Repo
 
