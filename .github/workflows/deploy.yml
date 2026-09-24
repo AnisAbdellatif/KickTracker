@@ -51,7 +51,8 @@ jobs:
         run: |
           # The tag is typed by hand: only a sha or a plain tag goes into the
           # command. Empty: deploy.sh takes the build of the commit it pulls.
-          [[ -z "$TAG" || "$TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad tag: $TAG" >&2; exit 1; }
+          # (Docker's own tag rule: no leading dot or dash, at most 128.)
+          [[ -z "$TAG" || "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || { echo "bad tag: $TAG" >&2; exit 1; }
           script=deploy/deploy.sh
           [ "$ROLE" = all ] && script=deploy/release.sh
           [[ "$DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "DEPLOY_DIR must be an absolute path: $DIR" >&2; exit 1; }

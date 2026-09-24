@@ -36,6 +36,13 @@
 		lb_try_duration 10s
 		lb_try_interval 250ms
 		health_uri /healthz
+		# Say the check came over HTTPS, as every visitor's request does:
+		# redirected to https by force_ssl, the check would fail and Caddy
+		# would send no one to the site. (/healthz is also exempt from the
+		# redirect in config/prod.exs; either alone is enough.)
+		health_headers {
+			X-Forwarded-Proto https
+		}
 		health_interval 2s
 		health_timeout 2s
 		fail_duration 10s
