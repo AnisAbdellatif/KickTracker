@@ -267,7 +267,15 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
   relied on.
 - **Confirmed on real data**: the start event, the end event and the API
   poll all reported the identical `started_at` string for the same stream.
-- The safety-net poll opens or closes streams whose webhooks were missed.
+- The 60s poll opens or closes streams whose webhooks were missed.
+- The rules (`Metrics.Sessionizer`, pure, property-tested for arrival
+  order): Kick's end event always wins, and a stream it closed never
+  reopens (the API lists a stream for ~20s after it ends). Without it, a
+  stream ends at its **latest live evidence**, which only ever moves later.
+  A newer `started_at` closes the previous stream. A poll must miss the
+  channel for **90s** after the last evidence before it counts as offline
+  (the API lags; a start event can come before the API lists the stream).
+  A stream closed from polling that is seen live again reopens.
 
 ### 3.4 Chat windows are chosen at read time
 
@@ -629,19 +637,22 @@ KickTrackerWeb.Supervisor
   and the 5-minute poll repairs anything else.
 
 **Poller** (one process)
-- Every **60s**: `GET /livestreams` for the channels currently live, 50 per
-  request, and sends each `ChannelServer` its reading: `{:reading, data, at}`.
-- Every **5 min**: `GET /channels` for all tracked channels, as a safety net
-  for missed live/offline and metadata events.
+- Every **60s**: `GET /livestreams` for **every** tracked channel, 50 per
+  request, and sends each `ChannelServer` its reading: `{:reading, data, at}`,
+  or `:offline` when a request that succeeded didn't list it. Polling all
+  channels (not only the live ones) notices a missed start within a minute,
+  at one request per 50 channels.
+- Every **5 min**: `GET /channels` for subscriber totals and slug renames.
 - If a request fails, it sends nothing. A missing reading is a gap, never
-  "offline" and never zero.
+  "offline" and never zero. Each batch's outcome goes to `coverage`.
 
 **ChannelServer** (one per channel)
 - Holds live/offline, the open stream, the current title and category, and
   this minute's chatters (`user_id -> messages`).
-- On a status event or a poll that disagrees with its state: opens or closes
-  the stream (keyed on `(channel_id, started_at)`), asks for a follower reading at
-  start and end, and tells the `Poller` to include or drop it.
+- Feeds status events and readings to the pure `Sessionizer`, which decides
+  when a stream opens, closes or reopens (keyed on `(channel_id,
+  started_at)`, rules in §3.3), and writes what it decides; asks for a
+  follower reading at start and end.
 - On a reading: writes a viewer sample carrying the current category.
 - On a metadata event or a changed title/category in a reading: writes a
   stream change.
@@ -667,9 +678,10 @@ KickTrackerWeb.Supervisor
   per offline channel, and on demand at stream start and end. Spread out, one
   channel per job.
 - `SubscriptionSync`: makes Kick's webhook subscriptions match the tracked
-  channel list, pointing at the ingress URL; subscribes new channels, removes
-  dropped ones, and **restores subscriptions Kick cancelled** after a long
-  failure.
+  channel list (the seven event types we read); subscribes new channels,
+  removes dropped ones and duplicates, and **restores subscriptions Kick
+  cancelled** after a long failure. Where deliveries go (the ingress URL)
+  is set once in the Kick app's settings, not per subscription.
 - `ProcessEvent`: retries status/metadata events still unprocessed after a
   while.
 - Rollup refreshes, retention and compression policies.
@@ -833,8 +845,10 @@ a stream's per-minute detail is gone, but its per-minute counts
   It is built by comparing each `livestream.metadata.updated` snapshot with
   the previous one (the event carries every field, not only the changed
   one); `occurred_at` is the delivery's `Kick-Event-Message-Timestamp`. The
-  poll's title and category fill in changes whose events were missed.
-  Titles in `livestream.status.updated` are not used for changes.
+  poll's title and category fill in changes whose events were missed; the
+  API lags Kick, so a poll counts a difference only when it sees it twice
+  in a row and not within two minutes of an event, dated at the first
+  sighting (`Metrics.Changes`). Titles in `livestream.status.updated` are not used for changes.
 - `stream_segments` is derived from it: stretches where title, category and
   language don't change. "Time per category" and "viewers after the switch
   to GTA" are simple queries on it.
@@ -863,9 +877,12 @@ webhook_events     (message_id PK, subscription_id, event_type, event_version,
                    -- raw bytes, not jsonb, and sent_at the header's own
                    -- string: together they're the signed text, and jsonb
                    -- would reformat it
-coverage           (id, channel_id NULL, source: api | chat | ingress | followers,
-                    from_at, to_at NULL, ok)
-                   -- our own gaps, so every stat can say how complete it is
+coverage           (id, channel_id NULL, source: api | subscribers | chat |
+                    ingress | followers, from_at, to_at, ok)
+                   -- our own gaps, so every stat can say how complete it
+                   -- is. Periods are always closed (extended by each
+                   -- outcome), so a dead collector claims nothing; time
+                   -- no period covers is a gap
 
 -- streams (normal tables)
 streams            (id, channel_id, started_at, ended_at NULL,
@@ -874,7 +891,10 @@ streams            (id, channel_id, started_at, ended_at NULL,
                    -- ended_at >= started_at; an end always says how it
                    -- was learnt
 stream_changes     (id, stream_id, occurred_at, field: title | category |
-                    language | tags | mature, old_value, new_value)
+                    language | mature, old_value, new_value,
+                    source: event | poll,
+                    UNIQUE (stream_id, field, occurred_at))
+                   -- a stream's first values have no old_value
 
 -- time series (hypertables, compressed, segmented by channel_id)
 viewer_samples     (channel_id, observed_at, stream_id, viewers, category_id,
