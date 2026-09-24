@@ -119,6 +119,24 @@ defmodule KickTrackerWeb.PublicSiteTest do
     assert has_element?(view, "figure:has(#stream-chart) [data-chart-action=fit]")
   end
 
+  test "a stream with unknown webhook counts still renders, showing them as unknown", %{
+    conn: conn
+  } do
+    channel = Reports.channel_by_slug("dailystreamer")
+    [stream | _] = Reports.streams(channel)
+
+    # No ingress coverage: subs, renewals and gifts are unknown (nil).
+    KickTracker.Repo.query!("DELETE FROM coverage WHERE source = 'ingress'")
+    KickTracker.Rollups.stream_stats(stream.id)
+    assert %{subs: nil, gifted_subs: nil} = Reports.stream(stream.id).stats
+
+    {:ok, view, _} = live(conn, "/c/dailystreamer/streams/#{stream.id}")
+    assert has_element?(view, "#stream-cards")
+
+    {:ok, view, _} = live(conn, "/c/dailystreamer/streams?#{@range}")
+    assert has_element?(view, "#stream-#{stream.id}")
+  end
+
   test "channel series come in columns, with the resolution chosen by range", %{conn: conn} do
     v = json_response(get(conn, "/data/v1/channels/dailystreamer/viewers?#{@range}"), 200)
     assert v["res"] == "5m"

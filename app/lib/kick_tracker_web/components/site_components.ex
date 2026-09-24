@@ -171,6 +171,16 @@ defmodule KickTrackerWeb.SiteComponents do
   def event_labels,
     do: Map.new(~w(raid_in raid_out host host_in host_out), &{&1, event_label(&1)})
 
+  @doc """
+  The sum of figures that may be unknown (`nil`): unknown if any part is,
+  never a partial sum passed off as the whole (webhook counts are `nil`
+  where we weren't receiving events).
+  """
+  @spec known_sum([number() | nil]) :: number() | nil
+  def known_sum(values) do
+    if Enum.any?(values, &is_nil/1), do: nil, else: Enum.sum(values)
+  end
+
   @doc "A KPI card with the change against the previous period."
   attr :label, :string, required: true
   attr :value, :any, required: true
