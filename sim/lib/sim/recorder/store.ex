@@ -22,14 +22,30 @@ defmodule Sim.Recorder.Store do
     dir
   end
 
-  @doc "Writes one recording as pretty JSON at `<run>/<source>/<seq>-<name>.json`."
+  @doc """
+  Writes one recording as pretty JSON at `<run>/<source>/<seq>-<name>.json`.
+
+  Safe to call concurrently, which matters because webhooks arrive
+  concurrently: the sequence number is unique and increasing across the
+  whole VM (counting the files in the folder was not, and let two
+  deliveries overwrite each other), and the file is written under a
+  temporary name and renamed into place, so a reader never sees half of it.
+  """
   @spec write(Path.t(), String.t(), String.t(), map()) :: Path.t()
   def write(run, source, name, recording) do
     dir = Path.join(run, source)
     File.mkdir_p!(dir)
-    seq = dir |> File.ls!() |> length() |> Integer.to_string() |> String.pad_leading(4, "0")
+
+    seq =
+      [:positive, :monotonic]
+      |> System.unique_integer()
+      |> Integer.to_string()
+      |> String.pad_leading(8, "0")
+
     path = Path.join(dir, "#{seq}-#{safe(name)}.json")
-    File.write!(path, Jason.encode_to_iodata!(redact(recording), pretty: true))
+    tmp = path <> ".tmp"
+    File.write!(tmp, Jason.encode_to_iodata!(redact(recording), pretty: true))
+    File.rename!(tmp, path)
     path
   end
 

@@ -62,15 +62,35 @@ defmodule Sim.Recorder.StoreTest do
   end
 
   @tag :tmp_dir
-  test "write/4 numbers files per source and never writes a secret", %{tmp_dir: dir} do
+  test "write/4 numbers files in order and never writes a secret", %{tmp_dir: dir} do
     p1 =
       Store.write(dir, "id", "token", %{"response" => %{"body" => ~s({"access_token":"s3cret"})}})
 
     p2 = Store.write(dir, "id", "token", %{"x" => 1})
 
-    assert Path.basename(p1) == "0000-token.json"
-    assert Path.basename(p2) == "0001-token.json"
+    assert Path.basename(p1) =~ ~r/^\d{8}-token\.json$/
+    assert [p1, p2] == Enum.sort([p1, p2])
     refute File.read!(p1) =~ "s3cret"
+    assert Path.wildcard(Path.join(dir, "id/*.tmp")) == []
+  end
+
+  @tag :tmp_dir
+  test "concurrent writes neither collide nor leave half-written files", %{tmp_dir: dir} do
+    1..200
+    |> Task.async_stream(fn n -> Store.write(dir, "webhook", "event", %{"n" => n}) end,
+      max_concurrency: 50
+    )
+    |> Enum.to_list()
+
+    files = Path.wildcard(Path.join(dir, "webhook/*.json"))
+    assert length(files) == 200
+
+    ns =
+      files
+      |> Enum.map(&(&1 |> File.read!() |> Jason.decode!() |> Map.fetch!("n")))
+      |> Enum.sort()
+
+    assert ns == Enum.to_list(1..200)
   end
 
   @tag :tmp_dir

@@ -15,6 +15,16 @@ defmodule Sim.Server do
   @key {__MODULE__, :state}
   @tokens __MODULE__.Tokens
 
+  # Kick's real Pusher app key, so pointing PUSHER_URL at the simulator only
+  # changes the host. `activity_timeout` is what the recording showed; the
+  # server pings on its own schedule and drops a client that misses a pong.
+  @pusher_defaults %{
+    app_key: "32cbd69e4b950bf97679",
+    activity_timeout_s: 120,
+    ping_ms: 60_000,
+    disconnect_after_ms: nil
+  }
+
   @type state :: %{scenario: Scenario.t(), clock: Clock.t(), keys: Keys.t()}
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -25,9 +35,10 @@ defmodule Sim.Server do
     scenario = Keyword.get(opts, :scenario) || Scenario.new()
     clock = Keyword.get(opts, :clock) || Clock.new()
     keys = Keyword.get(opts, :keys) || Keys.generate()
+    pusher = Map.merge(@pusher_defaults, Map.new(Keyword.get(opts, :pusher, [])))
 
     :ets.new(@tokens, [:set, :public, :named_table, read_concurrency: true])
-    :persistent_term.put(@key, %{scenario: scenario, clock: clock, keys: keys})
+    :persistent_term.put(@key, %{scenario: scenario, clock: clock, keys: keys, pusher: pusher})
 
     {:ok, %{}}
   end
@@ -47,6 +58,10 @@ defmodule Sim.Server do
   @doc "The private key webhooks are signed with."
   @spec private_key() :: :public_key.rsa_private_key()
   def private_key, do: state().keys.private
+
+  @doc "The fake Pusher's settings: app key, ping interval, disconnect fault."
+  @spec pusher() :: map()
+  def pusher, do: state().pusher
 
   @doc "Simulated time now."
   @spec now() :: DateTime.t()

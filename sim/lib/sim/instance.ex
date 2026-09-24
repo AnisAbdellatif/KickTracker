@@ -21,7 +21,9 @@ defmodule Sim.Instance do
     clock = Keyword.get(opts, :clock) || Clock.new()
 
     children = [
-      {Sim.Server, scenario: scenario, clock: clock},
+      {Sim.Server, scenario: scenario, clock: clock, pusher: pusher_options(opts, scenario)},
+      Sim.Pusher.Hub,
+      {Task.Supervisor, name: Sim.Webhooks.Tasks},
       {Sim.Webhooks, webhook_url: Keyword.get(opts, :webhook_url)},
       {Sim.Channels, scenario: scenario, tick_ms: Keyword.get(opts, :tick_ms, 1_000)},
       {Bandit,
@@ -33,6 +35,22 @@ defmodule Sim.Instance do
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  # The disconnect fault can come from the scenario or be given directly.
+  defp pusher_options(opts, scenario) do
+    given = Keyword.get(opts, :pusher, [])
+
+    case Sim.Scenario.fault(scenario, :pusher_disconnect_after_s, nil) do
+      nil -> given
+      seconds -> Keyword.put_new(given, :disconnect_after_ms, round(seconds * 1000))
+    end
+  end
+
+  @doc "The Pusher URL to point PUSHER_URL at."
+  @spec pusher_url() :: String.t()
+  def pusher_url do
+    "ws://127.0.0.1:#{port()}/app/#{Sim.Server.pusher().app_key}?protocol=7&client=js&version=8.4.0&flash=false"
   end
 
   @doc "The port the HTTP server actually listens on (useful when it was given 0)."
