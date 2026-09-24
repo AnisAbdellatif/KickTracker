@@ -1,0 +1,2448 @@
+## "msgid"s in this file come from POT (.pot) files.
+###
+### Do not add, change, or remove "msgid"s manually here as
+### they're tied to the ones in the corresponding POT file
+### (with the same domain).
+###
+### Use "mix gettext.extract --merge" or "mix gettext.merge"
+### to merge POT files into PO files.
+msgid ""
+msgstr ""
+"Language: en\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:181
+#, elixir-autogen, elixir-format
+msgid "%{n} viewers"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:306
+#, elixir-autogen, elixir-format
+msgid "%{n}d ago"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:305
+#, elixir-autogen, elixir-format
+msgid "%{n}h ago"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:304
+#, elixir-autogen, elixir-format
+msgid "%{n}m ago"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:303
+#, elixir-autogen, elixir-format
+msgid "%{n}s ago"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/subscriptions_live.ex:91
+#, elixir-autogen, elixir-format
+msgid "%{total} subscriptions at Kick; %{missing} missing, %{extra} to remove."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/groups_live.ex:86
+#, elixir-autogen, elixir-format
+msgid "1 channel"
+msgid_plural "%{count} channels"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:434
+#, elixir-autogen, elixir-format
+msgid "1 stream"
+msgid_plural "%{count} streams"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:54
+#, elixir-autogen, elixir-format
+msgid "1. Add this key to your authenticator app"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:68
+#, elixir-autogen, elixir-format
+msgid "2. Choose a password and enter a code"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:36
+#, elixir-autogen, elixir-format
+msgid "A stream is identified by the time Kick says it started. Kick's own end event decides when it ended; when that event is missing, the stream ends at the last moment we saw it live (marked with *). A short drop where Kick keeps the same start time continues the same stream."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:16
+#, elixir-autogen, elixir-format
+msgid "About people in a channel's audience: their public Kick user id and username, and when they chatted, followed, subscribed, gifted or sent Kicks. Never the text of a chat message."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:11
+#, elixir-autogen, elixir-format
+msgid "About tracked channels: public statistics (viewers, streams, titles, categories, follower totals, subscriptions, gifted subscriptions, Kicks, raids)."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:26
+#, elixir-autogen, elixir-format
+msgid "About visitors to this site: no accounts, no tracking cookies, no analytics, no access logs. Your IP address is held in memory to limit abusive request rates: about a minute, or an hour after repeated failed admin logins, then forgotten."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:22
+#, elixir-autogen, elixir-format
+msgid "Accept invitation"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/account_live.ex:10
+#: lib/kick_tracker_web/live/admin/account_live.ex:36
+#, elixir-autogen, elixir-format
+msgid "Account"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:36
+#, elixir-autogen, elixir-format
+msgid "Account created. Log in with your password and a code."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/audit_live.ex:32
+#, elixir-autogen, elixir-format
+msgid "Action"
+msgstr ""
+
+#: lib/kick_tracker_web/components/core_components.ex:375
+#, elixir-autogen, elixir-format
+msgid "Actions"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:233
+#, elixir-autogen, elixir-format
+msgid "Active chatters"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:474
+#, elixir-autogen, elixir-format
+msgid "Active chatters in a rolling window are on each stream's page."
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:167
+#, elixir-autogen, elixir-format
+msgid "Active chatters over"
+msgstr ""
+
+#: lib/kick_tracker_web/live/compare_live.ex:125
+#, elixir-autogen, elixir-format
+msgid "Add"
+msgstr ""
+
+#: lib/kick_tracker_web/live/compare_live.ex:121
+#, elixir-autogen, elixir-format
+msgid "Add a channel"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:165
+#, elixir-autogen, elixir-format
+msgid "Add a channel by its Kick slug"
+msgstr ""
+
+#: lib/kick_tracker_web/live/compare_live.ex:122
+#, elixir-autogen, elixir-format
+msgid "Add a channel…"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:281
+#, elixir-autogen, elixir-format
+msgid "Add annotation"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:166
+#, elixir-autogen, elixir-format
+msgid "Add one."
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:141
+#, elixir-autogen, elixir-format
+msgid "Admin"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/admin/session_html/new.html.heex:3
+#, elixir-autogen, elixir-format
+msgid "Admin login"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:171
+#: lib/kick_tracker_web/live/admin/admins_live.ex:12
+#: lib/kick_tracker_web/live/admin/admins_live.ex:61
+#, elixir-autogen, elixir-format
+msgid "Admins"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:593
+#, elixir-autogen, elixir-format
+msgid "After switching"
+msgstr ""
+
+#: lib/kick_tracker_web/live/category_live.ex:47
+#: lib/kick_tracker_web/live/channel_live.ex:317
+#: lib/kick_tracker_web/live/channel_live.ex:583
+#: lib/kick_tracker_web/live/compare_live.ex:185
+#, elixir-autogen, elixir-format
+msgid "Airtime"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:429
+#, elixir-autogen, elixir-format
+msgid "All"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:210
+#, elixir-autogen, elixir-format
+msgid "All channels"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:415
+#, elixir-autogen, elixir-format
+msgid "All streams"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:195
+#, elixir-autogen, elixir-format
+msgid "Already tracked."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:94
+#, elixir-autogen, elixir-format
+msgid "Annotation added."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:247
+#, elixir-autogen, elixir-format
+msgid "Annotations"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:80
+#, elixir-autogen, elixir-format
+msgid "Are you sure?"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:103
+#, elixir-autogen, elixir-format
+msgid "Ask an admin for a new one."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/settings_live.ex:54
+#, elixir-autogen, elixir-format
+msgid "Assumed streamer's share of a subscription (0–1)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/settings_live.ex:52
+#, elixir-autogen, elixir-format
+msgid "Assumed subscription price (USD), for the revenue estimate"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/settings_live.ex:55
+#, elixir-autogen, elixir-format
+msgid "Assumed value of one Kick to the streamer (USD)"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:262
+#: lib/kick_tracker_web/components/layouts.ex:277
+#, elixir-autogen, elixir-format
+msgid "Attempting to reconnect"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:168
+#: lib/kick_tracker_web/live/admin/audit_live.ex:10
+#: lib/kick_tracker_web/live/admin/audit_live.ex:24
+#, elixir-autogen, elixir-format
+msgid "Audit log"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/admin/session_html/new.html.heex:25
+#, elixir-autogen, elixir-format
+msgid "Authenticator code"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:344
+#, elixir-autogen, elixir-format
+msgid "Average"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:307
+#: lib/kick_tracker_web/live/compare_live.ex:172
+#: lib/kick_tracker_web/live/home_live.ex:86
+#, elixir-autogen, elixir-format
+msgid "Average viewers"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:588
+#, elixir-autogen, elixir-format
+msgid "Average viewers in the 15 minutes after switching to it, minus the 15 before"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:49
+#, elixir-autogen, elixir-format
+msgid "Average viewers: the mean of the readings while live. Peak viewers: the highest reading."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:645
+#, elixir-autogen, elixir-format
+msgid "Avg"
+msgstr ""
+
+#: lib/kick_tracker_web/live/category_live.ex:48
+#: lib/kick_tracker_web/live/channel_live.ex:584
+#: lib/kick_tracker_web/live/home_live.ex:228
+#: lib/kick_tracker_web/live/stream_live.ex:147
+#, elixir-autogen, elixir-format
+msgid "Avg viewers"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:174
+#, elixir-autogen, elixir-format
+msgid "Bands: categories. Dotted lines: title changes. Markers: gift bursts, big Kicks, raids. Grey: no data."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:103
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:275
+#, elixir-autogen, elixir-format
+msgid "By"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:214
+#: lib/kick_tracker_web/live/admin/channels_live.ex:268
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:140
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:212
+#, elixir-autogen, elixir-format
+msgid "Cancel"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:189
+#, elixir-autogen, elixir-format
+msgid "Categories"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:186
+#: lib/kick_tracker_web/live/channel_live.ex:376
+#: lib/kick_tracker_web/live/channel_live.ex:427
+#: lib/kick_tracker_web/live/channel_live.ex:573
+#: lib/kick_tracker_web/live/channel_live.ex:580
+#: lib/kick_tracker_web/live/channel_live.ex:641
+#, elixir-autogen, elixir-format
+msgid "Category"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/account_live.ex:61
+#, elixir-autogen, elixir-format
+msgid "Change password"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/search.html.heex:6
+#: lib/kick_tracker_web/live/admin/channels_live.ex:226
+#: lib/kick_tracker_web/live/admin/health_live.ex:112
+#: lib/kick_tracker_web/live/admin/subscriptions_live.ex:101
+#: lib/kick_tracker_web/live/category_live.ex:45
+#: lib/kick_tracker_web/live/home_live.ex:226
+#, elixir-autogen, elixir-format
+msgid "Channel"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:259
+#: lib/kick_tracker_web/live/channel_live.ex:263
+#: lib/kick_tracker_web/live/stream_live.ex:134
+#: lib/kick_tracker_web/live/stream_live.ex:137
+#, elixir-autogen, elixir-format
+msgid "Channel time"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:146
+#: lib/kick_tracker_web/live/admin/channels_live.ex:16
+#: lib/kick_tracker_web/live/admin/channels_live.ex:154
+#, elixir-autogen, elixir-format
+msgid "Channels"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:72
+#: lib/kick_tracker_web/live/admin/health_live.ex:115
+#: lib/kick_tracker_web/live/channel_live.ex:187
+#, elixir-autogen, elixir-format
+msgid "Chat"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:120
+#, elixir-autogen, elixir-format
+msgid "Chat 24h / 7d"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:28
+#, elixir-autogen, elixir-format
+msgid "Chat activity: the channel's public chat feed. We never store what anyone wrote: only who chatted, when, and how many messages."
+msgstr ""
+
+#: lib/kick_tracker_web/live/compare_live.ex:94
+#, elixir-autogen, elixir-format
+msgid "Chat messages"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:93
+#, elixir-autogen, elixir-format
+msgid "Chat minutes"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:485
+#: lib/kick_tracker_web/live/channel_live.ex:656
+#, elixir-autogen, elixir-format
+msgid "Chatters"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:459
+#, elixir-autogen, elixir-format
+msgid "Chatters per 100 viewers"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/admin/session_html/new.html.heex:31
+#, elixir-autogen, elixir-format
+msgid "Checking…"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:86
+#, elixir-autogen, elixir-format
+msgid "Code from the app"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:40
+#: lib/kick_tracker_web/live/compare_live.ex:18
+#: lib/kick_tracker_web/live/compare_live.ex:105
+#, elixir-autogen, elixir-format
+msgid "Compare"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/account_live.ex:57
+#, elixir-autogen, elixir-format
+msgid "Confirm new password"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:79
+#, elixir-autogen, elixir-format
+msgid "Confirm password"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:223
+#, elixir-autogen, elixir-format
+msgid "Consumer lag (p95, last hour)"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:105
+#: lib/kick_tracker_web/live/admin/data_live.ex:223
+#, elixir-autogen, elixir-format
+msgid "Corrections"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:164
+#, elixir-autogen, elixir-format
+msgid "Corrections are recorded on top of the raw data, never edits of it."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:72
+#, elixir-autogen, elixir-format
+msgid "Could not add: %{reason}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:65
+#, elixir-autogen, elixir-format
+msgid "Could not discard: %{r}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:194
+#, elixir-autogen, elixir-format
+msgid "Could not read"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:37
+#, elixir-autogen, elixir-format
+msgid "Could not replay: %{r}"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:91
+#, elixir-autogen, elixir-format
+msgid "Coverage and gaps"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/groups_live.ex:79
+#, elixir-autogen, elixir-format
+msgid "Create"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:96
+#, elixir-autogen, elixir-format
+msgid "Create account"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:94
+#, elixir-autogen, elixir-format
+msgid "Create link"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:50
+#, elixir-autogen, elixir-format
+msgid "Create your admin account"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:104
+#, elixir-autogen, elixir-format
+msgid "Created"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:95
+#, elixir-autogen, elixir-format
+msgid "Creating…"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/account_live.ex:43
+#, elixir-autogen, elixir-format
+msgid "Current password"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:246
+#, elixir-autogen, elixir-format
+msgid "Current stream"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:59
+#, elixir-autogen, elixir-format
+msgid "Daily and weekday figures use the channel's timezone, shown next to them. A stream crossing midnight counts for the day it started."
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:180
+#, elixir-autogen, elixir-format
+msgid "Dashboard"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:157
+#: lib/kick_tracker_web/live/admin/data_live.ex:17
+#: lib/kick_tracker_web/live/admin/data_live.ex:162
+#, elixir-autogen, elixir-format
+msgid "Data"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:640
+#, elixir-autogen, elixir-format
+msgid "Date"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:297
+#, elixir-autogen, elixir-format
+msgid "Days and weekdays in %{tz} time."
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:155
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:15
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:90
+#, elixir-autogen, elixir-format
+msgid "Dead letters"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/groups_live.ex:98
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:106
+#, elixir-autogen, elixir-format
+msgid "Delete"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:267
+#, elixir-autogen, elixir-format
+msgid "Delete all data"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/groups_live.ex:96
+#, elixir-autogen, elixir-format
+msgid "Delete this group?"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:301
+#, elixir-autogen, elixir-format
+msgid "Delete…"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:122
+#, elixir-autogen, elixir-format
+msgid "Deleting %{slug} and all its data."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:57
+#, elixir-autogen, elixir-format
+msgid "Deletion queued; the collector runs it within seconds."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/audit_live.ex:34
+#, elixir-autogen, elixir-format
+msgid "Details"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:83
+#, elixir-autogen, elixir-format
+msgid "Disable"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:122
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:261
+#, elixir-autogen, elixir-format
+msgid "Discard"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:139
+#, elixir-autogen, elixir-format
+msgid "Discard for good"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:62
+#, elixir-autogen, elixir-format
+msgid "Discarded."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:5
+#, elixir-autogen, elixir-format
+msgid "Draft: to be reviewed before this site collects real data."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:182
+#: lib/kick_tracker_web/live/channel_live.ex:643
+#: lib/kick_tracker_web/live/stream_live.ex:146
+#, elixir-autogen, elixir-format
+msgid "Duration"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/groups_live.ex:92
+#, elixir-autogen, elixir-format
+msgid "Edit"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/admin/session_html/new.html.heex:11
+#: lib/kick_tracker_web/live/admin/admins_live.ex:68
+#: lib/kick_tracker_web/live/admin/admins_live.ex:92
+#, elixir-autogen, elixir-format
+msgid "Email"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:83
+#, elixir-autogen, elixir-format
+msgid "Enable"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:174
+#, elixir-autogen, elixir-format
+msgid "Errors"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:98
+#, elixir-autogen, elixir-format
+msgid "Estimates"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:227
+#, elixir-autogen, elixir-format
+msgid "Events waiting for their channel"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:274
+#, elixir-autogen, elixir-format
+msgid "Every channel"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:93
+#, elixir-autogen, elixir-format
+msgid "Every figure can only be as complete as our collection. We record when each source was working and when it wasn't; the coverage badge is the share of the period our viewer polling was running. On charts, grey shading means no data: we weren't collecting. A break in a line means the channel was offline. Missing data is never drawn as zero."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:206
+#, elixir-autogen, elixir-format
+msgid "Exclude"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:205
+#, elixir-autogen, elixir-format
+msgid "Exclude this stream from every figure?"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:83
+#, elixir-autogen, elixir-format
+msgid "Find"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:51
+#: lib/kick_tracker_web/components/layouts.ex:52
+#: lib/kick_tracker_web/components/layouts.ex:59
+#: lib/kick_tracker_web/controllers/about_html/search.html.heex:2
+#, elixir-autogen, elixir-format
+msgid "Find a channel"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:70
+#, elixir-autogen, elixir-format
+msgid "Find what we hold about a Kick user and delete what identifies them. Counts they contributed to stay, without them."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:323
+#: lib/kick_tracker_web/live/compare_live.ex:175
+#: lib/kick_tracker_web/live/home_live.ex:88
+#: lib/kick_tracker_web/live/home_live.ex:231
+#: lib/kick_tracker_web/live/stream_live.ex:150
+#, elixir-autogen, elixir-format
+msgid "Follower gain"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:67
+#, elixir-autogen, elixir-format
+msgid "Follower gain is the total at the end of a period minus the total at its start, from our readings nearest to each end. Without a reading near both ends it is shown as unknown (–), not zero. Kick's webhooks report new follows but not unfollows, so the follows count is gross."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:23
+#, elixir-autogen, elixir-format
+msgid "Follower totals: read every 15 minutes while live, daily while offline, and at the start and end of every stream."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:65
+#: lib/kick_tracker_web/live/channel_live.ex:359
+#: lib/kick_tracker_web/live/channel_live.ex:361
+#: lib/kick_tracker_web/live/channel_live.ex:653
+#: lib/kick_tracker_web/live/compare_live.ex:95
+#, elixir-autogen, elixir-format
+msgid "Followers"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:118
+#, elixir-autogen, elixir-format
+msgid "Followers read"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:95
+#, elixir-autogen, elixir-format
+msgid "Follows"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:261
+#: lib/kick_tracker_web/live/admin/data_live.ex:303
+#, elixir-autogen, elixir-format
+msgid "From (UTC)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:513
+#: lib/kick_tracker_web/live/channel_live.ex:541
+#: lib/kick_tracker_web/live/stream_live.ex:235
+#, elixir-autogen, elixir-format
+msgid "Gifted subs"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:131
+#, elixir-autogen, elixir-format
+msgid "Give a valid range (from before to), in UTC."
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:149
+#: lib/kick_tracker_web/live/admin/groups_live.ex:12
+#: lib/kick_tracker_web/live/admin/groups_live.ex:59
+#, elixir-autogen, elixir-format
+msgid "Groups"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:144
+#: lib/kick_tracker_web/live/admin/health_live.ex:17
+#: lib/kick_tracker_web/live/admin/health_live.ex:45
+#, elixir-autogen, elixir-format
+msgid "Health"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:293
+#, elixir-autogen, elixir-format
+msgid "Hide"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:383
+#, elixir-autogen, elixir-format
+msgid "Highest peak"
+msgstr ""
+
+#: lib/kick_tracker_web/live/category_live.ex:46
+#: lib/kick_tracker_web/live/channel_live.ex:301
+#: lib/kick_tracker_web/live/channel_live.ex:376
+#: lib/kick_tracker_web/live/channel_live.ex:573
+#: lib/kick_tracker_web/live/channel_live.ex:581
+#: lib/kick_tracker_web/live/channel_live.ex:650
+#: lib/kick_tracker_web/live/compare_live.ex:171
+#: lib/kick_tracker_web/live/home_live.ex:85
+#: lib/kick_tracker_web/live/home_live.ex:227
+#: lib/kick_tracker_web/live/stream_live.ex:149
+#, elixir-autogen, elixir-format
+msgid "Hours watched"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:374
+#: lib/kick_tracker_web/live/channel_live.ex:571
+#, elixir-autogen, elixir-format
+msgid "Hours watched by category"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:44
+#, elixir-autogen, elixir-format
+msgid "Hours watched: the sum of viewers × the time since the previous reading, with each reading counting for at most 75 seconds. A missed reading is never interpolated: it adds at most 15 seconds."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:3
+#, elixir-autogen, elixir-format
+msgid "How the numbers are made"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:5
+#, elixir-autogen, elixir-format
+msgid "If you stream on Kick and don't want your channel here, write to %{contact} from an address we can connect to the channel (or send the request from the channel itself, for instance in its bio or a chat message we can see). We stop tracking it and remove its pages."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:11
+#, elixir-autogen, elixir-format
+msgid "If you're in a channel's audience and want your data removed, see"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/admin/session_controller.ex:34
+#, elixir-autogen, elixir-format
+msgid "Invalid email, password or code."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:89
+#, elixir-autogen, elixir-format
+msgid "Invite an admin"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:69
+#, elixir-autogen, elixir-format
+msgid "Invited by"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:252
+#, elixir-autogen, elixir-format
+msgid "Jobs"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/subscriptions_live.ex:89
+#, elixir-autogen, elixir-format
+msgid "Kick didn't answer: %{e}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:45
+#, elixir-autogen, elixir-format
+msgid "Kick didn't answer: %{reason}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:232
+#, elixir-autogen, elixir-format
+msgid "Kick ids"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:176
+#, elixir-autogen, elixir-format
+msgid "Kick user id"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:80
+#, elixir-autogen, elixir-format
+msgid "Kick user id or username"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:119
+#, elixir-autogen, elixir-format
+msgid "Kick's end event was missed; the end is when polling last saw it live"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:514
+#: lib/kick_tracker_web/live/channel_live.ex:559
+#: lib/kick_tracker_web/live/compare_live.ex:178
+#: lib/kick_tracker_web/live/home_live.ex:89
+#: lib/kick_tracker_web/live/home_live.ex:233
+#, elixir-autogen, elixir-format
+msgid "Kicks"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:287
+#, elixir-autogen, elixir-format
+msgid "LIVE"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:190
+#, elixir-autogen, elixir-format
+msgid "Language"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:117
+#, elixir-autogen, elixir-format
+msgid "Last event"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:190
+#, elixir-autogen, elixir-format
+msgid "Leaderboard"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:672
+#, elixir-autogen, elixir-format
+msgid "Left out of statistics"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:39
+#: lib/kick_tracker_web/live/admin/health_live.ex:113
+#, elixir-autogen, elixir-format
+msgid "Live"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:18
+#: lib/kick_tracker_web/live/home_live.ex:121
+#, elixir-autogen, elixir-format
+msgid "Live now"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:267
+#, elixir-autogen, elixir-format
+msgid "LiveDashboard"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/admin/session_html/new.html.heex:32
+#, elixir-autogen, elixir-format
+msgid "Log in"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:188
+#, elixir-autogen, elixir-format
+msgid "Log out"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/admin/session_controller.ex:46
+#, elixir-autogen, elixir-format
+msgid "Logged out."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:54
+#, elixir-autogen, elixir-format
+msgid "Long ranges are drawn in buckets (5 minutes, hours, days); each bucket shows its average and, as a band, its peak, so a spike is never averaged away."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:399
+#, elixir-autogen, elixir-format
+msgid "Longest stream"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:170
+#, elixir-autogen, elixir-format
+msgid "Look up"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:170
+#, elixir-autogen, elixir-format
+msgid "Looking up…"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:214
+#, elixir-autogen, elixir-format
+msgid "Merge into previous"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:212
+#, elixir-autogen, elixir-format
+msgid "Merge this stream into the one before it?"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:447
+#: lib/kick_tracker_web/live/channel_live.ex:469
+#: lib/kick_tracker_web/live/channel_live.ex:471
+#: lib/kick_tracker_web/live/compare_live.ex:177
+#: lib/kick_tracker_web/live/stream_live.ex:152
+#, elixir-autogen, elixir-format
+msgid "Messages"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:232
+#, elixir-autogen, elixir-format
+msgid "Messages / min"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:75
+#, elixir-autogen, elixir-format
+msgid "Messages and unique chatters are counted per minute. Active chatters over a window (5, 10 or 15 minutes) are the distinct people who chatted in that window."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:454
+#, elixir-autogen, elixir-format
+msgid "Messages per hour live"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:92
+#, elixir-autogen, elixir-format
+msgid "Messages the consumer rejected or that failed ten deliveries. Nothing is dropped silently."
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:42
+#: lib/kick_tracker_web/components/layouts.ex:77
+#: lib/kick_tracker_web/controllers/about_controller.ex:7
+#, elixir-autogen, elixir-format
+msgid "Methodology"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:277
+#, elixir-autogen, elixir-format
+msgid "Modeled, not measured"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:391
+#, elixir-autogen, elixir-format
+msgid "Most hours watched"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:486
+#, elixir-autogen, elixir-format
+msgid "New"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:478
+#, elixir-autogen, elixir-format
+msgid "New and returning chatters"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:80
+#, elixir-autogen, elixir-format
+msgid "New chatters are people chatting in a channel for the first time since we started tracking it."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/account_live.ex:50
+#, elixir-autogen, elixir-format
+msgid "New password (12+ characters)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:299
+#, elixir-autogen, elixir-format
+msgid "New peak record for"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:511
+#, elixir-autogen, elixir-format
+msgid "New subs"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:480
+#, elixir-autogen, elixir-format
+msgid "New: chatting in this channel for the first time since we started tracking it."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:39
+#, elixir-autogen, elixir-format
+msgid "No channel with that slug on Kick."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:165
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:158
+#, elixir-autogen, elixir-format
+msgid "No channels yet."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:241
+#, elixir-autogen, elixir-format
+msgid "No deliveries in the last 7 days."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:62
+#, elixir-autogen, elixir-format
+msgid "No earlier stream to merge into."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:444
+#, elixir-autogen, elixir-format
+msgid "No message text is ever stored: only who chatted, when, and how much."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:63
+#, elixir-autogen, elixir-format
+msgid "No public sign-up: invite an admin by email and send them the link yourself."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:689
+#, elixir-autogen, elixir-format
+msgid "No streams in this period."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:407
+#, elixir-autogen, elixir-format
+msgid "No streams yet."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/search.html.heex:28
+#, elixir-autogen, elixir-format
+msgid "No tracked channel matches."
+msgstr ""
+
+#: lib/kick_tracker_web/live/category_live.ex:69
+#, elixir-autogen, elixir-format
+msgid "No tracked channel streamed this in the period."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:43
+#, elixir-autogen, elixir-format
+msgid "Nobody by that id or username."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:720
+#, elixir-autogen, elixir-format
+msgid "Nobody in this period."
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:138
+#, elixir-autogen, elixir-format
+msgid "Nobody we track is live right now."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:224
+#, elixir-autogen, elixir-format
+msgid "None."
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:74
+#, elixir-autogen, elixir-format
+msgid "Not affiliated with Kick."
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:278
+#, elixir-autogen, elixir-format
+msgid "Notable moments"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:64
+#, elixir-autogen, elixir-format
+msgid "Now tracking %{slug}."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:50
+#, elixir-autogen, elixir-format
+msgid "Open alerts"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:34
+#, elixir-autogen, elixir-format
+msgid "Our legal basis is legitimate interest: publishing statistics about public live streams, built only from public information, with the least personal data that makes them possible."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:185
+#, elixir-autogen, elixir-format
+msgid "Overview"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/admin/session_html/new.html.heex:18
+#, elixir-autogen, elixir-format
+msgid "Password"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:72
+#, elixir-autogen, elixir-format
+msgid "Password (12+ characters)"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/admin/session_html/new.html.heex:5
+#, elixir-autogen, elixir-format
+msgid "Password and the code from your authenticator app."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/account_live.ex:23
+#, elixir-autogen, elixir-format
+msgid "Password changed. Please log in again."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:285
+#, elixir-autogen, elixir-format
+msgid "Pause"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:281
+#, elixir-autogen, elixir-format
+msgid "Pause tracking %{slug}? Nothing is collected while paused."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:156
+#, elixir-autogen, elixir-format
+msgid "Pausing stops collection and keeps every row already collected."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:182
+#: lib/kick_tracker_web/live/category_live.ex:49
+#: lib/kick_tracker_web/live/channel_live.ex:345
+#: lib/kick_tracker_web/live/channel_live.ex:647
+#: lib/kick_tracker_web/live/home_live.ex:229
+#: lib/kick_tracker_web/live/stream_live.ex:148
+#, elixir-autogen, elixir-format
+msgid "Peak"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:312
+#: lib/kick_tracker_web/live/compare_live.ex:173
+#: lib/kick_tracker_web/live/home_live.ex:87
+#, elixir-autogen, elixir-format
+msgid "Peak viewers"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:102
+#, elixir-autogen, elixir-format
+msgid "Pending for"
+msgstr ""
+
+#: lib/kick_tracker_web/live/compare_live.ex:195
+#, elixir-autogen, elixir-format
+msgid "People who chatted in both channels during the period."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:85
+#, elixir-autogen, elixir-format
+msgid "Per-minute detail of who chatted is deleted after 90 days; the counts and per-stream figures remain."
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:90
+#, elixir-autogen, elixir-format
+msgid "Period"
+msgstr ""
+
+#: lib/kick_tracker_web/live/compare_live.ex:134
+#, elixir-autogen, elixir-format
+msgid "Pick two to four channels to compare them."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:119
+#, elixir-autogen, elixir-format
+msgid "Poll 24h / 7d"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/settings_live.ex:91
+#, elixir-autogen, elixir-format
+msgid "Polling cadences aren't settings: they are fixed in code with the rules that depend on them (viewers every 60s, subscribers every 5 minutes, followers every 15 minutes live and daily offline)."
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:80
+#: lib/kick_tracker_web/components/layouts.ex:162
+#: lib/kick_tracker_web/controllers/about_controller.ex:9
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:3
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:15
+#, elixir-autogen, elixir-format
+msgid "Privacy"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:68
+#, elixir-autogen, elixir-format
+msgid "Privacy requests"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/groups_live.ex:61
+#, elixir-autogen, elixir-format
+msgid "Public groups get their own leaderboard on the home page and a shortcut on the compare page."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:119
+#, elixir-autogen, elixir-format
+msgid "Publish it to kick.events again?"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:323
+#: lib/kick_tracker_web/live/admin/health_live.ex:188
+#, elixir-autogen, elixir-format
+msgid "Queue"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:323
+#, elixir-autogen, elixir-format
+msgid "Queue this?"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:127
+#, elixir-autogen, elixir-format
+msgid "Queued; the collector runs it."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:214
+#, elixir-autogen, elixir-format
+msgid "RABBITMQ_MANAGEMENT_URL is not set."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:218
+#, elixir-autogen, elixir-format
+msgid "RabbitMQ didn't answer: %{r}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:100
+#, elixir-autogen, elixir-format
+msgid "RabbitMQ: %{e}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:97
+#, elixir-autogen, elixir-format
+msgid "Raw events mentioning the id"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:107
+#, elixir-autogen, elixir-format
+msgid "Raw observations are never edited. When something is wrong (a test stream, a stream split in two), a correction is recorded on top and the figures are recomputed. Excluded streams are marked where they appear."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:239
+#, elixir-autogen, elixir-format
+msgid "Receivers"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:413
+#, elixir-autogen, elixir-format
+msgid "Recent streams"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:317
+#, elixir-autogen, elixir-format
+msgid "Recompute rollups (all channels, the range)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:380
+#, elixir-autogen, elixir-format
+msgid "Records"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:97
+#: lib/kick_tracker_web/live/admin/subscriptions_live.ex:85
+#, elixir-autogen, elixir-format
+msgid "Refresh"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:83
+#: lib/kick_tracker_web/controllers/about_controller.ex:10
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:3
+#, elixir-autogen, elixir-format
+msgid "Removal requests"
+msgstr ""
+
+#: lib/kick_tracker_web/live/compare_live.ex:117
+#, elixir-autogen, elixir-format
+msgid "Remove %{c}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:512
+#, elixir-autogen, elixir-format
+msgid "Renewals"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:121
+#, elixir-autogen, elixir-format
+msgid "Replay"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:320
+#, elixir-autogen, elixir-format
+msgid "Replay stored webhook events (this channel)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:33
+#, elixir-autogen, elixir-format
+msgid "Replayed %{id}."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:295
+#, elixir-autogen, elixir-format
+msgid "Reprocess"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:285
+#, elixir-autogen, elixir-format
+msgid "Resume"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/subscriptions_live.ex:86
+#, elixir-autogen, elixir-format
+msgid "Resync now"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/subscriptions_live.ex:68
+#, elixir-autogen, elixir-format
+msgid "Resync queued; the collector runs it within seconds."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:487
+#, elixir-autogen, elixir-format
+msgid "Returning"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:517
+#, elixir-autogen, elixir-format
+msgid "Revenue"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:100
+#, elixir-autogen, elixir-format
+msgid "Revenue is an estimate, not a measurement: subscriptions (new, renewed and gifted) times an assumed price and the streamer's share, plus Kicks at an assumed value each. The assumptions are shown next to the figure. Kick doesn't publish earnings; the real amount can differ a lot."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:114
+#: lib/kick_tracker_web/live/admin/data_live.ex:243
+#, elixir-autogen, elixir-format
+msgid "Revoke"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:69
+#, elixir-autogen, elixir-format
+msgid "Revoked; figures are being recomputed."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:242
+#: lib/kick_tracker_web/live/admin/groups_live.ex:120
+#: lib/kick_tracker_web/live/admin/settings_live.ex:88
+#, elixir-autogen, elixir-format
+msgid "Save"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/settings_live.ex:38
+#, elixir-autogen, elixir-format
+msgid "Saved."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:145
+#, elixir-autogen, elixir-format
+msgid "Saved; figures are being recomputed."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:51
+#, elixir-autogen, elixir-format
+msgid "Say why it is discarded."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_controller.ex:15
+#: lib/kick_tracker_web/controllers/about_controller.ex:20
+#: lib/kick_tracker_web/controllers/about_html/search.html.heex:8
+#, elixir-autogen, elixir-format
+msgid "Search"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:97
+#, elixir-autogen, elixir-format
+msgid "Send this link; it works once, for 7 days, and won't be shown again:"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:165
+#: lib/kick_tracker_web/live/admin/settings_live.ex:15
+#: lib/kick_tracker_web/live/admin/settings_live.ex:61
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:352
+#, elixir-autogen, elixir-format
+msgid "Shaded: no data (our collection wasn't running). Breaks: offline."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:582
+#, elixir-autogen, elixir-format
+msgid "Share"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:264
+#, elixir-autogen, elixir-format
+msgid "Share of the period our collection was running"
+msgstr ""
+
+#: lib/kick_tracker_web/live/compare_live.ex:193
+#, elixir-autogen, elixir-format
+msgid "Shared chatters"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:293
+#, elixir-autogen, elixir-format
+msgid "Show"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:280
+#, elixir-autogen, elixir-format
+msgid "Show on public charts"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/settings_live.ex:46
+#, elixir-autogen, elixir-format
+msgid "Show the support page (subs, gifts, Kicks, estimated revenue) publicly"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:260
+#, elixir-autogen, elixir-format
+msgid "Show times in the channel's timezone (%{tz})"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/settings_live.ex:49
+#, elixir-autogen, elixir-format
+msgid "Show top chatters and supporters by name on stream pages"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:70
+#, elixir-autogen, elixir-format
+msgid "Since"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:175
+#, elixir-autogen, elixir-format
+msgid "Slug"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:269
+#, elixir-autogen, elixir-format
+msgid "Something went wrong!"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:182
+#, elixir-autogen, elixir-format
+msgid "Start"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:71
+#: lib/kick_tracker_web/live/admin/channels_live.ex:177
+#: lib/kick_tracker_web/live/admin/channels_live.ex:251
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:273
+#, elixir-autogen, elixir-format
+msgid "Status"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:485
+#, elixir-autogen, elixir-format
+msgid "Stream"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:18
+#, elixir-autogen, elixir-format
+msgid "Stream start and end, title and category changes, follows, subscriptions, gifted subscriptions and Kicks: Kick's official webhooks, delivered to us as they happen."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:47
+#, elixir-autogen, elixir-format
+msgid "Streamers can ask for their channel to be removed:"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:34
+#: lib/kick_tracker_web/live/admin/data_live.ex:178
+#: lib/kick_tracker_web/live/channel_live.ex:186
+#: lib/kick_tracker_web/live/compare_live.ex:174
+#: lib/kick_tracker_web/live/stream_live.ex:100
+#, elixir-autogen, elixir-format
+msgid "Streams"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:94
+#, elixir-autogen, elixir-format
+msgid "Streams chatted in"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:540
+#: lib/kick_tracker_web/live/stream_live.ex:234
+#, elixir-autogen, elixir-format
+msgid "Subs"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:658
+#: lib/kick_tracker_web/live/stream_live.ex:153
+#, elixir-autogen, elixir-format
+msgid "Subs + gifts"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:152
+#: lib/kick_tracker_web/live/admin/subscriptions_live.ex:16
+#, elixir-autogen, elixir-format
+msgid "Subscriptions"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:188
+#: lib/kick_tracker_web/live/channel_live.ex:535
+#, elixir-autogen, elixir-format
+msgid "Support"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:96
+#, elixir-autogen, elixir-format
+msgid "Support events"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/audit_live.ex:33
+#, elixir-autogen, elixir-format
+msgid "Target"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:102
+#, elixir-autogen, elixir-format
+msgid "The dead-letter queue is empty."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:273
+#, elixir-autogen, elixir-format
+msgid "This channel"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/invite_live.ex:101
+#, elixir-autogen, elixir-format
+msgid "This invitation is invalid or has expired."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:237
+#, elixir-autogen, elixir-format
+msgid "Timezone"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:203
+#, elixir-autogen, elixir-format
+msgid "Timezone (for daily and weekday figures)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:187
+#, elixir-autogen, elixir-format
+msgid "Title"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:183
+#, elixir-autogen, elixir-format
+msgid "Title and category"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:309
+#, elixir-autogen, elixir-format
+msgid "To (UTC)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:267
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:178
+#, elixir-autogen, elixir-format
+msgid "To (UTC, optional)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:557
+#, elixir-autogen, elixir-format
+msgid "Top Kick senders"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:198
+#, elixir-autogen, elixir-format
+msgid "Top chatters"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:551
+#, elixir-autogen, elixir-format
+msgid "Top gifters"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:208
+#, elixir-autogen, elixir-format
+msgid "Top supporters"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:212
+#, elixir-autogen, elixir-format
+msgid "Track this channel"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:197
+#, elixir-autogen, elixir-format
+msgid "Tracked before and paused: confirming resumes it with its history."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:248
+#: lib/kick_tracker_web/live/channel_live.ex:249
+#, elixir-autogen, elixir-format
+msgid "Tracked since"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:103
+#, elixir-autogen, elixir-format
+msgid "Type %{id} to confirm"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:125
+#, elixir-autogen, elixir-format
+msgid "Type the slug exactly to confirm."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:59
+#, elixir-autogen, elixir-format
+msgid "Type the user id to confirm."
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:328
+#: lib/kick_tracker_web/live/channel_live.ex:449
+#: lib/kick_tracker_web/live/compare_live.ex:176
+#: lib/kick_tracker_web/live/stream_live.ex:151
+#, elixir-autogen, elixir-format
+msgid "Unique chatters"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:462
+#, elixir-autogen, elixir-format
+msgid "Unique chatters in the period ÷ average viewers × 100"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:68
+#: lib/kick_tracker_web/live/admin/channels_live.ex:145
+#, elixir-autogen, elixir-format
+msgid "Unknown timezone."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:46
+#, elixir-autogen, elixir-format
+msgid "Updated %{at} UTC"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:91
+#, elixir-autogen, elixir-format
+msgid "User id"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/privacy_live.ex:92
+#, elixir-autogen, elixir-format
+msgid "Username"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:41
+#, elixir-autogen, elixir-format
+msgid "Viewer figures"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:114
+#, elixir-autogen, elixir-format
+msgid "Viewer poll"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:339
+#: lib/kick_tracker_web/live/compare_live.ex:93
+#: lib/kick_tracker_web/live/stream_live.ex:231
+#, elixir-autogen, elixir-format
+msgid "Viewers"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:13
+#, elixir-autogen, elixir-format
+msgid "Viewers, live status, title and category: Kick's public API, read every 60 seconds for every tracked channel (Kick itself refreshes its viewer count about once a minute)."
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:254
+#, elixir-autogen, elixir-format
+msgid "We can't find the internet"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:5
+#, elixir-autogen, elixir-format
+msgid "We track a chosen set of Kick channels and record what we observe, from the moment we start tracking a channel. Nothing before that exists here, and nothing we missed is filled in."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/subscriptions_live.ex:78
+#, elixir-autogen, elixir-format
+msgid "Webhook subscriptions"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:116
+#, elixir-autogen, elixir-format
+msgid "Webhooks"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:175
+#, elixir-autogen, elixir-format
+msgid "Webhooks with an unexpected shape (7 days)"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:8
+#, elixir-autogen, elixir-format
+msgid "What we store"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/audit_live.ex:32
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:273
+#, elixir-autogen, elixir-format
+msgid "When"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:367
+#, elixir-autogen, elixir-format
+msgid "When they stream (avg viewers, %{tz})"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/subscriptions_live.ex:80
+#, elixir-autogen, elixir-format
+msgid "Where deliveries go is set once in the Kick app's settings; this is who we subscribed to."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/methodology.html.heex:10
+#, elixir-autogen, elixir-format
+msgid "Where the data comes from"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/audit_live.ex:32
+#, elixir-autogen, elixir-format
+msgid "Who"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:21
+#, elixir-autogen, elixir-format
+msgid "Who chatted in which minute is deleted after 90 days. Per-stream counts are kept."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:32
+#, elixir-autogen, elixir-format
+msgid "Why"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/dead_letters_live.ex:136
+#, elixir-autogen, elixir-format
+msgid "Why (kept in the audit log)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:168
+#, elixir-autogen, elixir-format
+msgid "Window"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:41
+#, elixir-autogen, elixir-format
+msgid "You can ask what we hold about your Kick account, and ask us to delete it: your username, the per-person rows, and the raw event records naming you. Aggregate counts that no longer identify you stay. Write to %{contact} with your Kick username."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:47
+#, elixir-autogen, elixir-format
+msgid "You can't disable yourself."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:39
+#, elixir-autogen, elixir-format
+msgid "Your rights"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:72
+#, elixir-autogen, elixir-format
+msgid "active"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:104
+#: lib/kick_tracker_web/live/admin/audit_live.ex:26
+#, elixir-autogen, elixir-format
+msgid "all"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:288
+#, elixir-autogen, elixir-format
+msgid "all channels"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:317
+#, elixir-autogen, elixir-format
+msgid "by %{who}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:443
+#, elixir-autogen, elixir-format
+msgid "chat coverage"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:234
+#, elixir-autogen, elixir-format
+msgid "chatroom"
+msgstr ""
+
+#: lib/kick_tracker_web/components/core_components.ex:81
+#, elixir-autogen, elixir-format
+msgid "close"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/audit_live.ex:40
+#, elixir-autogen, elixir-format
+msgid "command line"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:206
+#, elixir-autogen, elixir-format
+msgid "consumers"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:266
+#, elixir-autogen, elixir-format
+msgid "coverage"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:99
+#, elixir-autogen, elixir-format
+msgid "custom"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/admins_live.ex:72
+#, elixir-autogen, elixir-format
+msgid "disabled"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:179
+#, elixir-autogen, elixir-format
+msgid "e.g."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/groups_live.ex:70
+#, elixir-autogen, elixir-format
+msgid "e.g. Tunisian streamers"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:258
+#, elixir-autogen, elixir-format
+msgid "e.g. collector outage, charity stream"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:115
+#, elixir-autogen, elixir-format
+msgid "ended"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:279
+#, elixir-autogen, elixir-format
+msgid "estimate"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:192
+#: lib/kick_tracker_web/live/channel_live.ex:673
+#, elixir-autogen, elixir-format
+msgid "excluded"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:124
+#, elixir-autogen, elixir-format
+msgid "excluded from statistics"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:293
+#, elixir-autogen, elixir-format
+msgid "failing"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:237
+#, elixir-autogen, elixir-format
+msgid "flagged reading, not counted as a peak"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:213
+#, elixir-autogen, elixir-format
+msgid "gifted"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:236
+#, elixir-autogen, elixir-format
+msgid "gifted subs"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:253
+#, elixir-autogen, elixir-format
+msgid "hidden"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:179
+#, elixir-autogen, elixir-format
+msgid "last"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:180
+#: lib/kick_tracker_web/live/admin/channels_live.ex:228
+#, elixir-autogen, elixir-format
+msgid "live"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:193
+#, elixir-autogen, elixir-format
+msgid "merged"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:203
+#, elixir-autogen, elixir-format
+msgid "messages"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:295
+#, elixir-autogen, elixir-format
+msgid "never"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:232
+#, elixir-autogen, elixir-format
+msgid "not tracked at the moment"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:183
+#, elixir-autogen, elixir-format
+msgid "offline"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:292
+#, elixir-autogen, elixir-format
+msgid "ok"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:84
+#: lib/kick_tracker_web/live/admin/health_live.ex:230
+#, elixir-autogen, elixir-format
+msgid "oldest"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:252
+#: lib/kick_tracker_web/live/admin/health_live.ex:131
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:168
+#, elixir-autogen, elixir-format
+msgid "paused"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:14
+#, elixir-autogen, elixir-format
+msgid "privacy"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:287
+#: lib/kick_tracker_web/live/admin/groups_live.ex:78
+#: lib/kick_tracker_web/live/admin/groups_live.ex:85
+#: lib/kick_tracker_web/live/admin/groups_live.ex:119
+#, elixir-autogen, elixir-format
+msgid "public"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:50
+#, elixir-autogen, elixir-format
+msgid "removal requests"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:54
+#, elixir-autogen, elixir-format
+msgid "since"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:294
+#, elixir-autogen, elixir-format
+msgid "stale"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:523
+#, elixir-autogen, elixir-format
+msgid "subs at $%{p}, %{s}% share; a Kick at $%{k}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:553
+#, elixir-autogen, elixir-format
+msgid "subs gifted"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:305
+#, elixir-autogen, elixir-format
+msgid "subs gifted at once on"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:216
+#, elixir-autogen, elixir-format
+msgid "subscribed"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:252
+#, elixir-autogen, elixir-format
+msgid "tracking"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:264
+#, elixir-autogen, elixir-format
+msgid "type %{slug}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:206
+#, elixir-autogen, elixir-format
+msgid "unacked"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:234
+#, elixir-autogen, elixir-format
+msgid "user"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:716
+#: lib/kick_tracker_web/live/stream_live.ex:201
+#: lib/kick_tracker_web/live/stream_live.ex:211
+#, elixir-autogen, elixir-format
+msgid "user %{id}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:161
+#: lib/kick_tracker_web/live/home_live.ex:303
+#, elixir-autogen, elixir-format
+msgid "viewers"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:166
+#, elixir-autogen, elixir-format
+msgid "vs previous"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:239
+#: lib/kick_tracker_web/live/home_live.ex:129
+#: lib/kick_tracker_web/live/stream_live.ex:111
+#, elixir-autogen, elixir-format
+msgid "watching"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/data_live.ex:202
+#, elixir-autogen, elixir-format
+msgid "why"
+msgstr ""
+
+#: lib/kick_tracker_web/live/channel_live.ex:304
+#, elixir-autogen, elixir-format
+msgid "Σ viewers × time between readings, capped at 75s"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:181
+#, elixir-autogen, elixir-format
+msgid "3 h ago"
+msgstr ""
+
+#: lib/kick_tracker_web/live/stream_live.ex:90
+#, elixir-autogen, elixir-format
+msgid "Breadcrumb"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:159
+#, elixir-autogen, elixir-format
+msgid "Change against the previous period of the same length"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:225
+#: lib/kick_tracker_web/components/site_components.ex:226
+#, elixir-autogen, elixir-format
+msgid "Download CSV"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:205
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Group"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:239
+#, elixir-autogen, elixir-format
+msgid "Nothing recorded in this period."
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:195
+#, elixir-autogen, elixir-format
+msgid "Rank by"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:216
+#: lib/kick_tracker_web/components/site_components.ex:217
+#, elixir-autogen, elixir-format
+msgid "Show as a table"
+msgstr ""
+
+#: lib/kick_tracker_web/live/home_live.ex:125
+#, elixir-autogen, elixir-format, fuzzy
+msgid "channel live"
+msgid_plural "channels live"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kick_tracker_web/live/home_live.ex:154
+#, elixir-autogen, elixir-format
+msgid "live for %{duration}"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:165
+#, elixir-autogen, elixir-format
+msgid "no change"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:102
+#: lib/kick_tracker_web/live/home_live.ex:181
+#, elixir-autogen, elixir-format
+msgid "now"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:286
+#, elixir-autogen, elixir-format
+msgid "%{n} rows added"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:241
+#, elixir-autogen, elixir-format
+msgid "(removed here on request)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:191
+#, elixir-autogen, elixir-format
+msgid "Adds what isn't here yet; nothing already here is changed. Channels and removal requests come along."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:236
+#, elixir-autogen, elixir-format
+msgid "Already here"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:87
+#, elixir-autogen, elixir-format
+msgid "Can't import this file: %{reason}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:149
+#, elixir-autogen, elixir-format
+msgid "Channels and their history"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:90
+#, elixir-autogen, elixir-format
+msgid "Choose a .zip export first."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:225
+#, elixir-autogen, elixir-format
+msgid "Contents"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:64
+#, elixir-autogen, elixir-format
+msgid "Dates are YYYY-MM-DD."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:296
+#, elixir-autogen, elixir-format
+msgid "Download"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:138
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:184
+#, elixir-autogen, elixir-format
+msgid "Export"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:159
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:22
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:128
+#, elixir-autogen, elixir-format
+msgid "Export / import"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:61
+#, elixir-autogen, elixir-format
+msgid "Export queued; it appears below when ready."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:311
+#, elixir-autogen, elixir-format
+msgid "Export: channel list"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:313
+#, elixir-autogen, elixir-format
+msgid "Export: channels and history"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:224
+#, elixir-autogen, elixir-format
+msgid "Exported"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:269
+#, elixir-autogen, elixir-format
+msgid "Files are kept for 7 days."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:223
+#, elixir-autogen, elixir-format
+msgid "From"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:173
+#, elixir-autogen, elixir-format
+msgid "From (UTC, optional)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:189
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:259
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:314
+#, elixir-autogen, elixir-format
+msgid "Import"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:104
+#, elixir-autogen, elixir-format
+msgid "Import queued; the collector runs it now."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:130
+#, elixir-autogen, elixir-format
+msgid "Move tracked channels and their history between instances, or take them elsewhere to analyse. An export is a .zip of CSV files, one per table."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:234
+#, elixir-autogen, elixir-format
+msgid "New channels"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:238
+#, elixir-autogen, elixir-format
+msgid "Not imported"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:63
+#, elixir-autogen, elixir-format
+msgid "Pick at least one channel."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:268
+#, elixir-autogen, elixir-format
+msgid "Recent"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:274
+#, elixir-autogen, elixir-format
+msgid "Size"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:153
+#, elixir-autogen, elixir-format
+msgid "The channel list only"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:245
+#, elixir-autogen, elixir-format
+msgid "The other instance deleted these channels on a removal request; importing deletes them here too: %{slugs}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:217
+#, elixir-autogen, elixir-format
+msgid "Upload and preview"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:273
+#, elixir-autogen, elixir-format
+msgid "What"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:316
+#, elixir-autogen, elixir-format
+msgid "awaiting confirmation"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:229
+#, elixir-autogen, elixir-format
+msgid "channels and their history"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:319
+#, elixir-autogen, elixir-format
+msgid "done"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:321
+#, elixir-autogen, elixir-format
+msgid "expired"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:320
+#, elixir-autogen, elixir-format
+msgid "failed"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:337
+#, elixir-autogen, elixir-format
+msgid "not a .zip"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:338
+#, elixir-autogen, elixir-format
+msgid "one file at a time"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:317
+#, elixir-autogen, elixir-format
+msgid "queued"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:318
+#, elixir-autogen, elixir-format
+msgid "running"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:228
+#, elixir-autogen, elixir-format
+msgid "the channel list only"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:336
+#, elixir-autogen, elixir-format
+msgid "too large"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/transfer_live.ex:339
+#, elixir-autogen, elixir-format
+msgid "upload failed"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:67
+#, elixir-autogen, elixir-format
+msgid "Collector"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:60
+#, elixir-autogen, elixir-format
+msgid "Collectors"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:68
+#, elixir-autogen, elixir-format
+msgid "Last heard"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:62
+#, elixir-autogen, elixir-format
+msgid "No collector has reported in the last day."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:96
+#, elixir-autogen, elixir-format
+msgid "Recent handoffs"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:67
+#, elixir-autogen, elixir-format
+msgid "Role"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:69
+#, elixir-autogen, elixir-format
+msgid "Set aside"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:69
+#, elixir-autogen, elixir-format
+msgid "Writes waiting"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:318
+#, elixir-autogen, elixir-format
+msgid "collecting"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:314
+#, elixir-autogen, elixir-format
+msgid "down"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:100
+#, elixir-autogen, elixir-format
+msgid "from"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:319
+#, elixir-autogen, elixir-format
+msgid "standing by"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:320
+#, elixir-autogen, elixir-format
+msgid "stopped"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:101
+#, elixir-autogen, elixir-format
+msgid "to"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:321
+#, elixir-autogen, elixir-format
+msgid "shadow, on another machine"
+msgstr ""
+
+#: lib/kick_tracker_web/components/site_components.ex:206
+#: lib/kick_tracker_web/components/site_components.ex:207
+#, elixir-autogen, elixir-format
+msgid "Show all the data (or double-click the chart)"
+msgstr ""

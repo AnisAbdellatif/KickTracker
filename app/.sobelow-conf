@@ -1,0 +1,15 @@
+[
+  verbose: false,
+  private: false,
+  skip: true,
+  router: "lib/kick_tracker_web/router.ex",
+  exit: "low",
+  format: "txt",
+  out: "",
+  threshold: "low",
+  # HTTPS is terminated by Caddy (deploy/Caddyfile); prod.exs sets
+  # force_ssl with HSTS behind it.
+  ignore: ["Config.HTTPS"],
+  ignore_files: [""],
+  version: false
+]

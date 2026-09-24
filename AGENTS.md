@@ -10,7 +10,7 @@ touching before changing it; section numbers below (§n) refer to it.
 
 ## 1. The project in one paragraph
 
-kick_tracker tracks the stats of a chosen set of Kick channels over time (viewers every 15s,
+kick_tracker tracks the stats of a chosen set of Kick channels over time (viewers every 60s,
 streams, title and category changes, followers, chat activity, subs, gifted subs, Kicks,
 raids) and shows them on a public site with an admin interface. **History only exists from
 the moment we record it**, and webhook events we miss are gone for good, so correctness and
@@ -30,7 +30,7 @@ continuity of collection come before everything else.
 - Commit at coherent milestones. Keep commits focused, with a short imperative subject line.
 - Never commit secrets (`.env`, keys, credentials, `prod.secret.exs`, the Kick client
   secret, RabbitMQ or database passwords). Secrets are encrypted with sops + age (§19.3).
-- Never commit `decisions.md` (§3 below) or **un-anonymized recordings** (§6 below).
+- Never commit **un-anonymized recordings** (§6 below).
 - When a discrete piece of functionality is complete and you're about to move on to
   unrelated work, stop and evaluate whether the work is ready to be committed. Do not
   silently keep working across multiple unrelated changes — this keeps commits scoped to
@@ -38,9 +38,9 @@ continuity of collection come before everything else.
 
 ## 3. Decision log (`decisions.md`)
 
-This project keeps a local decision log at `decisions.md` in the repo root, organized by
-topic rather than chronologically. It is intentionally git-excluded (`.git/info/exclude`)
-and must never be committed.
+This project keeps a decision log at `decisions.md` in the repo root, organized by
+topic rather than chronologically. It is tracked in git and public with the repo, so the
+same rules apply as for any other file: no real usernames or channel names, no secrets.
 
 `project.md` is the shared design; `decisions.md` is the running record of why. When a
 logged decision changes the design, update `project.md` too, in the same piece of work.
@@ -96,12 +96,12 @@ understanding their intent first.
 | Path | What | Notes |
 |---|---|---|
 | `project.md` | The design | Keep in sync with reality |
-| `app/` | Phoenix app, roles `collector` and `web` (§10) | One image, role chosen by `ROLE` |
+| `app/` | Phoenix app, roles `collector` and `web` (§10) | One image, role chosen by `ROLE`. `app/AGENTS.md` holds Phoenix's own framework guidelines: follow them in `app/`; this file wins on conflict |
 | `ingress/receiver/` | Webhook receiver (§8.4) | Separate deployable, rarely changed, **never touches the database** |
 | `sim/` | The fake Kick + the recorder (§17) | All development and tests run against it |
 | `fixtures/` | Recorded, anonymized Kick payloads (§17.1) | Source for the simulator and parser tests |
 | `contracts/` | The event envelope (§8.1) | The only thing app and ingress share |
-| `deploy/` | Compose files, Caddy, RabbitMQ definitions | |
+| `deploy/` | Compose files, Caddy, RabbitMQ definitions, `deploy.sh` | `compose.dev.yml` runs TimescaleDB (55432) and RabbitMQ (55672) for development and tests; `rehearsal/rehearse.sh` runs the production stack locally and upgrades it under load: run it after changing anything on the deploy path |
 
 Follow the phase order in §20. Don't build ahead of the current phase without asking.
 
@@ -119,8 +119,9 @@ Follow the phase order in §20. Don't build ahead of the current phase without a
 - Recordings are **anonymized** before they enter `fixtures/` (ids, usernames, avatars,
   message text replaced consistently). Original signed webhook bodies, kept only for
   signature tests, stay out of any public repo.
-- From v2 we read `followers_count` only. Nothing else from that response is stored or
-  logged (it contains a signed `playback_url`).
+- From v2 we read `followers_count`, and `chatroom.id` (needed to join the channel's chat,
+  and available nowhere else). Nothing else from that response is stored or logged (it
+  contains a signed `playback_url`); both are extracted in `Kick.V2` and the rest dropped.
 
 ## 7. Data invariants (non-negotiable)
 
@@ -141,7 +142,8 @@ one, stop and ask.
 - **Ack after commit.** The consumer acks only after the database commit; the receiver
   answers Kick only after a publisher confirm or a spool write.
 - **UTC in storage**, channel timezone for daily and weekday figures at read time.
-- **Hours watched** = Σ `viewers × min(Δt, 60s)`; never interpolate across a gap.
+- **Hours watched** = Σ `viewers × min(Δt, 75s)` (viewers polled every 60s); never
+  interpolate across a gap.
 - **No chat text is ever stored.** Only ids, counts and times. Usernames live only in
   `kick_users`. `chat_minute_users` is kept 90 days.
 - Estimates (revenue, anything modeled) are labeled as such wherever they appear.
@@ -158,6 +160,10 @@ one, stop and ask.
   through the database plus a `"channels:changed"` broadcast.
 - **OTP:** every long-lived process is supervised; no bare `spawn`. Per-channel state
   lives in its `ChannelServer`; one failing channel must never affect another.
+- **Collection never waits on Postgres:** every write of collected data from a
+  collection process goes through the journal as a `Collector.Ops` operation (naming
+  streams by `(channel, started_at)`), never straight to the Repo. New polled data is
+  a new `Collector.Source`. Nothing in collection may crash the node (§10.1–10.3).
 - **Pure core:** sessionizer, metrics, envelope decoding, signature verification and
   parsers are pure modules with no processes, database or network. GenServers only carry
   state and call them.
@@ -195,6 +201,12 @@ one, stop and ask.
 
 ## 11. Conventions
 
+- **Never use real usernames or channel names** in docs, comments, code, tests, commit
+  messages or examples. Use placeholders: `<channel>`, `<other-channel>`, `<slug>`,
+  `<username>`, `<user id>`, or obviously fake values (`somestreamer`, `1234567`) where a
+  test needs a concrete value. The same goes for anything else that identifies a real
+  channel or person: real ids, stream titles, follower counts tied to a name. Real data
+  lives only in `sim/recordings/` (git-ignored) and, anonymized, in `fixtures/`.
 - Elixir: `mix format`; follow Phoenix and Ecto conventions; contexts own their schemas.
 - Keep `project.md` accurate: when the implementation deliberately differs from it, update
   it in the same change (and log the decision, §3 above).

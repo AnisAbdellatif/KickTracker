@@ -42,10 +42,28 @@ Four sources, each used for what only it does well.
   category rankings.
 - `GET /channels`: slug, broadcaster id, title, category, `stream` (is_live,
   viewer_count, start time, language, tags), description, banner, and
-  subscriber count fields (probably only filled for a channel that authorized
-  us; to verify). Up to **50 per request**, by id or by slug (not mixed).
-  **No follower count.**
+  **subscriber counts** (`active_subscribers_count`,
+  `active_gifted_subscribers_count`, `canceled_subscribers_count`). Up to
+  **50 per request**, by id or by slug (not mixed). **No follower count.**
 - Back off on 429.
+
+Observed in the recordings (2026-09-24, `sim/recordings/`):
+
+- **`viewer_count` changes about once a minute** (median 61s between
+  changes, shortest 46s, over 40 polls at 15s). Polling every 15s saw each
+  value about four times, so viewers are polled **every 60s** (§3.1): peaks
+  and averages can't be finer than Kick's own refresh anyway.
+- **Subscriber counts are filled for a channel that hasn't authorized us**
+  (real non-zero values with the app token). `stream.key` and `stream.url`
+  are empty strings.
+- **An unknown slug fails the whole request** with 400 `Invalid request`, not
+  an empty result. Slugs are checked one at a time when a channel is added;
+  batched calls use broadcaster ids.
+- **Offline** `/livestreams` answers 200 `{"data": [], "message": "OK"}`.
+- **No rate-limit headers** in any response; the limits stay unknown.
+- App tokens last **60 days** (`expires_in` 5 184 000).
+- The API lags the real end of a stream by a few seconds: live 3s after
+  `ended_at`, empty 19s after.
 
 ### 2.2 Official webhooks: events
 
@@ -61,7 +79,15 @@ Four sources, each used for what only it does well.
 | `channel.subscription.renewal` | subscriber, duration, expiry | Resubs, months subbed |
 | `channel.subscription.gifts` | gifter (may be anonymous), giftees | Gifted subs |
 | `kicks.gifted` | sender, amount, gift type and tier | Kicks |
+| `moderation.banned` | bans and timeouts | Not tracked; must be tolerated |
+| `channel.reward.redemption.updated` | channel-point redemptions | Not tracked; must be tolerated |
 | `chat.message.sent` | every chat message | Not used for now, see §2.4 |
+
+These ten are every event type Kick documents. Captured so far:
+`livestream.status.updated`, `livestream.metadata.updated` and
+`channel.followed`. The rest are still to record (§16); the simulator
+produces all of them, the unrecorded ones from Kick's documented field
+lists rather than from a recording.
 
 - Limits: 10 000 subscriptions per event type per app; `chat.message.sent`
   is capped at 1 000 for apps Kick hasn't verified.
@@ -83,6 +109,31 @@ Four sources, each used for what only it does well.
 - Local development needs a tunnel (cloudflared or ngrok) so Kick can reach
   the ingress.
 
+Observed in the recordings (2026-09-24):
+
+- **All 9 event types were accepted with the app token** for a channel that
+  hasn't authorized us (`livestream.*`, `channel.followed`,
+  `channel.subscription.*`, `kicks.gifted`, `moderation.banned`,
+  `channel.reward.redemption.updated`). Deliveries seen so far: follows,
+  status, metadata; subs, gifts and Kicks not observed yet.
+- **Start and end are the same event type**, `livestream.status.updated`:
+  start has `is_live: true, ended_at: null`, end has `is_live: false` and
+  `ended_at`. Both carry the same `started_at`, and it is **string-identical
+  to `/livestreams`' `started_at`** (`YYYY-MM-DDTHH:MM:SSZ`, second
+  precision). Stream length = `ended_at − started_at`.
+- The `title` in status events is the title **at that moment** (the end event
+  had the changed title), so status events are not a source of title changes.
+- **`livestream.metadata.updated` is a full snapshot** (title, language,
+  `has_mature_content`, category), sent whenever any of them changes; which
+  field changed is found by comparing with the previous snapshot. The
+  category appears **twice**, as `category` and `Category`, with the same
+  value; we read the lowercase one.
+- **`livestream.metadata.updated` and `channel.followed` carry no timestamp**
+  in the body; when it happened comes from `Kick-Event-Message-Timestamp`
+  (`...Z`, second precision).
+- **Delivery is fast**: 0.2–0.9s after Kick's timestamp; the end event arrived
+  5s after `ended_at`. Every delivery's signature verified.
+
 ### 2.3 Private v2 API: follower totals only
 
 `https://kick.com/api/v2/channels/<slug>`, Kick's own frontend API (the one
@@ -95,10 +146,56 @@ KickPlus uses). The only source of the **total follower count**
   IPs: **test from the VPS before relying on it**.
 - Light use only: one channel per request, every 15 min while live and once a
   day offline (§3).
-- Read `followers_count` and discard the rest. The response also carries a
-  `playback_url` with a signed token; it is never stored.
+- Read `followers_count`, and `chatroom.id` (the only source of the id chat
+  needs), and discard the rest. The response also carries a
+  `playback_url` with a signed token; it is never stored or logged.
 - Isolated in its own module so it can be replaced. Failures are gaps, never
   zeros; `channel.followed` keeps counting gross follows meanwhile.
+- Observed (2026-09-24): 200 with `followers_count` from a home machine; the
+  datacenter test is still open. The response repeats the channel id under
+  `chatroom.chatable_id`. `followers_count` came as a **number in one
+  recording and a string in another**: parse both.
+
+### 2.3b Other undocumented website endpoints (probed)
+
+The community list fb-sean/kick-website-endpoints documents Kick's website
+API. Same status as v2: undocumented, can change, a grey area under Kick's
+terms; used only isolated and optional, failures are gaps. `mix
+record.probe` requested each read-only candidate once for one live channel
+(2026-09-24, from a home machine, no auth unless noted):
+
+| Endpoint | Result | Use |
+|---|---|---|
+| `api.kick.com/channels/:id/followers-count` | 404 (by user id and by channel id) | Gone |
+| `api.kick.com/private/v0/channels/:id/viewer-count` | 404 | Gone |
+| `api.kick.com/private/v1/channels/{slug}` | **200** | **Possible v2 replacement for the follower total** (below) |
+| `api.kick.com/private/v1/livestreams` | 200: all of Kick's live streams, sorted by viewers, 20 per page, cursor | Rankings; the official `/livestreams` (sorts by viewers, 100 per page) is preferred |
+| `kick.com/current-viewers?ids[]=` | 200: `[{livestream_id, viewers, show_view_count}]` | Several streams' viewers in one call; not needed while the public API works |
+| `kick.com/api/v2/channels/{slug}/leaderboards` | 200: top gifters all time (10), month (10), week (5) | **Partial gift history from before tracking**; a cross-check for our gift counts |
+| `kick.com/api/v2/channels/{slug}/videos` | 200: the last ~27 days of streams (14 here) | **Airtime history from before tracking** (below) |
+| `kick.com/api/v1/channels/{slug}` | 200 (51 KB): same past streams under `previous_livestreams`, `followersCount` equal to v2's | Alternative to the two above |
+| `kick.com/api/v2/channels/{slug}/clips` | 200: clips with `view_count`, `likes_count`, cursor | A later clips feature |
+| `kick.com/api/v2/channels/{slug}/livestream` | 200: live stream details, `viewers` | Not needed |
+| `kick.com/api/v2/channels/{slug}/chatroom` | 200: chat settings (followers-only, slow mode…) | Maybe later, as context on chat activity |
+| `kick.com/api/v2/channels/{slug}/subscribers/last` | 401 (needs a login) | Not usable |
+| `…/videos/latest`, `private/v1/channels/{slug}/clips` | 404 | Gone |
+
+What that means:
+
+- **`private/v1/channels/{slug}` as a follower source.** It answers on
+  `api.kick.com` without auth, so it may avoid v2's Cloudflare risk from a
+  server. But its count was **0.06% higher than v2's** at almost the same
+  moment (v1 and v2 agreed exactly), and it uses **opaque string ids**
+  (`channel_…`, `user_…`), not Kick's numeric ids. So: a channel's follower
+  history comes from **one source only**, never mixed. The probe from the
+  VPS decides which (§16).
+- **Past streams (`videos`)**: start time, `duration` in **milliseconds**,
+  title, categories, VOD views, for about the last month. `viewer_count` is
+  **0 for every finished stream**: no viewer history. When a channel is
+  added, about a month of airtime and category history could be imported,
+  marked as imported, never mixed with observed data. Not planned yet.
+- **Leaderboards** are top lists, not every gift, so they can't become a
+  full history; they're for display and checking.
 
 ### 2.4 Pusher websocket: chat, raids and hosts (unofficial)
 
@@ -111,6 +208,19 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
 - `App\Events\ChatMessageEvent` carries `sender.id` and `sender.username`.
 - Also carries host/raid events (event names to confirm), and possibly other
   events on the per-channel feed `channel.<id>` (to verify).
+- Observed (2026-09-24, from a home machine):
+  - Accepted without auth; subscribing to `chatrooms.<id>.v2` and
+    `channel.<id>` both succeed.
+  - **The server's first frame (`connection_established`) often arrives in
+    the same read as the upgrade response.** A client must process those
+    bytes or it never subscribes (the recorder had this bug; fixed and
+    tested).
+  - `App\Events\ChatMessageEvent` has `type` `message` or `reply`; a reply
+    carries `metadata.original_message` (id, content) and
+    `metadata.original_sender` (id, username), plus `thread_parent_id`.
+    Message ids are UUIDs. Senders carry `identity.badges_v2`.
+  - Nothing arrived on `channel.<id>` in 20 minutes besides the subscription
+    confirmation. No raid or host seen yet.
 - Chat stays here rather than on the chat webhook: a webhook is one HTTP
   request per message, heavy on busy channels, and capped at 1 000 channels
   for an unverified app. The webhook is the official fallback if Pusher stops.
@@ -124,12 +234,13 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
 | What | How | Cadence |
 |---|---|---|
 | Stream start and end | `livestream.status.updated`; Kick's own `started_at` / `ended_at` | Event |
-| Viewers | `GET /livestreams`, batched | **Every 15s** |
+| Viewers | `GET /livestreams`, batched | **Every 60s** (Kick refreshes about every 60s, §2.1) |
 | Title changes | `livestream.metadata.updated` (+ compared on each poll) | Event |
 | Category changes | `livestream.metadata.updated` (+ compared on each poll) | Event |
 | Active chatters | unique senders per minute, per user (§12) | **Per minute** |
 | Hosts and raids | Pusher events | Event |
 | Followers (total) | v2 `followers_count` | **Every 15 min**, plus **at stream start and end** |
+| Subscribers (active, gifted, cancelled) | `GET /channels` (the safety-net poll) | **Every 5 min** |
 | Follows | `channel.followed` | Event |
 | Subs, resubs, gifted subs | `channel.subscription.*` | Event |
 | Kicks | `kicks.gifted` | Event |
@@ -139,6 +250,7 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
 | What | How | Cadence |
 |---|---|---|
 | Followers (total) | v2 `followers_count` | **Once a day** |
+| Subscribers (active, gifted, cancelled) | `GET /channels` (the safety-net poll) | **Every 5 min** |
 | Going live | `livestream.status.updated` | Event |
 | Safety-net poll | `GET /channels`, batched, all channels | Every 5 min |
 | Follows, subs, gifts, Kicks | webhooks | Event |
@@ -146,7 +258,7 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
 ### 3.3 Stream identity
 
 - **Start:** Kick's `started_at`. **End:** Kick's `ended_at`, or the last live
-  reading if the event was missed (accurate to 15s).
+  reading if the event was missed (accurate to 60s).
 - **Kick sends no livestream id**: neither `livestream.status.updated` nor
   `GET /livestreams` carries one. A stream is identified by
   **`(channel_id, started_at)`**, Kick's own start time, which both the
@@ -154,7 +266,17 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
   stream keeps its `started_at` and stays one stream; a new `started_at`
   starts a new one. v2's livestream id may be stored as an extra, never
   relied on.
-- The safety-net poll opens or closes streams whose webhooks were missed.
+- **Confirmed on real data**: the start event, the end event and the API
+  poll all reported the identical `started_at` string for the same stream.
+- The 60s poll opens or closes streams whose webhooks were missed.
+- The rules (`Metrics.Sessionizer`, pure, property-tested for arrival
+  order): Kick's end event always wins, and a stream it closed never
+  reopens (the API lists a stream for ~20s after it ends). Without it, a
+  stream ends at its **latest live evidence**, which only ever moves later.
+  A newer `started_at` closes the previous stream. A poll must miss the
+  channel for **90s** after the last evidence before it counts as offline
+  (the API lags; a start event can come before the API lists the stream).
+  A stream closed from polling that is seen live again reopens.
 
 ### 3.4 Chat windows are chosen at read time
 
@@ -180,9 +302,10 @@ per-minute table loses no long-term statistic.
 | Metric | Source |
 |---|---|
 | Live / offline, start and end time | webhook, poll as backup |
-| Viewers | public API, every 15s |
+| Viewers | public API, every 60s |
 | Title, category, language, tags | webhook + public API |
 | Follower total | v2 |
+| Subscriber totals (active, gifted, cancelled) | public API `/channels` |
 | Follows | webhook |
 | Subs, resubs, gifted subs, Kicks | webhooks |
 | Chat messages (sender, time) | Pusher |
@@ -197,12 +320,13 @@ can be recomputed if a formula changes.
 |---|---|
 | Airtime, number of streams, active days | stream start and end |
 | Average viewers | mean of viewer samples while live |
-| Peak viewers | highest sample (15s resolution) |
-| Hours watched | Σ viewers × min(Δt, 60s) |
+| Peak viewers | highest sample (60s resolution, Kick's own refresh rate) |
+| Hours watched | Σ viewers × min(Δt, 75s) |
 | Viewer curve per stream | the raw samples |
 | Viewers / hours watched / time per category | samples grouped by the category they carry |
 | Title and category impact | viewer samples around change events |
 | Follower gain (per stream, period) | follower totals at start and end; gross follows from webhook |
+| Subscriber growth, gifted share, cancellations | subscriber samples over time |
 | Active chatters (any window), messages, unique chatters | chat minutes |
 | Engagement rate | chatters ÷ viewers |
 | New vs returning chatters, overlap between channels | chat minutes across streams and channels |
@@ -215,9 +339,9 @@ All of these cover only the period since we started tracking a channel.
 
 ### 4.3 With limits
 
-- **Subscriber total:** events give what we saw (new, resubs, gifts), not the
-  channel's current count. The `channels` endpoint's subscriber fields are
-  probably empty for channels that haven't authorized us.
+- **Subscriber totals** come from `/channels` every 5 minutes (active,
+  gifted, cancelled), so they're known at that resolution; who subscribed,
+  and when exactly, comes only from the webhook events we received.
 - **Revenue:** Kicks and subs have known prices, so money figures are
   possible, but only as labeled **estimates** (Kick's cut, regional pricing).
 
@@ -261,13 +385,13 @@ unique chatters per stream on average, no chat text stored.
 
 | | 10 channels | 100 channels | 1 000 channels |
 |---|---|---|---|
-| Viewer rows/day (15s) | ~10k | ~100k | ~1M |
+| Viewer rows/day (60s) | ~2.5k | ~25k | ~250k |
 | Chat minute × chatter rows/day (kept 90 days) | ~50k | ~500k | ~5M |
 | Chat stream × chatter rows/day (kept) | ~3k | ~30k | ~300k |
 | Stored after the first year, compressed | ~0.1 GB | ~1 GB | ~10 GB |
 | Open chat websockets | 10 | 100 | 1 000 |
 | Chat messages/s at peak | ~5–50 | ~50–500 | ~500–5 000 |
-| Viewer polls (public API) | 1 req / 15s | 1 req / 15s | ~4 req / 15s |
+| Viewer polls (public API) | 1 req / min | 1 req / min | ~4 req / min |
 | Safety-net polls | 1 req / 5 min | 2 req / 5 min | 20 req / 5 min |
 | v2 follower requests | < 1 / min | ~1–2 / min | ~15 / min |
 | Webhook subscriptions | ~80 | ~800 | ~8 000 (limit 10 000 per type) |
@@ -333,29 +457,36 @@ Kick ──webhook──▶ receiver(s) ──publish──▶ RabbitMQ
 
 ### 8.1 The envelope (the contract)
 
-Every ingress produces exactly this, as the message body (JSON):
+Every ingress produces exactly this, as the message body (JSON). The full
+definition, transport properties and versioning rules are in
+[`contracts/envelope.md`](contracts/envelope.md), with a JSON schema.
 
 ```json
 {
-  "message_id": "01J…",        // Kick-Event-Message-Id
+  "envelope_version": 1,
+  "message_id": "01J…",        // Kick-Event-Message-Id (the dedup key)
   "subscription_id": "01J…",   // Kick-Event-Subscription-Id
-  "type": "livestream.status.updated",
-  "version": "1",
-  "sent_at": "…",              // Kick-Event-Message-Timestamp
+  "event_type": "livestream.status.updated",   // Kick-Event-Type
+  "event_version": "1",        // Kick-Event-Version
+  "sent_at": "…",              // Kick-Event-Message-Timestamp, verbatim
   "signature": "…",            // Kick-Event-Signature
-  "body": "<raw request body, unchanged>",
-  "received_at": "…",
+  "body": "<raw request body, byte for byte>",
+  "received_at": "…",          // ingress clock, RFC 3339 UTC, microseconds
   "receiver": "vps-a/1"
 }
 ```
+
+`message_id`, `sent_at` and `body` are copied exactly, since together they
+are the signed text (`message_id.sent_at.body`, RSA SHA-256 PKCS#1 v1.5).
+A body that isn't valid UTF-8 travels as `body_base64` instead. The
+envelope's own `envelope_version` is separate from Kick's `event_version`.
 
 AMQP properties: `message_id` = Kick's message id, `type` = event type,
 `delivery_mode` = persistent, routing key = event type.
 
 The raw body and signature travel with it, so the app verifies again and
-trusts neither the queue nor the ingress. The envelope is defined in
-`contracts/envelope.md` with a JSON schema, and every ingress has a test
-producing a valid one.
+trusts neither the queue nor the ingress. Every ingress has a test
+producing envelopes that validate against the schema.
 
 ### 8.2 What the app may assume, and nothing more
 
@@ -410,6 +541,23 @@ A forwarder in the same app drains the spool into RabbitMQ when it is
 reachable again. It needs only Kick's **public** key and publish-only
 RabbitMQ credentials: no app secret, no database access.
 
+**Built** (2026-09-24, `ingress/receiver`), with two details the plan
+didn't have:
+
+- Returns of unroutable messages are registered with the Erlang RabbitMQ
+  client directly. Through the `amqp` library's `Basic.return/2` they are
+  relayed by another process and arrive *after* the confirm, so an
+  unroutable message looked delivered; directly, the return is always in
+  the mailbox first (200 of 200 in a test).
+- A failed signature refetches Kick's key once, at most once a minute, in
+  case Kick rotated it, without letting bad requests hammer Kick's API.
+
+A live run (fake Kick → receiver → RabbitMQ, with RabbitMQ stopped
+mid-way) delivered every event: the ones sent during the outage were
+spooled, answered 200, and forwarded when the broker came back; every
+envelope re-verified against the fake Kick's key. Deliveries arrived out
+of order, as the contract (§8.2) warns.
+
 Later ingress options (same envelope, same exchange or an equivalent queue):
 a Cloudflare Worker, managed RabbitMQ (CloudAMQP: no app change at all), or
 another queue with its own Broadway producer.
@@ -423,17 +571,18 @@ another queue with its own Broadway producer.
 | Queue | **RabbitMQ** (quorum queues, publisher confirms, dead-lettering) | Mature, runs on the BEAM, official Broadway producer; managed options exist (CloudAMQP). |
 | Queue consumer | **Broadway** + **broadway_rabbitmq** | Batching, acks, back-pressure, concurrency; the queue is a swappable producer. |
 | Receiver | **Bandit + Plug + amqp**, **SQLite** spool (exqlite) | Tiny, separate, rarely redeployed. |
+| Collector journal | **SQLite** (exqlite), one file per collector | Collection outlives the database: writes wait on local disk (§10.2). |
 | HTTP client | **Req** | Public API, v2, token endpoint. Retries and backoff built in. |
 | Chat websocket | **Mint.WebSocket** inside our own GenServer (or WebSockex if simpler) | Maintained, the process owns the connection, reconnect logic is ours. |
 | JSON | **Jason** (or OTP's `:json`) | Chat frames, API bodies, envelopes. |
 | Database | **PostgreSQL + TimescaleDB**, one database | Hypertables, continuous aggregates, compression, retention, plain SQL. Self-hosted (see §12.1). |
 | DB access | **Ecto + Postgrex** | Schemas, migrations; Timescale features via `execute` in migrations. |
-| Background jobs | **Oban** | Follower polls, subscription management, event processing retries, rollups, retention. |
-| Clustering | **libcluster** | Joins the `collector` and `web` nodes so PubSub reaches live pages. |
+| Background jobs | **Oban** | Subscription management, event processing retries, rollups, transfers; queues run on the leading collector. |
+| Clustering | **DNSCluster**, Erlang distribution | Joins every app node (web and collectors, found by a shared DNS name, one cookie from the secrets) so PubSub carries live readings to the pages. |
 | Charts | **Apache ECharts** through one LiveView hook, loaded only where needed | Bands, markers, linked zoom, heatmaps, sampling in one library (§13.7). |
 | Styling | **Tailwind** (Phoenix default), logical properties, dark + light themes | RTL-ready, one set of tokens for UI and charts. |
-| Admin auth | **phx.gen.auth** + TOTP, no public sign-up | Admins invite admins. |
-| Caching | **Cachex** in `web`; HTTP caching of `/data/v1` JSON at Caddy / Cloudflare | History never changes; serve it once. |
+| Admin auth | Session tokens on phx.gen.auth's model, PBKDF2 (OTP `:crypto`) + TOTP (RFC 6238), no public sign-up | Admins invite admins. |
+| Caching | A small ETS cache (`KickTracker.Cache`) in `web`; HTTP caching of `/data/v1` JSON (ETag, `Cache-Control`) at Caddy / Cloudflare | History never changes; serve it once. |
 | i18n | **Gettext**, English first | Translation-ready (Arabic, French later). |
 | Observability | **Telemetry + Phoenix LiveDashboard**, **Oban Web**, RabbitMQ management UI, admin health page | Process counts, memory, per-channel health, queue depth, job failures. |
 | Hosting | **Docker Compose** on a VPS + **Caddy** for HTTPS | Each role and the receiver are separate services. |
@@ -445,35 +594,155 @@ at boot. Each role is its own service, deployed on its own.
 
 | Role | Runs | Redeployed |
 |---|---|---|
-| `collector` | Poller, channel processes, chat sockets, Broadway consumer, Oban | When tracking logic changes |
-| `web` | Public site, admin interface, `/data/v1` JSON | Often |
+| `collector` | The journal, the leader election and, on the leading node, the sources, channel processes, chat sockets, Broadway consumer and Oban queues | When tracking logic changes, standby first (§10.1) |
+| `web` | Public site, admin interface, `/data/v1` JSON, alert checks | Often |
 
 The receiver is **not** a role of the app; it is the ingress (§8.4).
 
 ```
 collector
-KickTracker.Supervisor (one_for_one)
+KickTracker.Supervisor (one_for_one, 20 restarts / 60s)
 ├─ KickTracker.Repo
-├─ Phoenix.PubSub                  (+ libcluster, shared with web)
-├─ Oban                            FollowerPoll, SubscriptionSync, ProcessEvent, rollups
-├─ Kick.Token                      app token (client credentials), refreshed before expiry
-├─ Tracking.Registry               channel id -> its processes
-├─ Tracking.ChannelsSupervisor     DynamicSupervisor
-│   └─ Tracking.ChannelSup          one per channel (rest_for_one)
-│       ├─ Tracking.ChannelServer   state, stream sessions, writes, broadcasts
-│       └─ Tracking.ChatSocket      Pusher connection for this chatroom
-├─ Tracking.Poller                 batched public API polling
-├─ Events.Consumer                 Broadway pipeline on kick_tracker.events
-└─ Tracking.Boot                   starts a ChannelSup per active channel on startup
+├─ Phoenix.PubSub                  (+ DNSCluster, shared with web)
+├─ Oban                            queues start paused; run only on the leader
+└─ Collector.Supervisor (one_for_one, 50 / 60s)
+    ├─ Collector.Status            in-memory health, for the endpoint and heartbeat
+    ├─ Collector.Journal           every write on local disk first (SQLite)
+    ├─ Collector.Writer            journal -> Postgres, exactly once, with backoff
+    ├─ Collector.Tracked           the tracked channels, cached (and kept in the journal)
+    ├─ Collector.Slot              where Collection runs while this node leads
+    ├─ Collector.Leader            the lease: collect or stand by
+    ├─ Collector.Heartbeat         this node's row in collector_nodes, every 10s
+    └─ Collector.StatusPlug        GET /healthz, /status on a loopback port
+         Collector.Collection (while leading; restarted by the Leader with backoff)
+         ├─ Tracking.Registry
+         ├─ Collector.Tasks        Task.Supervisor for the sources' requests
+         ├─ Kick.PublicKey, Kick.Token
+         ├─ Tracking.ChannelsSupervisor
+         │   └─ Tracking.ChannelSup          one per channel (rest_for_one)
+         │       ├─ Tracking.ChannelServer   state, stream sessions, writes, broadcasts
+         │       └─ Tracking.ChatSocket      Pusher connection for this chatroom
+         ├─ Tracking.Manager       a ChannelSup per tracked channel, resynced every minute
+         ├─ SourceRunner(Viewers), SourceRunner(Subscribers), SourceRunner(Followers)
+         └─ Events.Consumer        Broadway pipeline on kick_tracker.events
 
 web
-KickTrackerWeb.Supervisor
+KickTracker.Supervisor
 ├─ KickTracker.Repo
-├─ Phoenix.PubSub                  (+ libcluster)
-├─ Cachex                          query cache for aggregates
+├─ Phoenix.PubSub
+├─ Oban                            inserts jobs, runs none
+├─ Kick.Token                      for the admin's lookups
+├─ KickTracker.Cache               query cache for aggregates (ETS, TTL)
+├─ Alerts.Ticker                   checks alerts every minute (§18.2)
 └─ KickTrackerWeb.Endpoint         public site, /admin, /data/v1; read-only against
                                    collected data, writes admin tables (§13.8)
 ```
+
+### 10.1 Collection that doesn't stop
+
+History only exists from the moment we record it, so the collector is
+built to keep collecting through deploys, crashes and outages of what it
+depends on. The web role can restart freely.
+
+- **Two collectors** run (`collector-a`, `collector-b`), each with its own
+  journal volume. One **leads** and collects; the other **stands by**. The
+  lease is a Postgres advisory lock held on the Leader's own connection,
+  plus a `collector_lease` row with an **epoch** raised at every change of
+  holder; `collector_terms` records each holder's term and why it ended.
+- **A standby takes over** (it checks every second; rules in
+  `Collector.Lease`, pure, on the database's clock):
+  - at once when the leader released the lease on a clean stop (a deploy);
+  - at once when the lock is free and the database did **not** restart
+    since the leader's last heartbeat: the leader's session ended, it
+    crashed or was killed (about a second);
+  - when the leader holds the lock but has been silent for 6s (frozen, or
+    cut off with a half-open connection that TCP could take hours to
+    notice): the standby ends the leader's session, then takes over (about
+    7s);
+  - after a database restart, only if the leader hasn't taken its lock back
+    within 10s.
+  A collector restarting takes its own lease back at once.
+- **The leader** heartbeats every second. Superseded, or finding the lock
+  taken by another node, it stops collecting at once. The database merely
+  unreachable, it keeps collecting into its journal.
+- **Fencing**: every write carries the epoch it was made under; a write
+  made by an older holder after a newer one started is dropped by the
+  Writer, so a moment of overlap can't double chat counts.
+- **Watchdog**: leading, if the viewers source hasn't completed a cycle in
+  5 minutes, the collection tree is restarted. The tree giving up (too
+  many crashes) is restarted with a backoff (1s to 60s); nothing in
+  collection can take the node down.
+- **Deploys** update the standby first, wait for it to be healthy, then the
+  leader (§15.3). Oban queues run only on the leader, so jobs that write
+  collected data run where collection runs.
+- **Health**: each collector answers `/healthz` and `/status` on its own
+  loopback port (the container healthcheck; the deploy script reads which
+  one leads) and writes a `collector_nodes` row every 10s, which the health
+  page and the alerts read from the web role (§18.2).
+
+Scope: this protects collection on one VPS. For the VPS itself going,
+there is the shadow collector on another machine (§10.5).
+
+### 10.2 Writes go through a local journal
+
+Every write the collector makes (samples, streams, changes, chat minutes,
+coverage, usernames, processed marks, learnt channel ids and slugs) is an
+**operation** (`Collector.Ops`) appended to a local SQLite journal
+(`synchronous=FULL`) and applied to Postgres by the **Writer**:
+
+- In batches, oldest first, one transaction per batch, which also moves
+  this journal's high-water mark (`collector_journal_marks`): **exactly
+  once**, even if the process dies between the commit and the journal
+  delete.
+- The database away (refused, restarting, a lock timeout during a
+  migration) is waited out with backoff up to 30s; nothing is lost, and a
+  collector restarted meanwhile finds its journal where it left it.
+- A write that can never apply is found by retrying the batch one write at
+  a time and **set aside** (`buried`), so it can't block the others; the
+  count shows on the health page and raises an alert.
+- Operations name streams by their natural key `(channel, started_at)`,
+  never by id, so they can be made without the database.
+- On shutdown the Writer keeps writing for up to 15s after collection has
+  stopped and the lease is released; what is left waits for the next start.
+
+The journal also keeps snapshots: the tracked channels (`Collector.Tracked`
+falls back on them) and each channel's stream state. A `ChannelServer`
+starting within the same term (writes may still be in the journal), or
+while the database can't be read, starts from its snapshot; otherwise the
+database is the truth. So a collector can start, and collect, during a
+database outage.
+
+### 10.3 Sources
+
+A **source** (`Collector.Source`, a behaviour) says what to ask Kick, how
+to ask it and what the answer means; the `SourceRunner` does the rest the
+same way for all of them: a steady cadence (a cycle that overruns is
+followed at once, never overlapped), requests in tasks with the source's
+concurrency and deadline, crashes isolated to the unit, **coverage
+recorded by outcome**, writes journaled, status reported. Adding a data
+source is one module.
+
+- **Viewers**: every **60s**, `GET /livestreams` for **every** tracked
+  channel, 50 per request, 4 at a time, 40s deadline; each `ChannelServer`
+  gets `{:reading, data, at}`, or `:offline` when a request that succeeded
+  didn't list it. Polling all channels (not only the live ones) notices a
+  missed start within a minute. At the end of each cycle, one aggregated
+  broadcast for the home page (§13.5). Coverage source `api`.
+- **Subscribers**: every **5 min**, `GET /channels` for subscriber totals
+  and slug renames. Coverage source `subscribers`.
+- **Followers**: v2 `followers_count`, every 15 min per live channel, daily
+  per offline channel, and on request (stream start and end, a channel
+  just added, from anywhere through the `FollowerPoll` job); one request at
+  a time, three per 15s cycle, so v2 never sees a burst; a failure is
+  retried after 10 minutes. Also learns the chatroom id. Coverage source
+  `followers`.
+
+If a request fails, nothing is written for it: a missing reading is a gap,
+never "offline" and never zero. A 429 waits Kick's `retry-after`, capped at
+10s. The app token is replaced ahead of expiry; a failed refresh keeps the
+old one and retries every minute.
+
+### 10.4 Processes
 
 **Events.Consumer** (Broadway)
 - Decodes the envelope and **re-verifies the signature**. Bad or undecodable
@@ -481,67 +750,100 @@ KickTrackerWeb.Supervisor
 - In one transaction per batch: inserts into `webhook_events`
   (`ON CONFLICT (message_id) DO NOTHING`) and, for newly inserted rows,
   writes the facts that need no channel state: `follows` and
-  `support_events`.
+  `support_events`. RabbitMQ is its buffer: with the database away, a
+  batch waits and retries holding its messages unacknowledged.
 - Then acks. Only after the commit.
 - Stream status and metadata events are handed to the channel's
   `ChannelServer` after the commit. If it is down or restarting, the event
   stays unprocessed in `webhook_events` (`processed_at` null); the
   `ChannelServer` picks up unprocessed events for its channel when it starts,
-  and the 5-minute poll repairs anything else.
-
-**Poller** (one process)
-- Every **15s**: `GET /livestreams` for the channels currently live, 50 per
-  request, and sends each `ChannelServer` its reading: `{:reading, data, at}`.
-- Every **5 min**: `GET /channels` for all tracked channels, as a safety net
-  for missed live/offline and metadata events.
-- If a request fails, it sends nothing. A missing reading is a gap, never
-  "offline" and never zero.
+  and `ProcessEvents` hands over anything still waiting after 2 minutes.
 
 **ChannelServer** (one per channel)
 - Holds live/offline, the open stream, the current title and category, and
   this minute's chatters (`user_id -> messages`).
-- On a status event or a poll that disagrees with its state: opens or closes
-  the stream (keyed on `(channel_id, started_at)`), asks for a follower reading at
-  start and end, and tells the `Poller` to include or drop it.
-- On a reading: writes a viewer sample carrying the current category.
-- On a metadata event or a changed title/category in a reading: writes a
-  stream change.
-- Every minute: flushes the minute's chat to `chat_minutes` (counts) and
-  `chat_minute_users`, and upserts `chat_stream_users`, so a crash loses at
-  most a minute of chat.
-- On (re)start: reloads the open stream from the DB and processes its
-  channel's unprocessed events, so a restart mid-stream continues the same
-  stream.
+- Feeds status events and readings to the pure `Sessionizer`, which decides
+  when a stream opens, closes or reopens (keyed on `(channel_id,
+  started_at)`, rules in §3.3), and journals what it decides; asks the
+  followers source for a reading at start and end.
+- On a reading: a viewer sample carrying the current category.
+- On a metadata event or a changed title/category in a reading: a stream
+  change (not recorded when the stream already had that value).
+- Every minute: the minute's chat to `chat_minutes` (counts),
+  `chat_minute_users` and `chat_stream_users`, so a crash loses at most a
+  minute of chat.
+- An event whose handling raises is logged, reported and marked processed:
+  one bad payload can't crash the channel in a loop; it stays in
+  `webhook_events` to be replayed once fixed.
 - Broadcasts readings and events on `"channel:<id>"` for LiveView pages.
 
 **ChatSocket** (one per channel)
-- Connects to Pusher, subscribes to `chatrooms.<id>.v2`, answers pings.
-- Sends `{:chat, sender_id, at}` and raid/host events to its `ChannelServer`.
+- Connects to Pusher, subscribes to `chatrooms.<id>.v2` and, once known,
+  `channel.<kick channel id>`; answers pings, pings after the activity
+  timeout, reconnects if no pong comes, or if the upgrade doesn't complete
+  within 15s. Waits until the chatroom id is known (from v2).
+- Sends `{:chat, message}` (sender, id, time) to its `ChannelServer`, and
+  the names of events it doesn't know (raids and hosts, until recorded).
   No message text is kept.
-- Reconnects with exponential backoff (1s up to 30s) and reports connected /
-  disconnected so chat coverage is recorded.
+- Reconnects with exponential backoff (1s up to 30s) and records chat
+  coverage when connected and disconnected.
 - `rest_for_one`: if the `ChannelServer` restarts, the socket restarts with
   it; if only the socket crashes, the channel's state is untouched.
 
-**Oban jobs**
-- `FollowerPoll`: v2 `followers_count`, every 15 min per live channel, daily
-  per offline channel, and on demand at stream start and end. Spread out, one
-  channel per job.
+**Oban jobs** (on the leader; each with a time limit)
 - `SubscriptionSync`: makes Kick's webhook subscriptions match the tracked
-  channel list, pointing at the ingress URL; subscribes new channels, removes
-  dropped ones, and **restores subscriptions Kick cancelled** after a long
-  failure.
-- `ProcessEvent`: retries status/metadata events still unprocessed after a
-  while.
-- Rollup refreshes, retention and compression policies.
+  channel list (the seven event types we read); subscribes new channels,
+  removes dropped ones and duplicates, and **restores subscriptions Kick
+  cancelled** after a long failure. Where deliveries go (the ingress URL)
+  is set once in the Kick app's settings, not per subscription.
+- `ProcessEvents`: hands over status/metadata events still unprocessed
+  after a while.
+- `FollowerPoll`: passes a reading request to the followers source.
+- `Alerts` (its own queue), rollups, transfers, privacy and channel
+  deletions, reprocessing.
 
 **Adding or removing a channel** = insert or deactivate the row, start or stop
 its `ChannelSup`, sync its webhook subscriptions. No redeploy.
 
-**Growing past one collector:** Horde to spread the `ChannelSup`s across
-collector nodes, the `Poller` as a cluster singleton, Broadway consumers on
-every node (RabbitMQ shares the queue between them). Not needed until well
-past a thousand channels.
+### 10.5 The shadow collector
+
+An independent collector on a second machine (the stage 2 one, §15.2),
+with **its own database**, collecting the same channels **all the time**:
+viewers, subscriber and follower totals, chat. It shares nothing with the
+primary side but a private network link, so it keeps collecting through
+anything that stops the main VPS, and there is no takeover: it was
+already running.
+
+- **Mode**: the same image, `COLLECTOR_MODE=shadow`, two collectors with
+  their own lease like the primary side's. No webhook consumer and no
+  subscription management (webhooks are the receivers', and a backup
+  receiver on the same machine spools them, §15.2); no site; its own jobs
+  only.
+- **Channel list and removals** come from the primary's database every
+  minute (`Workers.ShadowSync`, a read-only user). When it can't be read,
+  the shadow keeps its last list, keeps collecting, and notifies after 5
+  minutes (the primary's alerts may be down with it). Removal requests are
+  carried out on the shadow's copy too.
+- **Backfill**: every 5 minutes the primary side reads the shadow's
+  database (`Workers.Backfill`, a read-only user) and, per channel and
+  source over the last 7 days, copies the shadow's rows for the ranges
+  the shadow covered and it didn't (`Collector.BackfillPlan`, pure). Rows
+  are applied as `Collector.Ops`, so what the primary has always wins and a
+  second pass changes nothing; chat is copied only for whole minutes the
+  primary has nothing for. Each filled range is recorded in `coverage`
+  with `collector = 'shadow'`; rollups are rebuilt over it.
+- **Health**: the backfill records the shadow's leader heartbeat as the
+  `collector_nodes` row `shadow`; an alert fires when it hasn't been seen
+  collecting for 15 minutes. It has its own Kick app (token and rate
+  limits of its own) and its own `HEARTBEAT_URL`.
+- **Cost**: Kick sees two collectors: one more `/livestreams` request per
+  50 channels a minute, one more chat connection per channel.
+- It keeps 30 days (the primary backfills from the last 7) and isn't
+  backed up.
+
+**Growing past one collecting node:** partition the channels between
+collectors (a lease per partition), each with its own journal. Not needed
+until well past a thousand channels.
 
 ## 11. Project layout
 
@@ -589,11 +891,11 @@ kick_tracker/
 │  │     │                              #   annotations, privacy, settings, audit
 │  │     ├─ controllers/data/           # /data/v1 JSON, cacheable (§13.5)
 │  │     ├─ components/                 # stat cards, period picker, chart, tables
-│  │     └─ user_auth.ex                # phx.gen.auth, admin on_mount
+│  │     └─ admin_auth.ex               # admin sessions, on_mount
 │  ├─ assets/js/
 │  │  ├─ hooks/chart.js                 # the one ECharts hook
-│  │  └─ charts/                        # chart kinds: timeseries, bars, share,
-│  │                                    #   heatmap, sparkline; theme tokens
+│  │  └─ charts/                        # chart kinds: timeseries, stream, bars,
+│  │                                    #   share, heatmap, sparkline; theme tokens
 │  ├─ priv/repo/migrations/          # incl. hypertables, continuous aggregates
 │  ├─ test/
 │  ├─ config/                        # runtime.exs: ROLE, KICK_*, DATABASE_URL, AMQP_URL
@@ -607,10 +909,14 @@ kick_tracker/
 ├─ contracts/
 │  ├─ envelope.md                    # the envelope, the delivery guarantees (§8)
 │  └─ envelope.schema.json
-└─ deploy/
+└─ deploy/                          # runbook: deploy/README.md
    ├─ compose.single.yml             # stage 1, one VPS
    ├─ compose.backup-receiver.yml    # stage 2, second VPS
    ├─ Caddyfile
+   ├─ db/                            # TimescaleDB + WAL-G
+   ├─ backup/                        # base backups, scripted restore test
+   ├─ ops/                           # host checks (disk, certificates)
+   ├─ secrets/                       # sops + age encrypted env files
    └─ rabbitmq/                      # definitions: exchanges, queues, users, policies
 ```
 
@@ -691,6 +997,13 @@ a stream's per-minute detail is gone, but its per-minute counts
 ### 12.4 Titles and categories
 
 - `stream_changes` is an append-only log: field, old value, new value, when.
+  It is built by comparing each `livestream.metadata.updated` snapshot with
+  the previous one (the event carries every field, not only the changed
+  one); `occurred_at` is the delivery's `Kick-Event-Message-Timestamp`. The
+  poll's title and category fill in changes whose events were missed; the
+  API lags Kick, so a poll counts a difference only when it sees it twice
+  in a row and not within two minutes of an event, dated at the first
+  sighting (`Metrics.Changes`). Titles in `livestream.status.updated` are not used for changes.
 - `stream_segments` is derived from it: stretches where title, category and
   language don't change. "Time per category" and "viewers after the switch
   to GTA" are simple queries on it.
@@ -710,29 +1023,44 @@ kick_users         (id, username, seen_at)
                    -- the only place usernames live; facts hold ids only
 
 -- ingest (normal tables)
-webhook_events     (message_id PK, subscription_id, type, version,
-                    occurred_at, received_at, receiver, body jsonb,
-                    signature, processed_at NULL)
+webhook_events     (message_id PK, subscription_id, event_type, event_version,
+                    sent_at (verbatim text), occurred_at, signature,
+                    body bytea, received_at, receiver, stored_at,
+                    processed_at NULL, broadcaster_user_id NULL)
                    -- every delivered event, permanently; source for
-                   -- reprocessing if handling logic changes
-coverage           (id, channel_id NULL, source: api | chat | ingress | followers,
-                    from, to, ok)
-                   -- our own gaps, so every stat can say how complete it is
+                   -- reprocessing if handling logic changes. The body is
+                   -- raw bytes, not jsonb, and sent_at the header's own
+                   -- string: together they're the signed text, and jsonb
+                   -- would reformat it
+coverage           (id, channel_id NULL, source: api | subscribers | chat |
+                    ingress | followers, from_at, to_at, ok)
+                   -- our own gaps, so every stat can say how complete it
+                   -- is. Periods are always closed (extended by each
+                   -- outcome), so a dead collector claims nothing; time
+                   -- no period covers is a gap
 
 -- streams (normal tables)
 streams            (id, channel_id, started_at, ended_at NULL,
                     end_source: event | poll, kick_livestream_id NULL,
                     UNIQUE (channel_id, started_at))
+                   -- ended_at >= started_at; an end always says how it
+                   -- was learnt
 stream_changes     (id, stream_id, occurred_at, field: title | category |
-                    language | tags | mature, old_value, new_value)
+                    language | mature, old_value, new_value,
+                    source: event | poll,
+                    UNIQUE (stream_id, field, occurred_at))
+                   -- a stream's first values have no old_value
 
 -- time series (hypertables, compressed, segmented by channel_id)
 viewer_samples     (channel_id, observed_at, stream_id, viewers, category_id,
                     PRIMARY KEY (channel_id, observed_at))
-                   -- every 15s while live
+                   -- every 60s while live
 follower_samples   (channel_id, observed_at, followers,
                     PRIMARY KEY (channel_id, observed_at))
                    -- 15 min live, daily offline, stream start and end
+subscriber_samples (channel_id, observed_at, active, active_gifted, canceled,
+                    PRIMARY KEY (channel_id, observed_at))
+                   -- every 5 min, from the /channels safety-net poll
 chat_minutes       (channel_id, minute, stream_id, messages, chatters,
                     PRIMARY KEY (channel_id, minute))
 chat_minute_users  (channel_id, minute, user_id, messages,
@@ -742,20 +1070,27 @@ chat_minute_users  (channel_id, minute, user_id, messages,
 -- per-stream and event facts (normal tables)
 chat_stream_users  (stream_id, user_id, messages, first_at, last_at,
                     PRIMARY KEY (stream_id, user_id))
-follows            (message_id PK, channel_id, stream_id NULL,
-                    occurred_at, user_id)
-support_events     (message_id PK, channel_id, stream_id NULL, occurred_at,
+follows            (message_id PK, channel_id, occurred_at, user_id)
+support_events     (message_id PK, channel_id, occurred_at,
                     kind: sub | resub | gift | kicks,
                     user_id NULL,            -- subscriber / gifter / sender
                     quantity,                -- giftees, months, or Kicks amount
-                    tier, payload jsonb)
-channel_events     (id, channel_id, stream_id NULL, occurred_at,
+                    tier, payload jsonb)     -- giftee ids, expiry, gift type;
+                                             -- never message text or usernames
+channel_events     (id, channel_id, occurred_at,
                     kind: raid_in | raid_out | host | ...,
-                    other_channel_id NULL, viewers NULL, payload jsonb)
+                    other_channel NULL, viewers NULL, dedup_key, payload jsonb,
+                    UNIQUE (channel_id, dedup_key))
+                   -- created; filled once raid/host event names are
+                   -- recorded (§16). Unknown chat-feed events are logged
+                   -- by name only meanwhile
 ```
 
-- `stream_id` is null for things that happen while offline (follows, subs,
-  Kicks).
+- Follows and support events carry **no stream id**: which stream they
+  belong to is read from `occurred_at` against the streams' ranges. A
+  follow stored before its stream's start event arrives is then still
+  counted for that stream, whatever the arrival order. `channel_events`
+  works the same way.
 - `payload jsonb` keeps raw data so new fields need no migration.
 - `follows` and `support_events` can be rebuilt from `webhook_events`.
 - Unique keys on hypertables include the time column (a TimescaleDB rule).
@@ -767,11 +1102,24 @@ channel_events     (id, channel_id, stream_id NULL, occurred_at,
 
 - `stream_segments` (view): periods of constant title, category, language.
 - `stream_stats` (cache, rebuildable): airtime, avg and peak viewers, hours
-  watched, follower gain, gross follows, unique chatters, messages, subs,
-  gifted subs, Kicks.
-- Continuous aggregates by **UTC hour**: viewers (avg, peak, hours watched),
-  chat (messages), followers (last value), support totals. Daily, weekday and
-  30-day figures are built from them in the channel's timezone.
+  watched, followers at start and end and the gain, gross follows, unique
+  chatters, new chatters (no earlier stream of the channel), messages, subs,
+  resubs, gifted subs, Kicks. Unknown is null, never 0.
+- `excluded_streams` (view): streams an admin excluded (`stream_overrides`),
+  left out of every figure and marked where listed.
+- `hourly_stats` by **UTC hour** (cache, rebuildable, a hypertable):
+  samples, avg and peak viewers, hours watched, chat minutes and messages,
+  last follower total, follows, subs, gifted subs, Kicks. Daily, weekday and
+  30-day figures are built from it in the channel's timezone.
+- Both are recomputed by a job (last 3 hours every 5 minutes, last 2 days
+  nightly) and by `mix kick_tracker.rebuild` for any range.
+- **Not continuous aggregates**, as first planned: hours watched weights
+  each sample by the time since the previous one (capped at 75s), which
+  needs a window function a continuous aggregate can't run, and TimescaleDB
+  Toolkit (time-weighted averages) isn't in the community image. One job-
+  maintained table keeps a single definition: `KickTracker.Metrics` is the
+  reference, the SQL is tested to agree with it, and hourly hours watched
+  add up exactly to the stream's.
 
 ### 12.7 Retention and privacy
 
@@ -829,7 +1177,7 @@ shared.
 
 One time axis, stacked panels sharing zoom and crosshair:
 
-1. **Viewers** (15s resolution), with:
+1. **Viewers** (60s resolution), with:
    - **shaded bands** for category segments, labeled ("Just Chatting",
      "GTA V"), and ticks for title changes;
    - **markers** for raids/hosts in and out (with viewer counts), sub gift
@@ -841,7 +1189,7 @@ One time axis, stacked panels sharing zoom and crosshair:
 
 Beside it: stream stat cards, the change timeline (title and category
 history), top chatters and supporters of the stream. While live, new points
-append every 15s and the cards update.
+append every 60s and the cards update.
 
 ### 13.4 Resolution by range
 
@@ -850,30 +1198,37 @@ The server chooses the bucket from the requested range, so no series exceeds
 
 | Range | Viewers | Chat | Source |
 |---|---|---|---|
-| One stream (≤ ~12h) | raw 15s samples | per minute | `viewer_samples`, `chat_minutes` |
+| One stream (≤ ~12h) | raw 60s samples | per minute | `viewer_samples`, `chat_minutes` |
 | ≤ 7 days | 5-min buckets | 5-min buckets | `viewer_samples` (time_bucket) |
-| ≤ 90 days | hourly | hourly | continuous aggregates |
-| Longer | daily (channel timezone) | daily | from hourly aggregates |
+| ≤ 90 days | hourly | hourly | `hourly_stats` |
+| Longer | daily (channel timezone) | daily | `hourly_stats` |
 
 Each bucket carries **avg and max** (and min where useful), drawn as a line
 with a peak band, so downsampling never hides a peak. Buckets without data
-are sent as `null` (a break), never 0.
+are sent as `null` (a break), never 0. Chat counts are 0 only where chat
+coverage says we were listening, `null` where we weren't. Daily buckets stay
+under 2 000 points for about five years of history; weekly buckets will be
+needed after that.
 
 ### 13.5 Data delivery
 
 - **History over cacheable JSON:** charts fetch
-  `GET /data/channels/:id/viewers?from=…&to=…&res=…` and similar endpoints.
+  `GET /data/v1/channels/:slug/viewers?from=…&to=…&res=…` (also `chat`,
+  `support`, `followers`, `heatmap`, `categories`), `/data/v1/streams/:id`
+  (the stream page), `/data/v1/streams/:id/chatters?window=5` and
+  `/data/v1/compare?c=a,b&metric=…`. `res` can only ask for fewer points.
   Compact column format (`{"t":[…unix seconds…],"avg":[…],"max":[…]}`).
-  Responses for closed periods get long `Cache-Control` and an ETag, so
-  Caddy or Cloudflare can serve repeat visitors without touching the app.
-  Ranges that include "now" get a short TTL (e.g. 30s).
+  Responses get an ETag and a `Cache-Control`, so Caddy or Cloudflare can
+  serve repeat visitors without touching the app: a day for ranges ending
+  more than two days ago, 30s for ranges reaching into the last two days
+  (rollups and late events can still change them).
 - **Live over LiveView:** the page subscribes to `"channel:<id>"`; new
   readings are pushed to the chart hook with `push_event` (append a point),
-  at most every 15s. Chart data is **never kept in LiveView assigns**, so a
+  at most every 60s. Chart data is **never kept in LiveView assigns**, so a
   connected visitor costs a few KB, not a copy of the series.
-- **Home page:** one aggregated `"live"` broadcast every 15s with all live
+- **Home page:** one aggregated `"live"` broadcast every 60s with all live
   channels' current viewers, not one per channel.
-- **Query cache** (Cachex) in the `web` role for expensive aggregates
+- **Query cache** (`KickTracker.Cache`, ETS) in the `web` role for expensive aggregates
   (leaderboards, 30-day cards), keyed by query and period: minutes for
   periods including today, long for closed periods.
 - The JSON endpoints are the seed of a **public read API** later; they are
@@ -904,9 +1259,19 @@ code splitting). It covers every chart kind we need with one API:
 - built-in `lttb` sampling and canvas rendering for dense series.
 
 Wrapped in **one LiveView hook** and a small set of **chart kinds** written
-once in JS (`timeseries`, `bars`, `share`, `heatmap`, `sparkline`). The
+once in JS (`timeseries`, `stream`, `bars`, `share`, `heatmap`, `sparkline`;
+`stream` is the stream page's stacked panels). The
 server sends data and a kind, never ECharts options, so every chart of a
 kind looks and behaves the same and the payload stays small.
+
+**Zoom.** A time chart opens on the stretch that has data, first to last
+point with a little room, rather than the whole requested period (a 30-day
+view of a channel tracked since yesterday would otherwise be a sliver at
+the edge), and a stream opens on what we recorded rather than Kick's own
+start. The axis still spans the whole period or stream: the reader zooms
+in or out from there (wheel or pinch, drag to pan). Their zoom is kept
+across live points and theme changes; double-click, or the chart's "show
+all" button, fits the data again.
 
 (Chart.js was the earlier pick; it lacks bands, markers, linked zoom and
 heatmaps without plugins. uPlot is faster but too narrow for heatmaps and
@@ -914,16 +1279,19 @@ shares.)
 
 Also: every chart can switch to a **table view** and **export CSV** (the same
 JSON), which also serves accessibility. Colors come from a colorblind-safe
-palette with a dark theme by default and a light one; both from the same
-tokens.
+palette (checked for colour-vision deficiency in both themes), used in a
+fixed order so a channel keeps its colour; magnitudes use one blue ramp.
+Light and dark themes follow the visitor's system setting unless they pick
+one, and both come from the same CSS tokens (`assets/css/app.css`).
 
 ### 13.8 Admin interface
 
 Under `/admin`, same `web` role, separate `live_session` with an `on_mount`
 auth check.
 
-- **Access:** `phx.gen.auth` accounts, **no public sign-up** (admins invite
-  admins), TOTP second factor. Optionally reachable only over the private
+- **Access:** accounts on phx.gen.auth's model (server-side session tokens),
+  password + TOTP on every login, **no public sign-up** (admins invite
+  admins). Optionally reachable only over the private
   network (Caddy IP allowlist or Tailscale) as a second layer.
 - **Channels:**
   - Add by slug: resolve through the public API, preview (avatar, ids, live
@@ -945,14 +1313,29 @@ auth check.
 - **Reprocess:** rebuild `stream_stats` or rollups for a channel and range;
   replay `webhook_events` through the current handlers.
 - **Data corrections** (never editing raw facts, only adding on top):
-  - merge two streams the sessionizer split, or split one it merged;
+  - merge two streams the sessionizer split (built), or split one it merged
+    (not built yet: it needs an id for each half);
   - exclude a stream (test stream, rebroadcast) from statistics;
   - **annotations** on a channel's timeline ("collector outage", "suspected
     viewbots", "charity stream"), optionally shown publicly on charts.
 - **Privacy:** find everything held about a Kick user id; delete it
   (per-user rows, username, raw event bodies redacted).
-- **Settings:** polling cadences, feature flags (e.g. show the support page
-  publicly), public groups.
+- **Export / import:** download chosen channels, alone or with their
+  history over an optional date range, as a `.zip` of CSVs (one per table,
+  local ids kept so they join, plus `manifest.json`); upload one from
+  another instance, preview it (new channels, channels already here,
+  channels it would delete), and merge it. Only raw facts and admin
+  corrections travel; derived tables are rebuilt afterwards. Imports only
+  add, matching rows on natural keys (Kick ids, `(channel, started_at)`,
+  `message_id`), so rows already here win and a second import changes
+  nothing. Removal requests travel with the data (`removals`): a channel or
+  user removed on either side stays removed. The collector does the work
+  (`Workers.Transfer`, its own queue); the files live in `TRANSFER_DIR`,
+  shared by both roles, for 7 days.
+- **Settings:** feature flags (show the support page publicly, show top
+  chatters and supporters by name), the assumptions behind the revenue
+  estimate; public groups on their own page. Polling cadences stay in code,
+  with the rules that depend on them.
 - **Audit log:** every admin action, who and when.
 
 **How admin actions reach the collector:** the database is the source of
@@ -961,10 +1344,12 @@ truth. The admin writes (e.g. a new active channel) and broadcasts
 stop `ChannelSup`s, sync subscriptions). The collector also reconciles from
 the database every minute, so a lost message only delays the change.
 
-New tables for this: `admins` (phx.gen.auth), `channel_groups`,
+New tables for this: `admins`, `admin_tokens` (sessions, invitations), `channel_groups`,
 `channel_group_members`, `stream_overrides` (merge / split / exclude),
-`annotations`, `admin_audit_log`, `settings`. The `web` role is read-only
-against the collected data and writes only these.
+`annotations`, `admin_audit_log`, `settings`, `transfers` (export and
+import log). The `web` role is read-only against the collected data and
+writes only these. `removals` (Kick ids whose removal was carried out) is
+written by the collector, with the deletion itself.
 
 ### 13.9 Performance targets
 
@@ -980,8 +1365,9 @@ against the collected data and writes only these.
 
 - **Gaps are recorded as gaps.** A failed poll writes nothing, never a zero.
   No answer is not the same as offline. Every gap lands in `coverage`.
-- **Hours watched** = Σ `viewers × min(Δt, 60s)`, so an outage is never
-  filled in by interpolation.
+- **Hours watched** = Σ `viewers × min(Δt, 75s)`: 75s tolerates a poll a
+  few seconds late, while a missed poll (a 120s gap) is filled by at most
+  15s, never interpolated.
 - **Events are idempotent** (unique `message_id`) and **order-independent**
   (event timestamps and `started_at`, never arrival order).
 - **UTC everywhere, channel timezone at read time**: daily and weekday
@@ -1007,19 +1393,23 @@ against the collected data and writes only these.
 |---|---|---|---|
 | `receiver` ×2 | `ingress/receiver` | Rarely, one at a time | Nothing, while the other answers |
 | `rabbitmq` | official | Rarely | Receivers spool to disk; nothing lost |
-| `collector` | `app`, `ROLE=collector` | When tracking changes | Events wait in the queue; ~one missed 15s reading and seconds of chat, recorded in `coverage` |
-| `web` | `app`, `ROLE=web` | Often | Site down; collection unaffected |
-| `db` | TimescaleDB | Rarely | Consumer stops acking, events wait in the queue; polling pauses |
+| `collector-a`, `collector-b` | `app`, `ROLE=collector` | When tracking changes, standby first | One down: the other collects (within a second after a clean stop or a crash, ~7s if the leader freezes). Both down: events wait in the queue; polls and chat come from the shadow's backfill (§10.5) |
+| shadow (second VPS) | `app`, `COLLECTOR_MODE=shadow`, own database | With the collectors | Nothing, while the primary side collects; the main VPS down, it is what still collects |
+| `web-a`, `web-b` | `app`, `ROLE=web` | Often, one at a time | One down: Caddy sends everyone to the other. Both down: site down; collection unaffected |
+| `db` | TimescaleDB | Rarely | Collection continues into the leader's journal and is written when it is back; the consumer stops acking, events wait in the queue; the site is down |
 | `caddy` | official | Rarely | Ingress unreachable (see stage 2) |
 
-`docker compose up -d web` redeploys only the website; the receivers and the
-queue keep running the images they have.
+`docker compose up -d web` redeploys only the website; the receivers, the
+queue and the collectors keep running the images they have (images are
+pinned in `deploy/.env`, so a plain `docker compose up -d` doesn't swap
+the collectors' either).
 
 ### 15.2 Stages
 
 **Stage 1: one VPS.**
 Caddy → two receivers (`lb_policy first`, active health checks) → RabbitMQ
-(single node) → collector. Covers receiver crashes and receiver updates;
+(single node) → two collectors, one collecting (§10.1). Covers receiver
+crashes and updates, collector crashes and updates, and database restarts;
 app deploys never touch webhook intake.
 
 **Stage 2: backup receiver on a second VPS.**
@@ -1027,7 +1417,9 @@ Same receiver image on another provider or region, with its own spool,
 publishing to RabbitMQ over a private network (WireGuard or Tailscale). The
 webhook hostname is routed by **Cloudflare Load Balancing** (health-checked
 failover between the two machines). Covers the main VPS or Caddy going down:
-events are received and spooled on the backup until RabbitMQ is back.
+events are received and spooled on the backup until RabbitMQ is back. The
+same machine runs the **shadow collector** (§10.5), so polls and chat are
+collected through the outage too and backfilled after it.
 
 **Stage 3 (if ever needed): a redundant queue.**
 A 3-node RabbitMQ cluster (quorum queues replicate across nodes), or managed
@@ -1044,6 +1436,19 @@ change to the app beyond producer config.
   fields); a breaking change means a new `version` and a consumer that reads
   both.
 - Redeploy receivers one at a time; the other keeps answering.
+- Redeploy the web nodes one at a time too: Caddy health-checks both
+  every 2s, keeps a visitor on one (by address) and retries a request on
+  the other when one is being replaced.
+- Every deploy runs `deploy/deploy.sh` (the Deploy workflow over SSH, or
+  by hand), and the whole path is rehearsed on a development machine
+  with `deploy/rehearsal/rehearse.sh` (the production stack under load,
+  upgraded step by step, with what each step costs measured).
+- Redeploy collectors the standby first, waiting for it to be healthy, then
+  the leader, whose clean stop hands over within a second (§10.1). The
+  deploy workflow finds the leader from the collectors' status ports.
+- Migrations run with `lock_timeout = 5s`: one that would queue behind
+  the collector's writes (and hold every later write behind it) fails and
+  is retried at a quieter moment; the collectors' journals absorb the wait.
 
 ## 16. Open questions
 
@@ -1054,7 +1459,25 @@ Answered:
 - ~~Batching limits?~~ 50 channels per request for `livestreams` and
   `channels`.
 - ~~Is there a "stream started" signal?~~ Yes, `livestream.status.updated`,
-  subscribable with the app token.
+  subscribable with the app token; the same event signals the end.
+- ~~How often does Kick refresh `viewer_count`?~~ About every 60s (§2.1).
+- ~~Are the `channels` subscriber-count fields filled for channels that
+  haven't authorized us?~~ Yes (§2.1); now tracked every 5 minutes.
+- ~~Does Pusher accept connections without auth?~~ Yes, from a home machine
+  (§2.4).
+
+Partly answered:
+
+- **Sub, gift and Kicks webhooks with the app token:** subscriptions are
+  accepted for a channel that hasn't authorized us; no delivery of those
+  types observed yet. Seven of the ten event types are still uncaptured:
+  `channel.subscription.new`, `.renewal`, `.gifts`, `kicks.gifted`,
+  `moderation.banned`, `channel.reward.redemption.updated` and
+  `chat.message.sent`. Record a busy channel where people subscribe, gift
+  and get timed out. Until then the simulator's shapes for them follow the
+  documentation, and must be re-checked against a recording.
+- **Public API rate limits:** no rate-limit headers are sent, so the limits
+  are unknown. We don't probe for them; stay batched and back off on 429.
 
 Still open:
 
@@ -1062,17 +1485,12 @@ Still open:
    whether and when it is delivered again. Decides how urgent stages 2 and 3
    are.
 2. **Does v2 answer from the VPS** (datacenter IP), not just from home?
-3. **Do sub, gift and Kicks webhooks work with the app token** for a channel
-   that hasn't authorized us? Test on one real channel.
-4. **How often does Kick refresh `viewer_count`?** If it's every 30–60s, most
-   15s readings repeat (harmless, they compress; but worth knowing).
-5. **Public API rate limits** (requests per minute).
-6. **Pusher from a server:** accepted, any limit on subscriptions per
-   connection, and the exact raid/host event names. Does the `channel.<id>`
-   feed carry anything useful (live status, follower counts)?
-7. **Are the `channels` subscriber-count fields** filled for channels that
-   haven't authorized us?
-8. **Outgoing raids:** visible from the raiding channel's feed, or only in the
+   And `api.kick.com/private/v1/channels/{slug}` (§2.3b): if v2 is blocked
+   from a datacenter and this isn't, it becomes the follower source. Run
+   `mix record.probe` and `mix record.v2` from the VPS.
+3. **Pusher from a datacenter IP**, any limit on subscriptions per
+   connection, and the exact raid/host event names.
+4. **Outgoing raids:** visible from the raiding channel's feed, or only in the
    target's?
 
 ## 17. Development: recorded payloads and a fake Kick
@@ -1085,8 +1503,11 @@ real life.
 
 ### 17.1 Recording real payloads (once, lightly)
 
-A small recorder (`sim/recorder`, a `mix` task) run by hand against the real
-Kick, on one or two channels, for a limited time:
+A set of `mix` tasks in `sim/` (`record.api`, `record.v2`, `record.pusher`,
+`record.subscribe`, `record.webhooks`, `record.probe`, then
+`fixtures.anonymize`), run by hand
+against the real Kick, on one or two channels, for a limited time. The
+runbook is `sim/README.md`. They record:
 
 - **Public API:** `/livestreams`, `/channels`, the token endpoint, and error
   responses (401, 404, 429 if seen).
@@ -1097,14 +1518,26 @@ Kick, on one or two channels, for a limited time:
 - **Pusher:** raw frames from a chatroom: connection, subscription, pings,
   chat messages, and raids / hosts / anything else that shows up.
 
-Stored under `fixtures/` in the repo, **anonymized** (user ids, usernames,
-avatars and message text replaced consistently, so the same person stays the
-same fake person across files). Signed webhook fixtures keep their original
+Raw recordings go to `sim/recordings/` (git-ignored); tokens, `Authorization`
+and v2's `playback_url` are redacted before anything is written. They reach
+`fixtures/` only through `mix fixtures.anonymize`: user and channel ids,
+usernames and slugs, avatars and every URL, and free text (chat, titles,
+bios) are replaced consistently, so the same person stays the same fake
+person across files and runs (the mapping stays in `sim/recordings/`). It
+reports every text field it kept without a rule, by path only, for review
+before committing, and then runs an independent **leak check**: every real
+username, slug, chat text and id in the raw files is searched for in the
+output (names, chat texts, numeric and string ids, UUIDs), and the run fails
+if any is found. (On the first real data it caught the channel id under
+`chatroom.chatable_id`, which the rules had missed.) UUIDs and opaque string
+ids are replaced by consistent fakes of the same shape, so links between
+messages survive; the ids Kick issues to our app for webhook subscriptions
+and deliveries are kept, since they also appear in webhook headers. Signed webhook fixtures keep their original
 body next to the anonymized one, since re-signing is impossible without
 Kick's key; signature tests use the originals, and those files stay out of
 the public repo if it ever becomes public.
 
-The same run answers most open questions (§16.1–5): retry behavior, refresh
+The same run answers most open questions (§16): retry behavior, refresh
 rate of `viewer_count`, rate limits, v2 from the VPS, app-token access to
 sub / Kicks events.
 
@@ -1144,13 +1577,31 @@ only works against the simulator, that is a bug.
   stream on channel X", "raid X → Y with 1 200", "gift 50 subs", "drop the
   socket"), for manual testing and demos.
 
+**Built so far** (2026-09-24): the clock, scenarios and channel profiles,
+schedules and viewer curves, the payload builders, the HTTP side (token,
+public key, channels, livestreams, webhook subscriptions, v2), signed
+webhook delivery with drop and duplicate faults, and a process per channel
+that announces streams starting and ending, title and category changes, and
+the follows, subs, gifts, Kicks, bans and redemptions of each passing
+minute, and a Pusher websocket carrying each stream's chat (with the
+handshake, pings, and the disconnect codes real Pusher uses). The recorder
+drives all of it unchanged, and its payload shapes (API, webhooks, chat
+frames) are checked against `fixtures/` by tests, so a shape Kick changes
+shows up when we re-record. Raids and hosts wait for a recording (their
+event names are unknown). A control API (`/_sim`) and CLI (`mix sim.ctl`)
+drive it by hand: start or end a stream now, change title or category,
+send any event, move or speed up the clock, drop the next N webhooks, set
+faults, disconnect Pusher clients, expire tokens. Manual changes are
+overrides layered over the schedule, so the simulation stays a function of
+time. Still to come: bulk mode (phase 2).
+
 **Two modes:**
 
 1. **Live mode:** the simulator runs in real time (or a faster clock for
    the simulator only) and the whole pipeline runs against it: ingress →
    RabbitMQ → collector → database → site. Used to develop and test the
    pipeline end to end.
-2. **Bulk mode:** generates **months of history** for dozens or hundreds of
+2. **Bulk mode** (after phase 2, see below): generates **months of history** for dozens or hundreds of
    channels in minutes, written straight into the raw fact tables with the
    same shapes the pipeline would produce. Used to develop the website,
    charts, rollups and performance at realistic volume (§6), without waiting
@@ -1183,9 +1634,9 @@ data collection starts in earnest**.
 The collected history can't be fetched again from Kick; losing the database
 loses it for good.
 
-- Continuous Postgres backups with point-in-time recovery (**WAL-G** or
-  **pgBackRest**) to object storage off the VPS (Backblaze B2, Cloudflare R2
-  or S3).
+- Continuous Postgres backups with point-in-time recovery (**WAL-G**, built
+  into the database image, `deploy/db`) to object storage off the VPS
+  (Backblaze B2, Cloudflare R2 or S3), encrypted at rest.
 - **Restore tested regularly**, scripted, into a scratch database, with a
   check that row counts and a few metrics match.
 - Also backed up: RabbitMQ definitions, `deploy/` config, encrypted secrets.
@@ -1195,6 +1646,11 @@ loses it for good.
 
 Notifications (Telegram, Discord or email), not just dashboards, when:
 
+- no collector is collecting, or the standby is gone (from the
+  collectors' heartbeat rows, checked by the web role too: a dead
+  collector can't report itself);
+- a collector's journal has writes waiting for the database for more than
+  5 minutes, or writes set aside because they can't be applied;
 - a channel is live but no viewer readings arrive;
 - no webhooks arrive while channels are live;
 - the dead-letter queue grows, or the consumer falls behind;
@@ -1202,8 +1658,10 @@ Notifications (Telegram, Discord or email), not just dashboards, when:
 - coverage for a channel drops below a threshold;
 - disk nearly full, a backup fails, a certificate is close to expiry.
 
-Plus an **external uptime check** on the ingress URL and the site, and error
-tracking (**ErrorTracker**, self-hosted in Elixir, or Sentry).
+Plus an **external uptime check** on the ingress URL and the site, a
+**dead man's switch** pinged every minute by the collecting node
+(`HEARTBEAT_URL`), and error tracking (**ErrorTracker**, self-hosted in
+Elixir, or Sentry).
 
 ### 18.3 Legal and privacy
 
@@ -1234,18 +1692,25 @@ Done after everything else is set up and working (§20, phase 6).
 ### 19.2 Data quality
 
 - Outlier detection on viewer readings (a sudden 0 mid-stream, a one-reading
-  spike): **flagged, never deleted**, and excluded from peaks when flagged.
+  spike): **flagged, never deleted**, and excluded from peaks when flagged
+  (`Metrics.Outliers` → `viewer_flags`, rebuilt with the rollups; drawn as
+  hollow markers on the stream chart).
 - Strict parsing, with an **alert when a payload changes shape** (missing
-  field, unknown event version); new versions handled side by side.
-- Server clocks synced (NTP); a check that event times and our times don't
-  drift apart.
+  field, unknown event version): `Events.Shape` checks every stored event,
+  counts problems in `payload_issues`, and the alerts and health page show
+  them; the event is stored anyway, to replay once handled.
+- Server clocks synced (NTP); an alert when the median delay between Kick's
+  send time and our receive time passes 30 seconds.
 - Edge cases from §17.2's fault list covered by tests and handled in the
   sessionizer.
 
 ### 19.3 Security
 
-- Rate limits on public pages and `/data` (Hammer or PlugAttack).
-- Security headers (CSP, HSTS, frame options).
+- Rate limits on public pages and `/data` (PlugAttack: pages 120/min,
+  `/data` 600/min, admin logins 10/min and a one-hour ban after 20 failures
+  in 10 minutes), keyed on the visitor's address as our own proxies saw it.
+- Security headers (CSP with a per-request script nonce, HSTS, frame
+  options), from the app and again from Caddy.
 - **Sobelow** (static security analysis) and **mix_audit** (vulnerable
   dependencies) in CI.
 - Secrets encrypted in the repo (sops + age), never committed in clear.
@@ -1261,14 +1726,19 @@ Tests are written alongside every step (§17.3), not as a step of their own.
 2. `contracts/envelope.md` + schema.
 3. The recorder (§17.1): record API, v2, webhooks (through a tunnel) and
    Pusher for one or two channels; anonymize into `fixtures/`. Answer
-   §16.1–5 along the way.
+   the open questions (§16) along the way.
 
 **Phase 1: the fake Kick**
 
 4. `sim/`: token endpoint, public API, v2, Pusher, signed webhook sender,
    built from the fixtures.
 5. Scenarios with channel profiles and fault injection; control API and CLI.
-6. Bulk mode generating months of history.
+6. Control API and CLI.
+
+   (Bulk mode moves to phase 2: it writes the raw fact tables, which don't
+   exist until the schema does. Everything it needs is already pure and
+   time-addressable, so it is a writer over `Schedule.windows_between/3`
+   and `Curve`, not new simulation.)
 
 **Phase 2: the pipeline, against the simulator**
 
@@ -1284,11 +1754,34 @@ Tests are written alongside every step (§17.3), not as a step of their own.
     `SubscriptionSync`.
 11. `FollowerPoll` (v2), `follows`, support events.
 12. `ChatSocket`, the three chat tables, raids and hosts.
-13. `Metrics`; `stream_stats`; continuous aggregates.
+13. `Metrics`; `stream_stats`; hourly rollups (job-maintained, see §12.6).
+13b. Bulk mode: months of history written straight into the raw tables
+    (`mix kick_tracker.bulk`, dev only; 14 days of the default scenario,
+    2.4M chat messages, in about a minute).
+
+**Phase 2 built** (2026-09-24). A live run with every piece as its own
+process (fake Kick → receiver → RabbitMQ → collector → TimescaleDB): a
+stream's start and metadata events opened it and logged its first values,
+samples every 60s carried the category, chat minutes were attributed to
+it, and follows, a gift and Kicks became rows. With the collector stopped,
+a whole stream (start, events, end) was sent: the events waited in
+RabbitMQ and were all handled after the restart, the stream recorded with
+Kick's exact end, nothing dead-lettered. The run found two bugs the tests
+couldn't: the consumer refused its AMQP URL under `mix run` (a lazily
+loaded module), and a fresh collector waited up to 15 minutes before
+subscribing to webhooks.
 
 **Phase 3: admin core**
 
 14. Auth, add / pause channels, health page.
+
+**Phase 3 built** (2026-09-24). Invitations (`mix kick_tracker.admin.invite`,
+then from the admin pages), password + TOTP login, channels added by slug
+with a preview and a timezone, pause / resume, and a health page (sources per
+channel, coverage over 24h and 7 days, webhook subscriptions, queue depth,
+receivers, jobs, LiveDashboard under `/admin/dashboard`). Checked in a
+browser against the fake Kick: an invitation accepted, a login with a code,
+three channels added and collecting within a minute.
 
 **Phase 4: the public site (on bulk-mode data, then live-mode data)**
 
@@ -1299,6 +1792,19 @@ Tests are written alongside every step (§17.3), not as a step of their own.
 18. Rest of admin: dead letters, reprocess, corrections, annotations,
     privacy, audit log.
 
+**Phase 4 built** (2026-09-24). `/data/v1` JSON with resolution by range,
+ETags and cache headers; one ECharts hook (loaded only on chart pages) with
+six kinds, table view and CSV; home (live now from one aggregated broadcast
+per poll, leaderboards by group and period, notable moments), channel pages
+(overview, streams, chat, support, categories), the stream page (stacked
+panels, category bands, title ticks, markers, "no data" shading, rolling
+active chatters, live appends), compare with chatter overlap, category
+pages, search, methodology, privacy and removal pages. Admin: groups,
+subscriptions (resync), dead letters (inspect, replay, discard with a
+reason), data (exclude and merge streams, annotations, reprocess rollups or
+replay events), privacy requests, settings, audit log. Checked in a browser
+on 90 days of bulk-mode history (4 channels, 15M chat messages).
+
 **Phase 5: operations and legal (§18), then real collection**
 
 19. Backups with a tested restore.
@@ -1307,11 +1813,71 @@ Tests are written alongside every step (§17.3), not as a step of their own.
 22. Point the configuration at the real Kick; start tracking the first real
     channels.
 
+**Phase 5 built, up to step 22** (2026-09-24). WAL-G in the database image;
+`deploy/backup/restore-test.sh` restored a base backup plus archived WAL into
+a scratch container and passed its checks (rows written after the base
+backup came back). Alerts (webhook or Telegram, heartbeat), ErrorTracker,
+`/healthz`, host checks. Hide or delete a channel on request; an identifying
+User-Agent on every request to Kick; draft privacy and removal pages. App and
+receiver images (releases checked to boot, both roles), the stage 1 and 2
+compose files, Caddy, production RabbitMQ definitions, sops-encrypted
+secrets; runbook in `deploy/README.md`. **Left to the owner:** reading
+Kick's developer terms, choosing the public name, a legal review of the
+privacy page, and step 22 itself (deploy/README.md, "Going live").
+
 **Phase 6: hardening (§19)**
 
 23. CI/CD.
 24. Data quality checks.
 25. Security.
+
+**Phase 6 built** (2026-09-24). CI (`.github/workflows/ci.yml`): format,
+compile warnings, Credo, Sobelow, `mix deps.audit` and `hex.audit`,
+Dialyzer, and the three test suites against real TimescaleDB and RabbitMQ;
+images pushed to GHCR from `main`; a manual per-role deploy with
+migrations first (`deploy.yml`). Outlier flags, payload shape checks and
+the clock drift alert; CSP, rate limits, the visitor's address behind the
+proxies. Everything ran locally except the workflows themselves and the
+image builds, which need GitHub and hex.pm.
+
+**Collector hardening built** (2026-09-24, §10.1–10.3). Two collectors
+with a lease and fencing, every collected write through a local journal
+and an exactly-once writer, sources on one behaviour and runner, deploys
+standby first, collectors' health checked from web. Tried on a local run
+against the real Kick with two collector nodes: a clean stop handed
+collection over in under half a second; a 75-second database outage lost
+nothing (the leader kept polling, 362 writes waited in its journal and
+were written 14s after the database came back, the lease stayed put); a
+`kill -9` of the leader was taken over in 16s. The release image booted as
+a collector without web secrets, reported healthy, and stopped cleanly in
+a second. The run also showed the old failure for real: before the
+change, a code reload crash-looped the collector's Manager until the whole
+node stopped.
+
+**Fast takeover and the shadow collector built** (2026-09-24, §10.1,
+§10.5). A standby now tells a crashed leader (its session ended, the
+database didn't restart) from a database restart, and ends the session of
+a leader that holds the lock but has gone silent. Tried on the same local
+run: a `kill -9` of the leader was taken over in 0.6s (16s before); with
+both primary collectors stopped for three minutes, a shadow node with its
+own database kept collecting, and the next backfill filled the outage for
+all 24 channels (viewers and chat). The run also found two bugs the tests
+then covered: a leader process restarting left the previous collection
+tree running and couldn't start its own, and lock checks on `pg_locks`
+weren't scoped to our database, so a shadow on the same server ended the
+primary leader's session every few seconds.
+
+**Deploy rehearsal** (2026-09-24, §15.3). Two web nodes behind Caddy, all
+app containers in one cluster, the deploy steps in `deploy/deploy.sh`, and
+`deploy/rehearsal/rehearse.sh` running the production stack on a
+development machine under load while upgrading it. Measured: no failed
+request through web, collector and receiver deploys, a RabbitMQ restart,
+a collector killed and a rollback; about 3s during a database restart; no
+minute of viewer readings missing; 910 of 910 webhooks stored. Its runs
+found four production faults first: the site down from the first deploy
+(Caddy's health check redirected to HTTPS), RabbitMQ unable to read its
+definitions, the live broadcasts never reaching the site (the nodes weren't
+clustered), and deploy script details.
 
 **Later** (not planned yet): history before tracking from v2's VOD list
 (marked as imported), streamer accounts via Kick login with private stats and

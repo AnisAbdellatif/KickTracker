@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs pending migrations: a step of its own before a deploy (project.md
+# §19.1), expand-then-contract (§15.3).
+set -eu
+cd -P -- "$(dirname -- "$0")"
+exec ./kick_tracker eval KickTracker.Release.migrate

@@ -1,0 +1,106 @@
+defmodule Sim.Recorder.StoreTest do
+  use ExUnit.Case, async: true
+
+  alias Sim.Recorder.Store
+
+  describe "redact/1" do
+    test "secret headers are redacted in list and map form, whatever their case" do
+      rec = %{
+        "request" => %{
+          "headers" => [["Authorization", "Bearer abc"], ["accept", "application/json"]]
+        },
+        "response" => %{
+          "headers" => %{"Set-Cookie" => "x=1", "content-type" => "application/json"}
+        }
+      }
+
+      redacted = Store.redact(rec)
+
+      assert redacted["request"]["headers"] == [
+               ["Authorization", "[redacted]"],
+               ["accept", "application/json"]
+             ]
+
+      assert redacted["response"]["headers"] == %{
+               "Set-Cookie" => "[redacted]",
+               "content-type" => "application/json"
+             }
+    end
+
+    test "tokens and playback_url inside JSON bodies are redacted" do
+      body =
+        ~s({"access_token":"secret","expires_in":3600,"livestream":{"playback_url":"https://x/y?token=z"}})
+
+      redacted =
+        Store.redact(%{"response" => %{"body" => body}})["response"]["body"] |> Jason.decode!()
+
+      assert redacted["access_token"] == "[redacted]"
+      assert redacted["expires_in"] == 3600
+      assert redacted["livestream"]["playback_url"] == "[redacted]"
+    end
+
+    test "stream keys and publish tokens are redacted if a response ever carries them" do
+      body = ~s({"stream_key":"sk_live_x","publish_token":"pt","other":1})
+      redacted = Store.redact(%{"body" => body})["body"] |> Jason.decode!()
+
+      assert redacted == %{
+               "stream_key" => "[redacted]",
+               "publish_token" => "[redacted]",
+               "other" => 1
+             }
+    end
+
+    test "bodies without secrets are kept byte for byte (webhook signatures depend on it)" do
+      body = ~s({"b": 1,  "a":[ 2 ]}\n)
+      assert Store.redact(%{"request" => %{"body" => body}})["request"]["body"] == body
+    end
+
+    test "non-JSON bodies are kept as they are" do
+      assert Store.redact(%{"body" => "<html>access_token</html>"})["body"] ==
+               "<html>access_token</html>"
+    end
+  end
+
+  @tag :tmp_dir
+  test "write/4 numbers files in order and never writes a secret", %{tmp_dir: dir} do
+    p1 =
+      Store.write(dir, "id", "token", %{"response" => %{"body" => ~s({"access_token":"s3cret"})}})
+
+    p2 = Store.write(dir, "id", "token", %{"x" => 1})
+
+    assert Path.basename(p1) =~ ~r/^\d{8}-token\.json$/
+    assert [p1, p2] == Enum.sort([p1, p2])
+    refute File.read!(p1) =~ "s3cret"
+    assert Path.wildcard(Path.join(dir, "id/*.tmp")) == []
+  end
+
+  @tag :tmp_dir
+  test "concurrent writes neither collide nor leave half-written files", %{tmp_dir: dir} do
+    1..200
+    |> Task.async_stream(fn n -> Store.write(dir, "webhook", "event", %{"n" => n}) end,
+      max_concurrency: 50
+    )
+    |> Enum.to_list()
+
+    files = Path.wildcard(Path.join(dir, "webhook/*.json"))
+    assert length(files) == 200
+
+    ns =
+      files
+      |> Enum.map(&(&1 |> File.read!() |> Jason.decode!() |> Map.fetch!("n")))
+      |> Enum.sort()
+
+    assert ns == Enum.to_list(1..200)
+  end
+
+  @tag :tmp_dir
+  test "append_line/4 writes one JSON document per line", %{tmp_dir: dir} do
+    Store.append_line(dir, "pusher", "chan", %{"n" => 1})
+    Store.append_line(dir, "pusher", "chan", %{"n" => 2})
+
+    lines =
+      dir |> Path.join("pusher/chan.jsonl") |> File.read!() |> String.split("\n", trim: true)
+
+    assert Enum.map(lines, &Jason.decode!/1) == [%{"n" => 1}, %{"n" => 2}]
+  end
+end

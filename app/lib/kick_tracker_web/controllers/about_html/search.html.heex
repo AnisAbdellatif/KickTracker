@@ -1,0 +1,30 @@
+<Layouts.app flash={@flash} wide={false}>
+  <h1 class="text-2xl font-semibold tracking-tight">{gettext("Find a channel")}</h1>
+  <form action={~p"/search"} method="get" class="mt-4 flex gap-2" role="search">
+    <label class="input flex-1">
+      <.icon name="hero-magnifying-glass-micro" class="size-4 opacity-50" />
+      <input type="search" name="q" value={@q} aria-label={gettext("Channel")} autofocus />
+    </label>
+    <button class="btn btn-primary">{gettext("Search")}</button>
+  </form>
+  <ul
+    :if={@results != []}
+    id="results"
+    class="mt-6 divide-y divide-base-300 card-surface bg-base-100"
+  >
+    <li :for={c <- @results}>
+      <.link
+        navigate={~p"/c/#{c.slug}"}
+        class="flex items-center gap-3 px-4 py-3 hover:bg-base-200"
+      >
+        <.avatar name={c.slug} class="size-8 text-sm" />
+        <span class="font-medium">{c.slug}</span>
+        <span class="flex-1"></span>
+        <.icon name="hero-chevron-right-micro" class="size-4 opacity-40" />
+      </.link>
+    </li>
+  </ul>
+  <p :if={@q != "" and @results == []} class="mt-4 text-sm text-base-content/60">
+    {gettext("No tracked channel matches.")}
+  </p>
+</Layouts.app>

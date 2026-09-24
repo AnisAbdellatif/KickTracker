@@ -1,0 +1,112 @@
+<Layouts.app flash={@flash} wide={false} active={:about}>
+  <article class="prose prose-sm max-w-none dark:prose-invert space-y-4 leading-relaxed">
+    <h1 class="text-2xl font-semibold">{gettext("How the numbers are made")}</h1>
+    <p>
+      {gettext(
+        "We track a chosen set of Kick channels and record what we observe, from the moment we start tracking a channel. Nothing before that exists here, and nothing we missed is filled in."
+      )}
+    </p>
+
+    <h2 class="text-lg font-semibold">{gettext("Where the data comes from")}</h2>
+    <ul class="list-disc ps-5">
+      <li>
+        {gettext(
+          "Viewers, live status, title and category: Kick's public API, read every 60 seconds for every tracked channel (Kick itself refreshes its viewer count about once a minute)."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "Stream start and end, title and category changes, follows, subscriptions, gifted subscriptions and Kicks: Kick's official webhooks, delivered to us as they happen."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "Follower totals: read every 15 minutes while live, daily while offline, and at the start and end of every stream."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "Chat activity: the channel's public chat feed. We never store what anyone wrote: only who chatted, when, and how many messages."
+        )}
+      </li>
+    </ul>
+
+    <h2 class="text-lg font-semibold">{gettext("Streams")}</h2>
+    <p>
+      {gettext(
+        "A stream is identified by the time Kick says it started. Kick's own end event decides when it ended; when that event is missing, the stream ends at the last moment we saw it live (marked with *). A short drop where Kick keeps the same start time continues the same stream."
+      )}
+    </p>
+
+    <h2 class="text-lg font-semibold">{gettext("Viewer figures")}</h2>
+    <ul class="list-disc ps-5">
+      <li>
+        {gettext(
+          "Hours watched: the sum of viewers × the time since the previous reading, with each reading counting for at most 75 seconds. A missed reading is never interpolated: it adds at most 15 seconds."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "Average viewers: the mean of the readings while live. Peak viewers: the highest reading."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "Long ranges are drawn in buckets (5 minutes, hours, days); each bucket shows its average and, as a band, its peak, so a spike is never averaged away."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "Daily and weekday figures use the channel's timezone, shown next to them. A stream crossing midnight counts for the day it started."
+        )}
+      </li>
+    </ul>
+
+    <h2 class="text-lg font-semibold">{gettext("Followers")}</h2>
+    <p>
+      {gettext(
+        "Follower gain is the total at the end of a period minus the total at its start, from our readings nearest to each end. Without a reading near both ends it is shown as unknown (–), not zero. Kick's webhooks report new follows but not unfollows, so the follows count is gross."
+      )}
+    </p>
+
+    <h2 class="text-lg font-semibold">{gettext("Chat")}</h2>
+    <ul class="list-disc ps-5">
+      <li>
+        {gettext(
+          "Messages and unique chatters are counted per minute. Active chatters over a window (5, 10 or 15 minutes) are the distinct people who chatted in that window."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "New chatters are people chatting in a channel for the first time since we started tracking it."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "Per-minute detail of who chatted is deleted after 90 days; the counts and per-stream figures remain."
+        )}
+      </li>
+    </ul>
+
+    <h2 id="coverage" class="text-lg font-semibold">{gettext("Coverage and gaps")}</h2>
+    <p>
+      {gettext(
+        "Every figure can only be as complete as our collection. We record when each source was working and when it wasn't; the coverage badge is the share of the period our viewer polling was running. On charts, grey shading means no data: we weren't collecting. A break in a line means the channel was offline. Missing data is never drawn as zero."
+      )}
+    </p>
+
+    <h2 id="estimates" class="text-lg font-semibold">{gettext("Estimates")}</h2>
+    <p>
+      {gettext(
+        "Revenue is an estimate, not a measurement: subscriptions (new, renewed and gifted) times an assumed price and the streamer's share, plus Kicks at an assumed value each. The assumptions are shown next to the figure. Kick doesn't publish earnings; the real amount can differ a lot."
+      )}
+    </p>
+
+    <h2 class="text-lg font-semibold">{gettext("Corrections")}</h2>
+    <p>
+      {gettext(
+        "Raw observations are never edited. When something is wrong (a test stream, a stream split in two), a correction is recorded on top and the figures are recomputed. Excluded streams are marked where they appear."
+      )}
+    </p>
+  </article>
+</Layouts.app>

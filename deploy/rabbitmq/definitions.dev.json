@@ -1,0 +1,236 @@
+{
+  "users": [
+    {
+      "name": "admin",
+      "password_hash": "aSwBdo7+aX5cWdcLhthVKDweFramzKNnagTiOWKrsstKMXIm",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": [
+        "administrator"
+      ]
+    },
+    {
+      "name": "receiver",
+      "password_hash": "d+kSG20eLfX9WoakwOxzxP8B297IR/76wrvWE4rT6JcnFar2",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    },
+    {
+      "name": "app",
+      "password_hash": "wt9yinCZAMK9nDKmptvDjaUXgkpUis/pqxAc+0UNq/jiM1hg",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    },
+    {
+      "name": "monitor",
+      "password_hash": "ogHxJ07biAIUbCVwdpt1nl0GPxauB/6dKce47OWWuExISlPt",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": [
+        "monitoring"
+      ]
+    },
+    {
+      "name": "ops",
+      "password_hash": "R+LNfEJTq4wVY2PzDQaU9cdYxGWOcFIWruCVImjp2gAEl+rp",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/"
+    },
+    {
+      "name": "test"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "admin",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "receiver",
+      "vhost": "/",
+      "configure": "^$",
+      "write": "^kick\\.events$",
+      "read": "^$"
+    },
+    {
+      "user": "app",
+      "vhost": "/",
+      "configure": "^$",
+      "write": "^$",
+      "read": "^kick_tracker\\.events$"
+    },
+    {
+      "user": "admin",
+      "vhost": "test",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "receiver",
+      "vhost": "test",
+      "configure": "^$",
+      "write": "^kick\\.events$",
+      "read": "^$"
+    },
+    {
+      "user": "app",
+      "vhost": "test",
+      "configure": "^$",
+      "write": "^$",
+      "read": "^kick_tracker\\.events$"
+    },
+    {
+      "user": "monitor",
+      "vhost": "/",
+      "configure": "^$",
+      "write": "^$",
+      "read": "^$"
+    },
+    {
+      "user": "monitor",
+      "vhost": "test",
+      "configure": "^$",
+      "write": "^$",
+      "read": "^$"
+    },
+    {
+      "user": "ops",
+      "vhost": "/",
+      "configure": "^$",
+      "write": "^kick\\.events$",
+      "read": "^kick_tracker\\.events\\.dead$"
+    },
+    {
+      "user": "ops",
+      "vhost": "test",
+      "configure": "^$",
+      "write": "^kick\\.events$",
+      "read": "^kick_tracker\\.events\\.dead$"
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "kick.events",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "kick.events.dlx",
+      "vhost": "/",
+      "type": "fanout",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "kick.events",
+      "vhost": "test",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "kick.events.dlx",
+      "vhost": "test",
+      "type": "fanout",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [
+    {
+      "name": "kick_tracker.events",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 10,
+        "x-dead-letter-exchange": "kick.events.dlx",
+        "x-dead-letter-strategy": "at-least-once",
+        "x-overflow": "reject-publish"
+      }
+    },
+    {
+      "name": "kick_tracker.events.dead",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "kick_tracker.events",
+      "vhost": "test",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 10,
+        "x-dead-letter-exchange": "kick.events.dlx",
+        "x-dead-letter-strategy": "at-least-once",
+        "x-overflow": "reject-publish"
+      }
+    },
+    {
+      "name": "kick_tracker.events.dead",
+      "vhost": "test",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    }
+  ],
+  "bindings": [
+    {
+      "source": "kick.events",
+      "vhost": "/",
+      "destination": "kick_tracker.events",
+      "destination_type": "queue",
+      "routing_key": "#",
+      "arguments": {}
+    },
+    {
+      "source": "kick.events.dlx",
+      "vhost": "/",
+      "destination": "kick_tracker.events.dead",
+      "destination_type": "queue",
+      "routing_key": "",
+      "arguments": {}
+    },
+    {
+      "source": "kick.events",
+      "vhost": "test",
+      "destination": "kick_tracker.events",
+      "destination_type": "queue",
+      "routing_key": "#",
+      "arguments": {}
+    },
+    {
+      "source": "kick.events.dlx",
+      "vhost": "test",
+      "destination": "kick_tracker.events.dead",
+      "destination_type": "queue",
+      "routing_key": "",
+      "arguments": {}
+    }
+  ]
+}
