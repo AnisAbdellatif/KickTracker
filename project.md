@@ -333,29 +333,36 @@ Kick ──webhook──▶ receiver(s) ──publish──▶ RabbitMQ
 
 ### 8.1 The envelope (the contract)
 
-Every ingress produces exactly this, as the message body (JSON):
+Every ingress produces exactly this, as the message body (JSON). The full
+definition, transport properties and versioning rules are in
+[`contracts/envelope.md`](contracts/envelope.md), with a JSON schema.
 
 ```json
 {
-  "message_id": "01J…",        // Kick-Event-Message-Id
+  "envelope_version": 1,
+  "message_id": "01J…",        // Kick-Event-Message-Id (the dedup key)
   "subscription_id": "01J…",   // Kick-Event-Subscription-Id
-  "type": "livestream.status.updated",
-  "version": "1",
-  "sent_at": "…",              // Kick-Event-Message-Timestamp
+  "event_type": "livestream.status.updated",   // Kick-Event-Type
+  "event_version": "1",        // Kick-Event-Version
+  "sent_at": "…",              // Kick-Event-Message-Timestamp, verbatim
   "signature": "…",            // Kick-Event-Signature
-  "body": "<raw request body, unchanged>",
-  "received_at": "…",
+  "body": "<raw request body, byte for byte>",
+  "received_at": "…",          // ingress clock, RFC 3339 UTC, microseconds
   "receiver": "vps-a/1"
 }
 ```
+
+`message_id`, `sent_at` and `body` are copied exactly, since together they
+are the signed text (`message_id.sent_at.body`, RSA SHA-256 PKCS#1 v1.5).
+A body that isn't valid UTF-8 travels as `body_base64` instead. The
+envelope's own `envelope_version` is separate from Kick's `event_version`.
 
 AMQP properties: `message_id` = Kick's message id, `type` = event type,
 `delivery_mode` = persistent, routing key = event type.
 
 The raw body and signature travel with it, so the app verifies again and
-trusts neither the queue nor the ingress. The envelope is defined in
-`contracts/envelope.md` with a JSON schema, and every ingress has a test
-producing a valid one.
+trusts neither the queue nor the ingress. Every ingress has a test
+producing envelopes that validate against the schema.
 
 ### 8.2 What the app may assume, and nothing more
 
