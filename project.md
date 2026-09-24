@@ -1231,10 +1231,18 @@ needed after that.
   period, a live stream) fetches its `/data/v1` URL again every 60s
   (`data-refresh`), while the page is visible, keeping the reader's zoom;
   a custom range or an ended stream doesn't move and isn't fetched again.
-  The home page's sparklines are recomputed with each minute's broadcast
-  (cached a minute for everyone).
+  The home page's sparklines are cacheable JSON too
+  (`/data/v1/sparklines/:slug?at=<minute>`): each minute's broadcast moves
+  the `at` in their URL, so the hook fetches the moved window (computed
+  once a minute for everyone).
 - **Home page:** one aggregated `"live"` broadcast every 60s with all live
-  channels' current viewers, not one per channel.
+  channels' current viewers, not one per channel. A visitor's page reads
+  the live list again only when the set of public channels named in it
+  changes; otherwise it only updates the viewer counts.
+- **Custom range:** the period picker's "custom" takes two dates (days in
+  the channel's timezone on its pages, UTC elsewhere) and turns them into
+  `from`/`to` in the URL. Query params that aren't plain strings are
+  ignored, never an error.
 - **Query cache** (`KickTracker.Cache`, ETS) in the `web` role for expensive aggregates
   (leaderboards, 30-day cards), keyed by query and period: minutes for
   periods including today, long for closed periods.
