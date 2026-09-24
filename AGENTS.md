@@ -195,6 +195,12 @@ one, stop and ask.
 
 ## 11. Conventions
 
+- **Never use real usernames or channel names** in docs, comments, code, tests, commit
+  messages or examples. Use placeholders: `<channel>`, `<other-channel>`, `<slug>`,
+  `<username>`, `<user id>`, or obviously fake values (`somestreamer`, `1234567`) where a
+  test needs a concrete value. The same goes for anything else that identifies a real
+  channel or person: real ids, stream titles, follower counts tied to a name. Real data
+  lives only in `sim/recordings/` (git-ignored) and, anonymized, in `fixtures/`.
 - Elixir: `mix format`; follow Phoenix and Ecto conventions; contexts own their schemas.
 - Keep `project.md` accurate: when the implementation deliberately differs from it, update
   it in the same change (and log the decision, §3 above).
