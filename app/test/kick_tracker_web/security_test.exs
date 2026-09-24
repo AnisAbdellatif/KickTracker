@@ -72,6 +72,20 @@ defmodule KickTrackerWeb.SecurityTest do
       assert attempt.().status == 429
     end
 
+    test "every failed login counts, even a burst in the same millisecond", %{ip: ip} do
+      conn = %Plug.Conn{remote_ip: ip}
+      alias KickTrackerWeb.Plugs.RateLimit
+
+      # Faster than a millisecond apart: each still counts.
+      refute Enum.any?(1..19, fn _ -> RateLimit.login_failed(conn) end)
+      refute RateLimit.login_banned?(conn)
+      assert RateLimit.login_failed(conn)
+      assert RateLimit.login_banned?(conn)
+
+      # Another address is untouched.
+      refute RateLimit.login_banned?(%Plug.Conn{remote_ip: {198, 51, 100, 250}})
+    end
+
     test "20 failed logins in 10 minutes shut an address out for an hour", %{ip: ip} do
       Application.put_env(:kick_tracker, :rate_limits, pages: 1_000, data: 1_000, login: 1_000)
 

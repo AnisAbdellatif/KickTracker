@@ -67,21 +67,45 @@ defmodule KickTrackerWeb.Plugs.RateLimit do
   @impl PlugAttack
   def allow_action(conn, _data, _opts), do: conn
 
+  @failures 20
+  @failure_period_ms 600_000
+  @ban_ms 3_600_000
+
   @doc """
   Records a failed admin login; after 20 in 10 minutes the address is
   banned from logging in for an hour. Returns whether it is banned.
+
+  Every failure counts. (PlugAttack's own `fail2ban` keys its entries by
+  the millisecond, so failures in the same millisecond, a parallel
+  burst, counted once.) Each failure is its own entry, which expires with
+  its period and is removed by the storage's cleaner.
   """
   @spec login_failed(Plug.Conn.t()) :: boolean()
   def login_failed(conn) do
-    match?(
-      {:block, _},
-      PlugAttack.Rule.fail2ban({:login_failed, conn.remote_ip},
-        period: 600_000,
-        limit: 20,
-        ban_for: 3_600_000,
-        storage: @storage
+    {mod, table} = @storage
+    now = System.system_time(:millisecond)
+    ip = conn.remote_ip
+
+    if login_banned?(conn) do
+      true
+    else
+      :ets.insert(
+        table,
+        {{:login_failure, ip, System.unique_integer([:monotonic])}, 0, now + @failure_period_ms}
       )
-    )
+
+      recent =
+        :ets.select_count(table, [
+          {{{:login_failure, ip, :_}, :_, :"$1"}, [{:>, :"$1", now}], [true]}
+        ])
+
+      if recent >= @failures do
+        :ok = mod.write(table, {:fail2ban_banned, {:login_failed, ip}}, true, now + @ban_ms)
+        true
+      else
+        false
+      end
+    end
   end
 
   @doc "Whether an address is banned from logging in."
