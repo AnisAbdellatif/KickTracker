@@ -1,0 +1,26 @@
+# Stage 2 (project.md §15.2): a backup receiver on a second VPS, another
+# provider or region, with its own spool. It publishes to the main
+# RabbitMQ over the private network (WireGuard or Tailscale: AMQP_URL points
+# at the main VPS's private address). Cloudflare Load Balancing sends the
+# webhook hostname here when the main VPS stops answering /health.
+name: kicktracker-backup
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    env_file: [secrets/stack.env]
+    command: caddy reverse-proxy --from {$$INGRESS_HOST} --to receiver:4060
+    volumes: [caddy_data:/data]
+
+  receiver:
+    image: ${RECEIVER_IMAGE:-ghcr.io/anisabdellatif/kicktracker-receiver:latest}
+    restart: unless-stopped
+    env_file: [secrets/receiver.env]
+    environment: {RECEIVER_ID: "vps2/1"}
+    volumes: [spool:/data]
+
+volumes:
+  caddy_data:
+  spool:

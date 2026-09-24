@@ -1,0 +1,5 @@
+#!/bin/sh
+# Prints an invitation link for an admin: bin/invite someone@example.com
+set -eu
+cd -P -- "$(dirname -- "$0")"
+exec ./kick_tracker eval "KickTracker.Release.invite(\"$1\")"

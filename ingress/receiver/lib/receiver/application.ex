@@ -23,7 +23,7 @@ defmodule Receiver.Application do
        exchange: env.(:exchange),
        confirm_timeout_ms: env.(:confirm_timeout_ms)},
       Receiver.Forwarder,
-      {Bandit, plug: Receiver.Router, port: env.(:port), ip: :loopback}
+      {Bandit, plug: Receiver.Router, port: env.(:port), ip: env.(:listen_ip)}
     ]
   end
 end

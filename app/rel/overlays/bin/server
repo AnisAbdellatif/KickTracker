@@ -1,0 +1,5 @@
+#!/bin/sh
+# Starts the app in the role given by ROLE (collector, web, or both).
+set -eu
+cd -P -- "$(dirname -- "$0")"
+PHX_SERVER=true exec ./kick_tracker start

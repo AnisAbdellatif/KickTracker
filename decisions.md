@@ -167,6 +167,18 @@ The development container this was built in could reach hex.pm's API and GitHub 
 
 Hiding first answers a streamer at once without losing anything if the request is withdrawn; deletion is the explicit second step. Deleting raw facts is, with privacy deletion, the only exception to append-only, and both are audited.
 
+## Backups
+
+**Current:** WAL-G, compiled from source into the TimescaleDB image (`deploy/db`), archives WAL continuously (`archive_timeout` 60s) and takes a daily base backup (7 kept) to S3-compatible storage off the VPS, encrypted with libsodium. `deploy/backup/restore-test.sh` (weekly) restores the latest backup plus WAL into a scratch container and checks row counts against the live database and that recent streams' hours watched agree with their samples; failures alert, successes ping a heartbeat. (updated 2026-09-24 07:30)
+
+WAL-G over pgBackRest: one static binary and native S3/B2/R2 support. The TimescaleDB image is Alpine, where WAL-G's release binaries (glibc) don't run, so it is built statically in a Go stage (`GOEXPERIMENT=jsonv2` is needed from v3.0.9). A sidecar reading a shared WAL directory was considered and rejected: more moving parts for the same result. The restore test was run locally against a file-backed WAL-G store; the first run caught a flaw in the test data, not the backup (an insert and `pg_switch_wal()` in one transaction put the commit in an unarchived segment).
+
+## Deployment
+
+**Current:** Two images built by CI (app, receiver) plus the database image; `compose.single.yml` for stage 1 and `compose.backup-receiver.yml` for stage 2; Caddy terminates HTTPS, restricts `/admin` to `ADMIN_ALLOW` networks, and fails the ingress over between two receivers (`lb_policy first`, active health checks). Migrations are their own `migrate` service run before a deploy. Secrets are sops + age encrypted env files; RabbitMQ's production definitions are generated on the server from them. The app listens on IPv4 unless `LISTEN_IPV6=true`; the receiver listens on `LISTEN_IP` (loopback in development, all interfaces in production). (updated 2026-09-24 07:30)
+
+Checked here: both releases boot in the Debian runtime image (web served pages, assets and `/healthz`; the collector ran; `bin/migrate` ran), the Caddyfile validates, the compose file parses. The first release run failed binding `::` where IPv6 is off, as it would in many Docker hosts, hence IPv4 by default. The receiver bound loopback only, which Caddy in another container couldn't reach. The image builds themselves need hex.pm and couldn't run here; CI builds them.
+
 ## Development Approach
 
 **Current:** Record real payloads once (anonymized into `fixtures/`), then build a fake Kick (`sim/`) with scenarios, fault injection and a bulk history mode before any tracking logic; all development and tests run against it, switched purely by configuration. (updated 2026-09-24 04:04)

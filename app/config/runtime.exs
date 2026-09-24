@@ -170,11 +170,13 @@ if config_env() == :prod do
   config :kick_tracker, KickTrackerWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [
-      # Enable IPv6 and bind on all interfaces.
-      # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
-      # See the documentation on https://bandit.hexdocs.pm/Bandit.html#t:options/0
-      # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-      ip: {0, 0, 0, 0, 0, 0, 0, 0}
+      # IPv4 by default: containers often have no IPv6, where binding ::
+      # fails; LISTEN_IPV6=true listens on both.
+      ip:
+        if(System.get_env("LISTEN_IPV6") in ~w(true 1),
+          do: {0, 0, 0, 0, 0, 0, 0, 0},
+          else: {0, 0, 0, 0}
+        )
     ],
     secret_key_base: secret_key_base
 

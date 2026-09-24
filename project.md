@@ -763,10 +763,14 @@ kick_tracker/
 ├─ contracts/
 │  ├─ envelope.md                    # the envelope, the delivery guarantees (§8)
 │  └─ envelope.schema.json
-└─ deploy/
+└─ deploy/                          # runbook: deploy/README.md
    ├─ compose.single.yml             # stage 1, one VPS
    ├─ compose.backup-receiver.yml    # stage 2, second VPS
    ├─ Caddyfile
+   ├─ db/                            # TimescaleDB + WAL-G
+   ├─ backup/                        # base backups, scripted restore test
+   ├─ ops/                           # host checks (disk, certificates)
+   ├─ secrets/                       # sops + age encrypted env files
    └─ rabbitmq/                      # definitions: exchanges, queues, users, policies
 ```
 
@@ -1440,9 +1444,9 @@ data collection starts in earnest**.
 The collected history can't be fetched again from Kick; losing the database
 loses it for good.
 
-- Continuous Postgres backups with point-in-time recovery (**WAL-G** or
-  **pgBackRest**) to object storage off the VPS (Backblaze B2, Cloudflare R2
-  or S3).
+- Continuous Postgres backups with point-in-time recovery (**WAL-G**, built
+  into the database image, `deploy/db`) to object storage off the VPS
+  (Backblaze B2, Cloudflare R2 or S3), encrypted at rest.
 - **Restore tested regularly**, scripted, into a scratch database, with a
   check that row counts and a few metrics match.
 - Also backed up: RabbitMQ definitions, `deploy/` config, encrypted secrets.
@@ -1604,6 +1608,18 @@ on 90 days of bulk-mode history (4 channels, 15M chat messages).
 21. Kick terms reviewed, public name, privacy policy, removal requests.
 22. Point the configuration at the real Kick; start tracking the first real
     channels.
+
+**Phase 5 built, up to step 22** (2026-09-24). WAL-G in the database image;
+`deploy/backup/restore-test.sh` restored a base backup plus archived WAL into
+a scratch container and passed its checks (rows written after the base
+backup came back). Alerts (webhook or Telegram, heartbeat), ErrorTracker,
+`/healthz`, host checks. Hide or delete a channel on request; an identifying
+User-Agent on every request to Kick; draft privacy and removal pages. App and
+receiver images (releases checked to boot, both roles), the stage 1 and 2
+compose files, Caddy, production RabbitMQ definitions, sops-encrypted
+secrets; runbook in `deploy/README.md`. **Left to the owner:** reading
+Kick's developer terms, choosing the public name, a legal review of the
+privacy page, and step 22 itself (deploy/README.md, "Going live").
 
 **Phase 6: hardening (§19)**
 

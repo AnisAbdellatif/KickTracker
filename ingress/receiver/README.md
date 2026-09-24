@@ -34,6 +34,7 @@ mix run --no-halt
 |---|---|---|
 | `PORT` | where Kick (or the load balancer) sends deliveries | `4060` |
 | `RECEIVER_ID` | this receiver's name, written into every envelope | `dev/1` |
+| `LISTEN_IP` | the address to listen on | `127.0.0.1` in development, `0.0.0.0` in production |
 | `KICK_PUBLIC_KEY` | Kick's signing key (PEM); fetched from the API if unset | — |
 | `KICK_API_URL` | where to fetch it | the fake Kick, `http://127.0.0.1:4050` |
 | `AMQP_URL` | RabbitMQ, as the publish-only `receiver` user | the local broker |

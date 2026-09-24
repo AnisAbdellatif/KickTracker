@@ -1,0 +1,7 @@
+# sops encrypts deploy/secrets/*.sops.env for these age keys (project.md
+# §19.3). Replace the placeholder with the real public keys: the server's
+# and each admin's (`age-keygen -y ~/.config/sops/age/keys.txt`).
+creation_rules:
+  - path_regex: deploy/secrets/.*\.env$
+    age: >-
+      age1replacewiththeserverspublickeyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
