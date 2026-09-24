@@ -912,7 +912,8 @@ kick_tracker/
 └─ deploy/                          # runbook: deploy/README.md
    ├─ compose.single.yml             # stage 1, one VPS
    ├─ compose.backup-receiver.yml    # stage 2, second VPS
-   ├─ Caddyfile
+   ├─ Caddyfile                      # the bundled Caddy (profile "caddy")
+   ├─ caddy/sites.caddy              # the sites, also imported by a host's own Caddy
    ├─ db/                            # TimescaleDB + WAL-G
    ├─ backup/                        # base backups, scripted restore test
    ├─ ops/                           # host checks (disk, certificates)
@@ -1397,7 +1398,7 @@ written by the collector, with the deletion itself.
 | shadow (second VPS) | `app`, `COLLECTOR_MODE=shadow`, own database | With the collectors | Nothing, while the primary side collects; the main VPS down, it is what still collects |
 | `web-a`, `web-b` | `app`, `ROLE=web` | Often, one at a time | One down: Caddy sends everyone to the other. Both down: site down; collection unaffected |
 | `db` | TimescaleDB | Rarely | Collection continues into the leader's journal and is written when it is back; the consumer stops acking, events wait in the queue; the site is down |
-| `caddy` | official | Rarely | Ingress unreachable (see stage 2) |
+| `caddy` | official, or the host's own Caddy (it imports `caddy/sites.caddy`) | Rarely | Ingress unreachable (see stage 2) |
 
 `docker compose up -d web` redeploys only the website; the receivers, the
 queue and the collectors keep running the images they have (images are

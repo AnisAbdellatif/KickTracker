@@ -10,7 +10,8 @@ production.
 | `compose.backup-receiver.yml` | Stage 2: a backup receiver on a second VPS |
 | `compose.shadow.yml` | Stage 2: the shadow collector on the second VPS (§10.5) |
 | `shadow/readers.sql` | Read-only users for the primary / shadow pair |
-| `Caddyfile` | HTTPS, the admin allowlist, the receivers' failover |
+| `Caddyfile` | The bundled Caddy (profile `caddy`): HTTPS, from `caddy/sites.caddy` |
+| `caddy/sites.caddy` | The sites: the admin allowlist, the web pair, the receivers' failover; imported by the bundled Caddy or the host's own |
 | `db/` | TimescaleDB with WAL-G (continuous backups) |
 | `backup/` | Base backups and the scripted restore test |
 | `ops/check-host.sh` | Disk and certificate checks |
@@ -33,21 +34,57 @@ On a fresh VPS with Docker, `sops` and `age`:
        echo "APP_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha>" >> .env
        echo "COLLECTOR_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha>" >> .env
        docker compose -f compose.single.yml pull
-4. Start the database and the queue, then migrate:
+4. Choose what serves HTTPS. A VPS with no web server of its own uses the
+   bundled Caddy: `echo COMPOSE_PROFILES=caddy >> .env`. A VPS whose host
+   already runs Caddy for something else keeps it, and imports our sites
+   into it (below, "A Caddy already on the host").
+5. Start the database and the queue, then migrate:
 
        docker compose -f compose.single.yml up -d db rabbitmq
        docker compose -f compose.single.yml run --rm migrate
 
-5. Start everything: `docker compose -f compose.single.yml up -d`.
-6. Take the first base backup (`./backup/base-backup.sh`) and install the
+6. Start everything: `docker compose -f compose.single.yml up -d`.
+7. Take the first base backup (`./backup/base-backup.sh`) and install the
    cron lines from `backup/base-backup.sh`, `backup/restore-test.sh` and
    `ops/check-host.sh`.
-7. Invite the first admin and open the link from an allowed network:
+8. Invite the first admin and open the link from an allowed network:
 
        docker compose -f compose.single.yml exec web-a /app/bin/invite you@example.org
 
-8. Point the Kick app's webhook URL (in Kick's developer settings) at
+9. Point the Kick app's webhook URL (in Kick's developer settings) at
    `https://$INGRESS_HOST/`.
+
+## A Caddy already on the host
+
+When the host already runs Caddy (for another site), ours isn't started
+(no `caddy` profile) and the host's serves both. Each web node and
+receiver is published on loopback for it: `web-a` on 127.0.0.1:4110,
+`web-b` on 4111, `receiver-1` on 4160, `receiver-2` on 4161 (set
+`WEB_A_PORT`, `WEB_B_PORT`, `RECEIVER_1_PORT`, `RECEIVER_2_PORT` in
+`deploy/.env` if one is taken). Add one line to the host's Caddyfile
+(`/etc/caddy/Caddyfile` for the packaged Caddy), outside any site block:
+
+    import /srv/kick_tracker/deploy/caddy/sites.caddy stats.example.org ingress.example.org 127.0.0.1:4110 127.0.0.1:4111 127.0.0.1:4160 127.0.0.1:4161 100.64.0.0/10
+
+The arguments: the site's host, the ingress host, the two web nodes, the
+two receivers, then the networks allowed on `/admin` (one or more CIDRs,
+as `ADMIN_ALLOW`). Then `caddy validate --config /etc/caddy/Caddyfile`
+and `systemctl reload caddy`. The host's Caddy gets the certificates with
+its own ACME email; `secrets/stack.env` is then read only by
+`ops/check-host.sh` (the hosts whose certificates it checks).
+
+The sites stay in git: after a `git pull` that changes
+`caddy/sites.caddy`, reload the host's Caddy. The Caddy user must be able
+to read the file (it is world-readable in a normal checkout).
+
+If the host's Caddy runs in a container instead, it can't reach the host's
+loopback: give it `network_mode: host`, or attach it to this stack's
+network (`kicktracker_default`) and pass `web-a:4100 web-b:4100
+receiver-1:4060 receiver-2:4060` as the upstreams.
+
+If Cloudflare (or another proxy) is in front of the host's Caddy, set
+`TRUSTED_PROXY_HOPS=2` in `secrets/app.env`, or every visitor shares the
+proxy's address for the rate limits.
 
 ## Deploying a change
 

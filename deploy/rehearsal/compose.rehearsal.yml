@@ -7,6 +7,7 @@ x-host: &host ["host.docker.internal:host-gateway"]
 
 services:
   caddy:
+    profiles: !reset []
     ports: !override ["127.0.0.1:8080:80"]
   rabbitmq:
     ports: !reset []
