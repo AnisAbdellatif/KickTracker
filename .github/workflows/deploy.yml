@@ -2,8 +2,11 @@
 # on its own by CI, so this is for rollbacks (a tag) and single roles.
 # `all` runs deploy/release.sh; a role runs
 # deploy/deploy.sh on the server, which migrates first, then updates the
-# chosen pair one at a time (web, collectors standby first, receivers), so
-# the site, collection and webhook intake never stop.
+# chosen pair one at a time (web, receivers), so the site and webhook
+# intake never stop. `collector` updates only the collector standing by and
+# switches collection to it, leaving the other on the previous build;
+# `collector-switch` switches back to that one (the collector rollback:
+# nothing is pulled, the tag is ignored).
 #
 # Needs the secrets DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS (the server's host
 # key line), DEPLOY_HOST and DEPLOY_USER (secrets or variables), and the stack in
@@ -20,7 +23,7 @@ on:
         description: What to deploy
         required: true
         type: choice
-        options: [all, web, collector, receivers, migrate-only, shadow]
+        options: [all, web, collector, collector-switch, receivers, migrate-only, shadow]
       tag:
         description: Image tag (empty for the latest main; a commit sha from main to roll back)
         required: false

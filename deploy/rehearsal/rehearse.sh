@@ -226,7 +226,7 @@ operations() {
   op "RabbitMQ restart" dc restart rabbitmq
   op "collector killed (SIGKILL)" kill_leader
   op "rollback: web" deploy web "$APP_V1"
-  op "rollback: collectors" deploy collector "$APP_V1"
+  op "rollback: collectors (switch to the standby, still on v1)" deploy collector-switch
 }
 
 # --- the report ----------------------------------------------------------------------

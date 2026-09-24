@@ -29,11 +29,14 @@ x-app: &app
   depends_on:
     db: {condition: service_healthy}
 
-# A collector: its own image pin and env file (no web secrets), its
-# journal on its own volume, `always` restarted, and a minute to stop
-# cleanly (stop collecting, release the lease, write out its journal).
+# A collector: its own env file (no web secrets), its journal on its own
+# volume, `always` restarted, and a minute to stop cleanly (stop
+# collecting, release the lease, write out its journal). Each has its own
+# image pin (COLLECTOR_A_IMAGE, COLLECTOR_B_IMAGE): a deploy updates only
+# the one standing by and switches to it, leaving the other on the
+# previous build for a rollback (deploy.sh). COLLECTOR_IMAGE is the
+# fallback for a pin not set yet.
 x-collector: &collector
-  image: ${COLLECTOR_IMAGE:?pin COLLECTOR_IMAGE in deploy/.env (deploy/README.md)}
   env_file: [secrets/collector.env]
   restart: always
   stop_grace_period: 60s
@@ -119,11 +122,13 @@ services:
 
   collector-a:
     <<: *collector
+    image: ${COLLECTOR_A_IMAGE:-${COLLECTOR_IMAGE:?pin COLLECTOR_IMAGE in deploy/.env (deploy/README.md)}}
     environment: {ROLE: collector, COLLECTOR_ID: collector-a}
     volumes: [journal-a:/journal, transfers:/transfers]
 
   collector-b:
     <<: *collector
+    image: ${COLLECTOR_B_IMAGE:-${COLLECTOR_IMAGE:?pin COLLECTOR_IMAGE in deploy/.env (deploy/README.md)}}
     environment: {ROLE: collector, COLLECTOR_ID: collector-b}
     volumes: [journal-b:/journal, transfers:/transfers]
 
