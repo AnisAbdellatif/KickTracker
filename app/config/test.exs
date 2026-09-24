@@ -45,3 +45,6 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Password hashing is deliberately slow; tests don't need it to be.
+config :kick_tracker, :pbkdf2_iterations, 1_000

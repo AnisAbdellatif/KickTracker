@@ -109,7 +109,8 @@ defmodule KickTracker.Events do
           body: e.body,
           received_at: e.received_at,
           receiver: e.receiver,
-          stored_at: now
+          stored_at: now,
+          broadcaster_user_id: Handlers.broadcaster_id(e)
         }
       end
 

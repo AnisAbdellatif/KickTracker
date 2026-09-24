@@ -34,6 +34,11 @@ defmodule KickTracker.RoleTest do
 
     refute KickTracker.Events.Consumer in without_collection
 
+    # A web node has its own app token (admin lookups, subscriptions); a
+    # node that also collects shares the collector's.
+    assert KickTracker.Kick.Token in names.([:web])
+    assert Enum.count(names.([:collector, :web]), &(&1 == KickTracker.Kick.Token)) == 1
+
     # Both roles share the database and PubSub, the link from collector to site.
     for roles <- [[:collector], [:web]] do
       assert KickTracker.Repo in names.(roles)

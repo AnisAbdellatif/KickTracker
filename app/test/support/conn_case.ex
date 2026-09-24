@@ -35,4 +35,16 @@ defmodule KickTrackerWeb.ConnCase do
     KickTracker.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc "Setup: a logged-in admin (`conn`, `admin`)."
+  def log_in_admin(%{conn: conn}) do
+    {admin, _password, _secret} = KickTracker.Fixtures.admin!()
+    %{conn: log_in_admin(conn, admin), admin: admin}
+  end
+
+  @doc "Logs an admin in on a test conn."
+  def log_in_admin(conn, admin) do
+    token = KickTracker.Admins.create_session_token(admin)
+    Plug.Test.init_test_session(conn, admin_token: token)
+  end
 end

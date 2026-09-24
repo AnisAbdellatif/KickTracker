@@ -27,7 +27,7 @@ defmodule KickTracker.Application do
 
     shared(roles) ++
       if(:collector in roles and collect?, do: collector(), else: []) ++
-      if(:web in roles, do: web(), else: [])
+      if(:web in roles, do: web(roles, collect?), else: [])
   end
 
   # Both roles: telemetry, the database, PubSub (the cluster link that
@@ -66,7 +66,15 @@ defmodule KickTracker.Application do
     ]
   end
 
-  defp web, do: [KickTrackerWeb.Endpoint]
+  # A web node needs its own app token to look channels up for the admin
+  # (project.md §13.8) and to list webhook subscriptions on the health page;
+  # it is fetched on first use.
+  defp web(roles, collect?) do
+    # (On a collector the collection tree has it; `collect: false` means
+    # tests start it themselves.)
+    token = if :collector in roles or not collect?, do: [], else: [KickTracker.Kick.Token]
+    token ++ [KickTrackerWeb.Endpoint]
+  end
 
   # Tell Phoenix to update the endpoint configuration whenever the
   # application is updated, when this node serves the site.

@@ -580,7 +580,7 @@ another queue with its own Broadway producer.
 | Clustering | **libcluster** | Joins the `collector` and `web` nodes so PubSub reaches live pages. |
 | Charts | **Apache ECharts** through one LiveView hook, loaded only where needed | Bands, markers, linked zoom, heatmaps, sampling in one library (§13.7). |
 | Styling | **Tailwind** (Phoenix default), logical properties, dark + light themes | RTL-ready, one set of tokens for UI and charts. |
-| Admin auth | **phx.gen.auth** + TOTP, no public sign-up | Admins invite admins. |
+| Admin auth | Session tokens on phx.gen.auth's model, PBKDF2 (OTP `:crypto`) + TOTP (RFC 6238), no public sign-up | Admins invite admins. |
 | Caching | **Cachex** in `web`; HTTP caching of `/data/v1` JSON at Caddy / Cloudflare | History never changes; serve it once. |
 | i18n | **Gettext**, English first | Translation-ready (Arabic, French later). |
 | Observability | **Telemetry + Phoenix LiveDashboard**, **Oban Web**, RabbitMQ management UI, admin health page | Process counts, memory, per-channel health, queue depth, job failures. |
@@ -745,7 +745,7 @@ kick_tracker/
 │  │     │                              #   annotations, privacy, settings, audit
 │  │     ├─ controllers/data/           # /data/v1 JSON, cacheable (§13.5)
 │  │     ├─ components/                 # stat cards, period picker, chart, tables
-│  │     └─ user_auth.ex                # phx.gen.auth, admin on_mount
+│  │     └─ admin_auth.ex               # admin sessions, on_mount
 │  ├─ assets/js/
 │  │  ├─ hooks/chart.js                 # the one ECharts hook
 │  │  └─ charts/                        # chart kinds: timeseries, bars, share,
@@ -876,7 +876,7 @@ kick_users         (id, username, seen_at)
 webhook_events     (message_id PK, subscription_id, event_type, event_version,
                     sent_at (verbatim text), occurred_at, signature,
                     body bytea, received_at, receiver, stored_at,
-                    processed_at NULL)
+                    processed_at NULL, broadcaster_user_id NULL)
                    -- every delivered event, permanently; source for
                    -- reprocessing if handling logic changes. The body is
                    -- raw bytes, not jsonb, and sent_at the header's own
@@ -1118,8 +1118,9 @@ tokens.
 Under `/admin`, same `web` role, separate `live_session` with an `on_mount`
 auth check.
 
-- **Access:** `phx.gen.auth` accounts, **no public sign-up** (admins invite
-  admins), TOTP second factor. Optionally reachable only over the private
+- **Access:** accounts on phx.gen.auth's model (server-side session tokens),
+  password + TOTP on every login, **no public sign-up** (admins invite
+  admins). Optionally reachable only over the private
   network (Caddy IP allowlist or Tailscale) as a second layer.
 - **Channels:**
   - Add by slug: resolve through the public API, preview (avatar, ids, live
@@ -1157,7 +1158,7 @@ truth. The admin writes (e.g. a new active channel) and broadcasts
 stop `ChannelSup`s, sync subscriptions). The collector also reconciles from
 the database every minute, so a lost message only delays the change.
 
-New tables for this: `admins` (phx.gen.auth), `channel_groups`,
+New tables for this: `admins`, `admin_tokens` (sessions, invitations), `channel_groups`,
 `channel_group_members`, `stream_overrides` (merge / split / exclude),
 `annotations`, `admin_audit_log`, `settings`. The `web` role is read-only
 against the collected data and writes only these.
@@ -1552,6 +1553,14 @@ subscribing to webhooks.
 **Phase 3: admin core**
 
 14. Auth, add / pause channels, health page.
+
+**Phase 3 built** (2026-09-24). Invitations (`mix kick_tracker.admin.invite`,
+then from the admin pages), password + TOTP login, channels added by slug
+with a preview and a timezone, pause / resume, and a health page (sources per
+channel, coverage over 24h and 7 days, webhook subscriptions, queue depth,
+receivers, jobs, LiveDashboard under `/admin/dashboard`). Checked in a
+browser against the fake Kick: an invitation accepted, a login with a code,
+three channels added and collecting within a minute.
 
 **Phase 4: the public site (on bulk-mode data, then live-mode data)**
 

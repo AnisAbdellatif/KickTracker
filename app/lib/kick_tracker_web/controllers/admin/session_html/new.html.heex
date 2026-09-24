@@ -1,0 +1,36 @@
+<Layouts.bare flash={@flash}>
+  <div class="mx-auto max-w-sm">
+    <h1 class="text-xl font-semibold">{gettext("Admin login")}</h1>
+    <p class="mt-1 text-sm opacity-70">
+      {gettext("Password and the code from your authenticator app.")}
+    </p>
+    <.form for={@form} id="login-form" action={~p"/admin/login"} class="mt-6 space-y-2">
+      <.input
+        field={@form[:email]}
+        type="email"
+        label={gettext("Email")}
+        autocomplete="username"
+        required
+      />
+      <.input
+        field={@form[:password]}
+        type="password"
+        label={gettext("Password")}
+        autocomplete="current-password"
+        required
+      />
+      <.input
+        field={@form[:code]}
+        type="text"
+        label={gettext("Authenticator code")}
+        inputmode="numeric"
+        autocomplete="one-time-code"
+        pattern="[0-9 ]*"
+        required
+      />
+      <.button class="btn btn-primary w-full mt-4" phx-disable-with={gettext("Checking…")}>
+        {gettext("Log in")}
+      </.button>
+    </.form>
+  </div>
+</Layouts.bare>

@@ -15,6 +15,7 @@ Users, each with only what it needs:
 |---|---|---|
 | `receiver` | publish to `kick.events`, nothing else | `receiver-dev` |
 | `app` | consume `kick_tracker.events`, nothing else | `app-dev` |
+| `monitor` | read queue depths over the management API (health page), nothing else | `monitor-dev` |
 | `admin` | everything (management UI, tests) | `admin-dev` |
 
 The same topology and permissions exist twice: in vhost `/` for development

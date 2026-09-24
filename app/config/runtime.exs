@@ -74,7 +74,20 @@ config :kick_tracker, :kick,
   public_key: System.get_env("KICK_PUBLIC_KEY")
 
 config :kick_tracker, :amqp_url, setting.("AMQP_URL")
+
+# The public name (never Kick's, project.md §18.3).
+config :kick_tracker, :site_name, System.get_env("SITE_NAME", "Stream Tracker")
 config :kick_tracker, :amqp_queue, System.get_env("AMQP_QUEUE", "kick_tracker.events")
+
+# RabbitMQ's management API, for queue depths on the health page: a
+# read-only monitoring user, e.g. http://monitor:<password>@rabbitmq:15672.
+# Optional.
+config :kick_tracker,
+       :rabbitmq_management_url,
+       System.get_env("RABBITMQ_MANAGEMENT_URL") ||
+         if(config_env() == :dev, do: "http://monitor:monitor-dev@127.0.0.1:15673")
+
+config :kick_tracker, :rabbitmq_vhost, System.get_env("RABBITMQ_VHOST", "/")
 
 if config_env() == :dev do
   # Reload browser tabs when matching files change.

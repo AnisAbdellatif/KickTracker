@@ -1,8 +1,8 @@
 defmodule KickTracker.Tracking.Manager do
   @moduledoc """
   Keeps one `ChannelSup` running per active channel: at boot, whenever the
-  tracked set changes (`"channels:changed"`), and every few minutes as a
-  safety net. A channel whose processes keep crashing is stopped by its
+  tracked set changes (`"channels:changed"`), and every minute as a safety
+  net, so a lost broadcast only delays a change. A channel whose processes keep crashing is stopped by its
   own supervisor without affecting the others, and restarted here on the
   next sync.
   """
@@ -13,7 +13,7 @@ defmodule KickTracker.Tracking.Manager do
   alias KickTracker.{Channels, Tracking}
   alias KickTracker.Tracking.ChannelSup
 
-  @resync_ms 300_000
+  @resync_ms 60_000
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []),

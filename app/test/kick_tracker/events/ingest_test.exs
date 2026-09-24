@@ -34,6 +34,11 @@ defmodule KickTracker.Events.IngestTest do
 
     assert [%{user_id: 11, channel_id: id}] = rows("follows", ["message_id"])
     assert id == c.id
+
+    # Each stored delivery says which broadcaster it is about.
+    assert rows("webhook_events", ["message_id"]) |> Enum.map(& &1.broadcaster_user_id) ==
+             [c.kick_user_id, c.kick_user_id]
+
     assert [%{kind: "gift", quantity: 2, user_id: 12}] = rows("support_events", ["message_id"])
 
     assert rows("kick_users", ["id"]) |> Enum.map(&{&1.id, &1.username}) ==

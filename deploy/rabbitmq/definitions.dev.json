@@ -19,6 +19,14 @@
       "password_hash": "wt9yinCZAMK9nDKmptvDjaUXgkpUis/pqxAc+0UNq/jiM1hg",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
       "tags": []
+    },
+    {
+      "name": "monitor",
+      "password_hash": "ogHxJ07biAIUbCVwdpt1nl0GPxauB/6dKce47OWWuExISlPt",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": [
+        "monitoring"
+      ]
     }
   ],
   "vhosts": [
@@ -71,6 +79,20 @@
       "configure": "^$",
       "write": "^$",
       "read": "^kick_tracker\\.events$"
+    },
+    {
+      "user": "monitor",
+      "vhost": "/",
+      "configure": "^$",
+      "write": "^$",
+      "read": "^$"
+    },
+    {
+      "user": "monitor",
+      "vhost": "test",
+      "configure": "^$",
+      "write": "^$",
+      "read": "^$"
     }
   ],
   "exchanges": [

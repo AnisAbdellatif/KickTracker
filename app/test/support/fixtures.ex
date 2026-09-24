@@ -16,6 +16,36 @@ defmodule KickTracker.Fixtures do
     })
   end
 
+  @doc """
+  An admin with a known password and TOTP secret (returned as
+  `{admin, password, secret}`), created through an invitation like a real one.
+  """
+  def admin!(email \\ nil) do
+    n = System.unique_integer([:positive])
+    email = email || "admin#{n}@example.com"
+    password = "correct horse battery #{n}"
+    secret = KickTracker.Admins.TOTP.new_secret()
+    {:ok, token} = KickTracker.Admins.invite(nil, email)
+    invite = KickTracker.Admins.get_invite(token)
+    # A step in the past, so a login "now" isn't refused as a replay.
+    past = DateTime.add(DateTime.utc_now(), -120)
+    code = KickTracker.Admins.TOTP.code(secret, KickTracker.Admins.TOTP.step_at(past))
+
+    {:ok, admin} =
+      KickTracker.Admins.accept_invite(
+        invite,
+        secret,
+        %{"password" => password, "password_confirmation" => password, "code" => code},
+        past
+      )
+
+    {admin, password, secret}
+  end
+
+  @doc "The current TOTP code for a secret."
+  def totp_now(secret),
+    do: KickTracker.Admins.TOTP.code(secret, KickTracker.Admins.TOTP.step_at(DateTime.utc_now()))
+
   @doc "All rows of a table as maps, ordered by the given columns."
   def rows(table, order_by) do
     %{columns: cols, rows: rows} =

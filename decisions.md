@@ -1,6 +1,6 @@
 # Decisions
 
-Local decision log (see AGENTS.md §3). Never committed.
+Decision log (see AGENTS.md §3), tracked in git and public with the repo.
 
 ## Scope
 
@@ -109,7 +109,21 @@ Needs shaded bands (category segments, no-data), event markers (raids, gifts), l
 
 ## Admin
 
-**Current:** Under `/admin` in the `web` role; phx.gen.auth, invite-only, TOTP; optionally only reachable over the private network. Corrections are layered on raw data, never edits. (updated 2026-09-24 04:04)
+**Current:** Under `/admin` in the `web` role, invite-only, password + TOTP on every login; optionally only reachable over the private network. Accounts are written by hand on phx.gen.auth's model (random session tokens in the database, looked up per request and per LiveView mount; logout deletes the token and disconnects live pages), not generated: PBKDF2-HMAC-SHA512 from OTP's `:crypto` (210 000 iterations, count kept in the hash) instead of bcrypt, and our own RFC 6238 TOTP (`Admins.TOTP`, tested against the RFC's vectors) that refuses a code for a step already used. Invitations are one-use links valid 7 days, stored hashed, shown once to the inviting admin to send by hand; the first comes from `mix kick_tracker.admin.invite` / `KickTracker.Release.invite/1`. Every admin action goes to `admin_audit_log`. Corrections are layered on raw data, never edits. (updated 2026-09-24 06:20)
+
+phx.gen.auth in Phoenix 1.8 generates magic-link login by email and public registration, both of which would have to be torn out (no mail is configured, no public sign-up), and it adds `bcrypt_elixir`, a native dependency; TOTP would have needed `nimble_totp`. The pieces kept from it are the ones that matter for security (server-side session tokens, renewing the session on login, disconnecting sockets on logout). The enrolment shows the secret and the `otpauth://` URI as text rather than a QR code, to avoid a QR library; any authenticator app accepts a typed key. Login failures give one message for every factor, and an unknown email costs as much time as a wrong password.
+
+## Admin Actions on a Web Node
+
+**Current:** A web node that doesn't collect runs its own `Kick.Token`, so the admin can look a slug up before adding it and the health page can list Kick's webhook subscriptions. Admin writes (a channel added, paused, its timezone) are row changes plus `"channels:changed"`; the collector's `Tracking.Manager` also reconciles from the database every minute (was 5), so a lost broadcast only delays a change. Timezones are validated against PostgreSQL's `pg_timezone_names`, which is also what applies them at read time; the add form suggests one from the stream's language, always editable. (updated 2026-09-24 06:20)
+
+The alternative for lookups was to insert a pending row and let the collector resolve it, which makes the admin wait for a job to see whether a slug exists. The web node holding the client secret is acceptable: it already holds the database credentials. PostgreSQL rather than a `tzdata` dependency, since the database is where timezones are applied anyway.
+
+## Health Page
+
+**Current:** The health page reads only the database (plus RabbitMQ's management API, when `RABBITMQ_MANAGEMENT_URL` is set, through a `monitor` user with the `monitoring` tag and empty permissions), so it works on a web node. A source's state comes from its latest `coverage` outcome: ok, failing, stale (older than a little over two cadences) or never. Coverage % is the pure `Metrics.Coverage.fraction/4`: each ok period vouches for its first to last outcome plus one cadence. `webhook_events` gained a nullable `broadcaster_user_id`, filled from the body when stored, for "last event per channel". (updated 2026-09-24 06:20)
+
+The collector's processes know more (socket state), but asking them from a web node needs clustering, and the database already records every outcome. Without the column, the last event per channel would mean decoding every recent body, and `convert_from` fails on a non-UTF-8 body. Rows stored before the column stay null rather than being backfilled (raw rows aren't updated). The monitoring user needs a permission entry in the vhost (empty patterns) to see its queues through the API.
 
 ## Development Approach
 
