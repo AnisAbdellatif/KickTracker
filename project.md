@@ -79,7 +79,15 @@ Observed in the recordings (2026-09-24, `sim/recordings/`):
 | `channel.subscription.renewal` | subscriber, duration, expiry | Resubs, months subbed |
 | `channel.subscription.gifts` | gifter (may be anonymous), giftees | Gifted subs |
 | `kicks.gifted` | sender, amount, gift type and tier | Kicks |
+| `moderation.banned` | bans and timeouts | Not tracked; must be tolerated |
+| `channel.reward.redemption.updated` | channel-point redemptions | Not tracked; must be tolerated |
 | `chat.message.sent` | every chat message | Not used for now, see §2.4 |
+
+These ten are every event type Kick documents. Captured so far:
+`livestream.status.updated`, `livestream.metadata.updated` and
+`channel.followed`. The rest are still to record (§16); the simulator
+produces all of them, the unrecorded ones from Kick's documented field
+lists rather than from a recording.
 
 - Limits: 10 000 subscriptions per event type per app; `chat.message.sent`
   is capped at 1 000 for apps Kick hasn't verified.
@@ -1188,7 +1196,12 @@ Partly answered:
 
 - **Sub, gift and Kicks webhooks with the app token:** subscriptions are
   accepted for a channel that hasn't authorized us; no delivery of those
-  types observed yet. Record a channel where people subscribe and gift.
+  types observed yet. Seven of the ten event types are still uncaptured:
+  `channel.subscription.new`, `.renewal`, `.gifts`, `kicks.gifted`,
+  `moderation.banned`, `channel.reward.redemption.updated` and
+  `chat.message.sent`. Record a busy channel where people subscribe, gift
+  and get timed out. Until then the simulator's shapes for them follow the
+  documentation, and must be re-checked against a recording.
 - **Public API rate limits:** no rate-limit headers are sent, so the limits
   are unknown. We don't probe for them; stay batched and back off on 429.
 
@@ -1292,12 +1305,14 @@ only works against the simulator, that is a bug.
 
 **Built so far** (2026-09-24): the clock, scenarios and channel profiles,
 schedules and viewer curves, the payload builders, the HTTP side (token,
-public key, channels, livestreams, webhook subscriptions, v2) and signed
-webhook delivery with drop and duplicate faults. The recorder drives it
-unchanged, and its payload shapes are checked against `fixtures/` by a
-test, so a shape Kick changes shows up when we re-record. Still to come:
-the Pusher websocket, channel processes firing events as streams start and
-end, the remaining event types, the control API, and bulk mode.
+public key, channels, livestreams, webhook subscriptions, v2), signed
+webhook delivery with drop and duplicate faults, and a process per channel
+that announces streams starting and ending, title and category changes, and
+the follows, subs, gifts, Kicks, bans and redemptions of each passing
+minute. The recorder drives it unchanged, and its payload shapes are
+checked against `fixtures/` by a test, so a shape Kick changes shows up
+when we re-record. Still to come: the Pusher websocket, the control API,
+and bulk mode.
 
 **Two modes:**
 

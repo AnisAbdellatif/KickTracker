@@ -25,6 +25,21 @@ defmodule Sim.Webhooks do
     defstruct [:id, :broadcaster_user_id, :event, :version, :created_at]
   end
 
+  # Every event type Kick documents (docs.kick.com/events/event-types).
+  # `chat.message.sent` is served over Pusher instead, so the simulator
+  # accepts a subscription to it but sends nothing.
+  @event_types ~w(
+    livestream.status.updated livestream.metadata.updated
+    channel.followed
+    channel.subscription.new channel.subscription.renewal channel.subscription.gifts
+    kicks.gifted moderation.banned channel.reward.redemption.updated
+    chat.message.sent
+  )
+
+  @doc "Every event type the fake Kick knows about."
+  @spec event_types() :: [String.t()]
+  def event_types, do: @event_types
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 

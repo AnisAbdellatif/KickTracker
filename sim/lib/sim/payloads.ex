@@ -140,6 +140,97 @@ defmodule Sim.Payloads do
     %{"broadcaster" => broadcaster(channel), "follower" => person(follower_id)}
   end
 
+  @doc """
+  The body of a `channel.subscription.new` or `.renewal` webhook.
+
+  **Not yet recorded**: these shapes follow Kick's documentation, since no
+  sub or gift event has been captured yet (project.md §16). Re-check them
+  against `fixtures/` once one is.
+  """
+  @spec subscription(Channel.t(), pos_integer(), pos_integer(), DateTime.t()) :: map()
+  def subscription(%Channel{} = channel, subscriber_id, months, at) do
+    %{
+      "broadcaster" => broadcaster(channel),
+      "subscriber" => person(subscriber_id),
+      "duration" => months,
+      "created_at" => iso(at),
+      "expires_at" => at |> DateTime.add(30, :day) |> iso()
+    }
+  end
+
+  @doc "The body of a `channel.subscription.gifts` webhook. Not yet recorded (see `subscription/4`)."
+  @spec subscription_gifts(Channel.t(), pos_integer() | nil, [pos_integer()], DateTime.t()) ::
+          map()
+  def subscription_gifts(%Channel{} = channel, gifter_id, giftee_ids, at) do
+    %{
+      "broadcaster" => broadcaster(channel),
+      "gifter" => if(gifter_id, do: person(gifter_id), else: anonymous()),
+      "giftees" => Enum.map(giftee_ids, &person/1),
+      "created_at" => iso(at),
+      "expires_at" => at |> DateTime.add(30, :day) |> iso()
+    }
+  end
+
+  @doc "The body of a `kicks.gifted` webhook. Not yet recorded (see `subscription/4`)."
+  @spec kicks_gifted(Channel.t(), pos_integer(), pos_integer(), DateTime.t()) :: map()
+  def kicks_gifted(%Channel{} = channel, sender_id, amount, at) do
+    %{
+      "broadcaster" => broadcaster(channel),
+      "sender" => person(sender_id),
+      "gift" => %{"amount" => amount, "type" => "kicks", "tier" => tier(amount)},
+      "created_at" => iso(at)
+    }
+  end
+
+  defp tier(amount) when amount >= 500, do: "legendary"
+  defp tier(amount) when amount >= 100, do: "epic"
+  defp tier(amount) when amount >= 50, do: "rare"
+  defp tier(_amount), do: "common"
+
+  defp anonymous do
+    %{
+      "user_id" => nil,
+      "username" => "Anonymous",
+      "channel_slug" => nil,
+      "is_verified" => false,
+      "is_anonymous" => true,
+      "identity" => nil,
+      "profile_picture" => nil
+    }
+  end
+
+  @doc """
+  The body of a `moderation.banned` webhook. Not yet recorded (see
+  `subscription/4`); the field names follow Kick's documentation.
+  """
+  @spec banned(Channel.t(), pos_integer(), boolean(), DateTime.t()) :: map()
+  def banned(%Channel{} = channel, banned_user_id, permanent?, at) do
+    %{
+      "broadcaster" => broadcaster(channel),
+      "moderator" => broadcaster(channel),
+      "banned_user" => person(banned_user_id),
+      "metadata" => %{
+        "reason" => "spam",
+        "created_at" => iso(at),
+        "expires_at" => if(permanent?, do: nil, else: at |> DateTime.add(600, :second) |> iso())
+      }
+    }
+  end
+
+  @doc "The body of a `channel.reward.redemption.updated` webhook. Not yet recorded."
+  @spec reward_redemption(Channel.t(), pos_integer(), map(), DateTime.t()) :: map()
+  def reward_redemption(%Channel{} = channel, redeemer_id, reward, at) do
+    %{
+      "id" => uuid(channel.seed, redeemer_id, at),
+      "broadcaster" => broadcaster(channel),
+      "redeemer" => person(redeemer_id),
+      "reward" => Map.put(reward, "description", ""),
+      "user_input" => "",
+      "status" => "fulfilled",
+      "redeemed_at" => iso(at)
+    }
+  end
+
   @doc "A Pusher chat message frame's `data` (a JSON document inside a string)."
   @spec chat_message(Channel.t(), pos_integer(), String.t(), DateTime.t()) :: map()
   def chat_message(%Channel{} = channel, sender_id, content, at) do

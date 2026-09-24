@@ -60,9 +60,20 @@ Without `--scenario` it runs `Sim.Scenarios.default/0`: a big weekday
 channel, a mid-sized daily one, a small weekend one, and one that never
 goes live.
 
-**Not built yet:** the Pusher websocket, channel processes that fire
-webhooks as streams start and end, follows/subs/gifts/Kicks events, the
-control API and CLI, and bulk history.
+Each channel also runs a process that announces what happens: a stream
+going live (`livestream.status.updated`, then
+`livestream.metadata.updated`, in Kick's own order), title and category
+changes partway through, the stream ending with the time it really ended,
+and minute by minute the follows, subs, resubs, gift bursts, Kicks, bans
+and channel-point redemptions its audience produced. That is all ten event
+types Kick documents except chat, which will come over Pusher.
+
+Three of those ten have been captured from the real Kick; the rest follow
+Kick's documented field lists and must be re-checked once recorded
+(project.md §16).
+
+**Not built yet:** the Pusher websocket, the control API and CLI, and bulk
+history.
 
 ## Setup
 

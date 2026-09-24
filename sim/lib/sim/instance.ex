@@ -23,6 +23,7 @@ defmodule Sim.Instance do
     children = [
       {Sim.Server, scenario: scenario, clock: clock},
       {Sim.Webhooks, webhook_url: Keyword.get(opts, :webhook_url)},
+      {Sim.Channels, scenario: scenario, tick_ms: Keyword.get(opts, :tick_ms, 1_000)},
       {Bandit,
        plug: Sim.Http.Router,
        scheme: :http,
