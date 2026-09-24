@@ -115,7 +115,8 @@ defmodule Mix.Tasks.Record.Api do
   end
 
   @doc false
-  def parse_slugs!(nil), do: Mix.raise("--slugs is required, e.g. --slugs <channel>,<other-channel>")
+  def parse_slugs!(nil),
+    do: Mix.raise("--slugs is required, e.g. --slugs <channel>,<other-channel>")
 
   def parse_slugs!(value) do
     case value
