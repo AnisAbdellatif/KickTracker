@@ -103,21 +103,22 @@ defmodule Sim.Channel.ServerTest do
     at(3 * 3600 + 120)
     assert "livestream.status.updated" in ChannelServer.tick(@slug)
 
-    assert wait_for(fn -> length(WebhookPolicy.deliveries(policy)) >= 3 end)
+    statuses = fn ->
+      for recording <- captured(run),
+          event_of(recording) == "livestream.status.updated",
+          do: Jason.decode!(recording["request"]["body"])
+    end
+
+    assert wait_for(fn -> length(statuses.()) == 2 end)
+    assert WebhookPolicy.deliveries(policy) != []
 
     recordings = captured(run)
-    assert length(recordings) >= 3
 
     # Every delivery verified against the simulator's own key.
     assert Enum.all?(recordings, &(&1["signature_valid"] == true))
     assert Enum.all?(recordings, &(&1["answered"] == 200))
 
-    statuses =
-      for recording <- recordings,
-          event_of(recording) == "livestream.status.updated",
-          do: Jason.decode!(recording["request"]["body"])
-
-    assert [live, ended] = statuses
+    assert [live, ended] = Enum.sort_by(statuses.(), &(&1["is_live"] == false))
     assert live["is_live"] == true and live["ended_at"] == nil
     assert ended["is_live"] == false
     assert ended["started_at"] == live["started_at"]

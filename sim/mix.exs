@@ -29,7 +29,7 @@ defmodule Sim.MixProject do
       {:bandit, "~> 1.12"},
       {:plug, "~> 1.20"},
       {:mint_web_socket, "~> 1.0"},
-      {:websock_adapter, "~> 0.6", only: :test},
+      {:websock_adapter, "~> 0.6"},
       {:stream_data, "~> 1.4", only: :test}
     ]
   end

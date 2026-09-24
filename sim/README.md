@@ -22,6 +22,7 @@ its own key. Point the code under test at it:
 KICK_API_URL=http://127.0.0.1:4050
 KICK_ID_URL=http://127.0.0.1:4050
 KICK_V2_URL=http://127.0.0.1:4050/api/v2
+PUSHER_URL=ws://127.0.0.1:4050/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false
 ```
 
 Useful options:
@@ -66,14 +67,28 @@ going live (`livestream.status.updated`, then
 changes partway through, the stream ending with the time it really ended,
 and minute by minute the follows, subs, resubs, gift bursts, Kicks, bans
 and channel-point redemptions its audience produced. That is all ten event
-types Kick documents except chat, which will come over Pusher.
+types Kick documents, chat included (`chat.message.sent` goes to an app
+that subscribed to it).
+
+**Pusher** runs on the same port (`/app/<key>`). It speaks what Kick's chat
+uses: `pusher:connection_established` on connect, `pusher:subscribe` with
+an empty `auth`, pings both ways, and `App\Events\ChatMessageEvent`
+frames for each subscribed `chatrooms.<id>.v2`, their `data` a JSON string
+as Pusher sends it. Chat follows the audience: more viewers, more messages,
+from a pool of chatters who come back, about one in twenty a reply to an
+earlier message. It also does what real Pusher does to misbehaving
+clients: a wrong app key gets `pusher:error` 4001, and a client that
+misses a pong is dropped with 4201. The `pusher_disconnect_after_s` fault
+closes every socket with 4200 after that long, to test reconnecting.
 
 Three of those ten have been captured from the real Kick; the rest follow
 Kick's documented field lists and must be re-checked once recorded
 (project.md §16).
 
-**Not built yet:** the Pusher websocket, the control API and CLI, and bulk
-history.
+Raids and hosts aren't simulated yet: none has been recorded, so their
+Pusher event names are unknown (project.md §16).
+
+**Not built yet:** the control API and CLI, and bulk history.
 
 ## Setup
 

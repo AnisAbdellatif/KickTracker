@@ -221,7 +221,7 @@ defmodule Sim.Payloads do
   @spec reward_redemption(Channel.t(), pos_integer(), map(), DateTime.t()) :: map()
   def reward_redemption(%Channel{} = channel, redeemer_id, reward, at) do
     %{
-      "id" => uuid(channel.seed, redeemer_id, at),
+      "id" => uuid({:redemption, channel.seed, redeemer_id, at}),
       "broadcaster" => broadcaster(channel),
       "redeemer" => person(redeemer_id),
       "reward" => Map.put(reward, "description", ""),
@@ -231,20 +231,109 @@ defmodule Sim.Payloads do
     }
   end
 
-  @doc "A Pusher chat message frame's `data` (a JSON document inside a string)."
-  @spec chat_message(Channel.t(), pos_integer(), String.t(), DateTime.t()) :: map()
-  def chat_message(%Channel{} = channel, sender_id, content, at) do
-    %{
-      "id" => uuid(channel.seed, sender_id, at),
+  @doc """
+  The `data` of a Pusher `App\\Events\\ChatMessageEvent`, in the shape the
+  recordings showed. Two things differ from the API and webhooks and are
+  kept on purpose: `created_at` ends in `+00:00` rather than `Z`, and a
+  reply carries its original message and sender under `metadata`.
+  """
+  @spec chat_message(Channel.t(), Sim.Chat.message()) :: map()
+  def chat_message(%Channel{} = channel, message) do
+    base = %{
+      "id" => message.id,
       "chatroom_id" => channel.chatroom_id,
-      "content" => content,
+      "content" => message.content,
       "type" => "message",
-      "created_at" => iso(at),
-      "sender" => %{
-        "id" => sender_id,
-        "username" => "chatter#{sender_id}",
-        "slug" => "chatter#{sender_id}",
-        "identity" => %{"color" => "#FF9D00", "badges" => []}
+      "created_at" => iso_offset(message.at),
+      "metadata" => %{
+        "message_ref" => Integer.to_string(DateTime.to_unix(message.at, :millisecond))
+      },
+      "sender" => chat_sender(channel, message.sender_id)
+    }
+
+    case message.reply_to do
+      nil ->
+        base
+
+      original ->
+        base
+        |> Map.put("type", "reply")
+        |> Map.put("thread_parent_id", original.id)
+        |> put_in(["metadata", "original_message"], %{
+          "id" => original.id,
+          "content" => original.content
+        })
+        |> put_in(["metadata", "original_sender"], %{
+          "id" => original.sender_id,
+          "username" => "chatter#{original.sender_id}"
+        })
+    end
+  end
+
+  @doc """
+  The body of a `chat.message.sent` webhook, for the same message. Not yet
+  recorded: the fields follow Kick's documentation.
+  """
+  @spec chat_message_sent(Channel.t(), Sim.Chat.message()) :: map()
+  def chat_message_sent(%Channel{} = channel, message) do
+    %{
+      "message_id" => message.id,
+      "replies_to" =>
+        message.reply_to &&
+          %{
+            "message_id" => message.reply_to.id,
+            "content" => message.reply_to.content,
+            "sender" => person(message.reply_to.sender_id)
+          },
+      "broadcaster" => broadcaster(channel),
+      "sender" => person(message.sender_id),
+      "content" => message.content,
+      "emotes" => [],
+      "created_at" => iso(message.at)
+    }
+  end
+
+  @doc "Pusher's timestamp style: whole seconds, `+00:00` instead of `Z`."
+  @spec iso_offset(DateTime.t()) :: String.t()
+  def iso_offset(%DateTime{} = at), do: Calendar.strftime(at, "%Y-%m-%dT%H:%M:%S+00:00")
+
+  @colors ~w(#FF9D00 #FFA600 #1475E1 #00C7AC #E9113C #BC66FF #72ACED #FF6B00)
+
+  # A chatter's look, stable per person: a colour, a level badge, and for
+  # some a subscriber badge, like the recorded senders.
+  defp chat_sender(channel, sender_id) do
+    h = :erlang.phash2({channel.seed, sender_id})
+    subscriber? = rem(h, 4) == 0
+
+    badges =
+      if subscriber?,
+        do: [
+          %{
+            "type" => "subscriber",
+            "text" => "Subscriber",
+            "count" => 1 + rem(h, 24),
+            "sort_order" => 6
+          }
+        ],
+        else: []
+
+    %{
+      "id" => sender_id,
+      "username" => "chatter#{sender_id}",
+      "slug" => "chatter#{sender_id}",
+      "identity" => %{
+        "color" => Enum.at(@colors, rem(h, length(@colors))),
+        "badges" => badges,
+        "badges_v2" => [
+          %{
+            "badge_type" => "global",
+            "name" => "level",
+            "image_url" => "https://sim.invalid/badge/level.webp",
+            "metadata" => %{"level" => 1 + rem(h, 60)},
+            "selected" => rem(h, 3) == 0,
+            "sort_order" => 1
+          }
+        ]
       }
     }
   end
@@ -351,10 +440,10 @@ defmodule Sim.Payloads do
 
   defp asset(channel, kind), do: "https://sim.invalid/#{kind}/#{channel.slug}.webp"
 
-  # Shaped like the UUIDs Kick uses for chat messages, and stable per message.
-  defp uuid(seed, sender_id, at) do
-    <<a::32, b::16, c::16, d::16, e::48>> =
-      :crypto.hash(:md5, "#{seed}-#{sender_id}-#{DateTime.to_unix(at, :millisecond)}")
+  @doc "A UUID shaped like Kick's (version 4 layout), stable for the same term."
+  @spec uuid(term()) :: String.t()
+  def uuid(term) do
+    <<a::32, b::16, c::16, d::16, e::48>> = :crypto.hash(:md5, :erlang.term_to_binary(term))
 
     :io_lib.format("~8.16.0b-~4.16.0b-4~3.16.0b-8~3.16.0b-~12.16.0b", [
       a,

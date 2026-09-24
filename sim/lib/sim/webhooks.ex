@@ -145,18 +145,19 @@ defmodule Sim.Webhooks do
     end
   end
 
+  # Each attempt runs in its own task, as Kick delivers concurrently: a slow
+  # endpoint, or a flood of one event type, must not hold up the others.
+  # A failed attempt schedules its retry back here.
   @impl true
   def handle_info({:attempt, delivery, attempt}, state) do
-    case post(state.url, delivery) do
-      :ok ->
-        :ok
+    url = state.url
 
-      :retry ->
-        case Enum.at(@retry_delays_ms, attempt) do
-          nil -> :ok
-          delay -> Process.send_after(self(), {:attempt, delivery, attempt + 1}, delay)
-        end
-    end
+    Task.Supervisor.start_child(Sim.Webhooks.Tasks, fn ->
+      with :retry <- post(url, delivery),
+           delay when is_integer(delay) <- Enum.at(@retry_delays_ms, attempt) do
+        Process.send_after(__MODULE__, {:attempt, delivery, attempt + 1}, delay)
+      end
+    end)
 
     {:noreply, state}
   end

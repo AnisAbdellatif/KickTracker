@@ -8,6 +8,7 @@ defmodule Sim.Http.Router do
     * `GET /public/v1/public-key`, `/channels`, `/livestreams`,
       and `/events/subscriptions` (api.kick.com)
     * `GET /api/v2/channels/:slug` — the private endpoint (kick.com)
+    * `GET /app/:key` — the Pusher websocket (ws-us2.pusher.com)
 
   It copies the behaviour the recordings showed, not just the happy path: a
   missing token is 401, an unknown slug fails the whole request with 400,
@@ -104,6 +105,16 @@ defmodule Sim.Http.Router do
       Webhooks.unsubscribe(Map.get(query(conn), "id", []))
       send_resp(conn, 204, "")
     end)
+  end
+
+  # Pusher, on the same port. The app key is checked the way Pusher does:
+  # a wrong one gets an error frame and a 4001 close, not an HTTP error.
+  get "/app/:key" do
+    conn
+    |> WebSockAdapter.upgrade(Sim.Pusher.Socket, %{key_ok?: key == Server.pusher().app_key},
+      timeout: 3_600_000
+    )
+    |> halt()
   end
 
   get "/api/v2/channels/:slug" do

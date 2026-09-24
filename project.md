@@ -1309,10 +1309,12 @@ public key, channels, livestreams, webhook subscriptions, v2), signed
 webhook delivery with drop and duplicate faults, and a process per channel
 that announces streams starting and ending, title and category changes, and
 the follows, subs, gifts, Kicks, bans and redemptions of each passing
-minute. The recorder drives it unchanged, and its payload shapes are
-checked against `fixtures/` by a test, so a shape Kick changes shows up
-when we re-record. Still to come: the Pusher websocket, the control API,
-and bulk mode.
+minute, and a Pusher websocket carrying each stream's chat (with the
+handshake, pings, and the disconnect codes real Pusher uses). The recorder
+drives all of it unchanged, and its payload shapes (API, webhooks, chat
+frames) are checked against `fixtures/` by tests, so a shape Kick changes
+shows up when we re-record. Raids and hosts wait for a recording (their
+event names are unknown). Still to come: the control API, and bulk mode.
 
 **Two modes:**
 

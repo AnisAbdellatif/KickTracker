@@ -12,7 +12,12 @@ defmodule Sim.Channel.Server do
   use GenServer, restart: :transient
 
   alias Sim.Channel.Timeline
-  alias Sim.{Server, Webhooks}
+  alias Sim.{Chat, Payloads, Server, Webhooks}
+  alias Sim.Pusher.{Hub, Socket}
+
+  # A fast clock can cover a lot of chat in one tick; past this, the rest is
+  # dropped rather than flooding the sockets (like a client falling behind).
+  @max_chat_per_tick 5_000
 
   @default_tick_ms 1_000
 
@@ -48,6 +53,7 @@ defmodule Sim.Channel.Server do
     state = %{
       channel: channel,
       timeline: Timeline.start(channel, now),
+      chat_at: now,
       tick_ms: tick_ms,
       delivered: []
     }
@@ -83,10 +89,48 @@ defmodule Sim.Channel.Server do
       Webhooks.deliver(state.channel.user_id, event, body, now)
     end
 
+    chat(state.channel, timeline.window, state.chat_at, now)
+
     emitted = Enum.map(emissions, &elem(&1, 0))
     delivered = Enum.reduce(emitted, state.delivered, &[{&1, now} | &2])
 
-    {%{state | timeline: timeline, delivered: Enum.take(delivered, 500)}, emitted}
+    {%{state | timeline: timeline, chat_at: now, delivered: Enum.take(delivered, 500)}, emitted}
+  end
+
+  # The minute's chat goes to Pusher subscribers, and as `chat.message.sent`
+  # webhooks to an app that subscribed to those instead.
+  defp chat(_channel, nil, _from, _now), do: :ok
+
+  defp chat(channel, window, from, now) do
+    topic = "chatrooms.#{channel.chatroom_id}.v2"
+    webhook? = Webhooks.subscription_for(channel.user_id, "chat.message.sent") != nil
+
+    if Hub.listened?(topic) or webhook? do
+      messages = channel |> Chat.between(window, from, now) |> Enum.take(@max_chat_per_tick)
+
+      if Hub.listened?(topic) do
+        frames =
+          Enum.map(messages, fn message ->
+            data = channel |> Payloads.chat_message(message) |> Jason.encode!()
+            Socket.frame("App\\Events\\ChatMessageEvent", data, topic)
+          end)
+
+        Hub.broadcast(topic, frames)
+      end
+
+      if webhook? do
+        for message <- messages do
+          Webhooks.deliver(
+            channel.user_id,
+            "chat.message.sent",
+            Payloads.chat_message_sent(channel, message),
+            now
+          )
+        end
+      end
+    end
+
+    :ok
   end
 
   defp via(slug), do: {:via, Registry, {Sim.Channel.Registry, String.downcase(slug)}}

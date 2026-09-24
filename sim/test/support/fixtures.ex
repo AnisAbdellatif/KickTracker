@@ -30,6 +30,24 @@ defmodule Sim.Fixtures do
     |> Enum.map(&Jason.decode!(&1["request"]["body"]))
   end
 
+  @doc "Every Pusher frame recorded coming in from the server, decoded (`data` left as it came)."
+  @spec pusher_frames() :: [map()]
+  def pusher_frames do
+    @root
+    |> Path.join("pusher/*.jsonl")
+    |> Path.wildcard()
+    |> Enum.flat_map(fn path -> path |> File.stream!() |> Enum.map(&Jason.decode!/1) end)
+    |> Enum.filter(&(&1["direction"] == "in" and is_binary(&1["frame"])))
+    |> Enum.map(&Jason.decode!(&1["frame"]))
+  end
+
+  @doc "The decoded `data` of every recorded chat message."
+  @spec pusher_chat_data() :: [map()]
+  def pusher_chat_data do
+    for %{"event" => "App\\Events\\ChatMessageEvent", "data" => data} <- pusher_frames(),
+        do: Jason.decode!(data)
+  end
+
   @doc """
   Every field path in a document, as dotted strings with `[]` for list
   elements. Comparing path sets is how a simulated payload is checked
