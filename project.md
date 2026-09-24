@@ -1124,8 +1124,10 @@ shares.)
 
 Also: every chart can switch to a **table view** and **export CSV** (the same
 JSON), which also serves accessibility. Colors come from a colorblind-safe
-palette with a dark theme by default and a light one; both from the same
-tokens.
+palette (checked for colour-vision deficiency in both themes), used in a
+fixed order so a channel keeps its colour; magnitudes use one blue ramp.
+Light and dark themes follow the visitor's system setting unless they pick
+one, and both come from the same CSS tokens (`assets/css/app.css`).
 
 ### 13.8 Admin interface
 

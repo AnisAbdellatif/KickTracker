@@ -99,7 +99,7 @@ defmodule KickTrackerWeb.CompareLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} active={:compare}>
       <div id="compare" phx-hook="Format">
         <div class="flex flex-wrap items-center gap-2">
           <h1 class="text-2xl font-semibold tracking-tight">{gettext("Compare")}</h1>

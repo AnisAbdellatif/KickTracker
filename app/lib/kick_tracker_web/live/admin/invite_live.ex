@@ -50,7 +50,7 @@ defmodule KickTrackerWeb.Admin.InviteLive do
           <h1 class="text-xl font-semibold">{gettext("Create your admin account")}</h1>
           <p class="mt-1 text-sm opacity-70">{@invite.sent_to}</p>
 
-          <div :if={@secret} class="mt-6 rounded-box border border-base-300 p-4 text-sm">
+          <div :if={@secret} class="mt-6 card-surface p-4 text-sm">
             <p class="font-medium">{gettext("1. Add this key to your authenticator app")}</p>
             <p id="totp-secret" class="mt-2 break-all font-mono text-base tracking-wider">
               {@secret

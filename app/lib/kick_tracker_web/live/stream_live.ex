@@ -85,21 +85,33 @@ defmodule KickTrackerWeb.StreamLive do
     ~H"""
     <Layouts.app flash={@flash}>
       <div id="stream-page" phx-hook="Format">
-        <nav class="text-sm opacity-70">
-          <.link navigate={~p"/c/#{@channel.slug}"} class="link">{@channel.slug}</.link>
-          /
-          <.link navigate={~p"/c/#{@channel.slug}/streams"} class="link">{gettext("Streams")}</.link>
+        <nav
+          class="flex items-center gap-1 text-sm text-base-content/60"
+          aria-label={gettext("Breadcrumb")}
+        >
+          <.link
+            navigate={~p"/c/#{@channel.slug}"}
+            class="flex items-center gap-1.5 hover:text-base-content"
+          >
+            <.avatar name={@channel.slug} class="size-5 text-[0.65rem]" />{@channel.slug}
+          </.link>
+          <.icon name="hero-chevron-right-micro" class="size-4 opacity-50" />
+          <.link navigate={~p"/c/#{@channel.slug}/streams"} class="hover:text-base-content">
+            {gettext("Streams")}
+          </.link>
         </nav>
-        <header class="mt-1 flex flex-wrap items-center gap-3">
-          <h1 class="text-2xl font-semibold tracking-tight">
+        <header class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">
             <.time at={@stream.started_at} tz={@channel.timezone} />
           </h1>
           <%= if is_nil(@stream.ended_at) do %>
             <.live_badge />
-            <span :if={@now_viewers} class="text-lg"><.num value={@now_viewers} />
-            <span class="text-sm opacity-70">{gettext("watching")}</span></span>
+            <span :if={@now_viewers} class="text-sm text-base-content/60">
+              <.num value={@now_viewers} class="text-lg font-semibold text-base-content" />
+              {gettext("watching")}
+            </span>
           <% else %>
-            <span class="text-sm opacity-70">
+            <span class="text-sm text-base-content/60">
               {gettext("ended")} <.time at={@stream.ended_at} fmt="time" tz={@channel.timezone} />
               <span
                 :if={@stream.end_source == "poll"}
@@ -117,15 +129,19 @@ defmodule KickTrackerWeb.StreamLive do
             id="tz-switch"
             phx-hook="TzSwitch"
             type="button"
-            class="btn btn-ghost btn-xs"
+            class="btn btn-ghost btn-sm aria-pressed:btn-active"
             aria-pressed="false"
-          >{gettext("Channel time")}</button>
+            aria-label={gettext("Channel time")}
+          >
+            <.icon name="hero-globe-alt-micro" class="size-4" />
+            <span class="hidden sm:inline">{gettext("Channel time")}</span>
+          </button>
         </header>
 
         <section
           :if={s = @stream.stats}
           id="stream-cards"
-          class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8"
+          class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8"
         >
           <.kpi label={gettext("Duration")} value={s.airtime_s} kind={:duration} />
           <.kpi label={gettext("Avg viewers")} value={s.avg_viewers} />
@@ -163,8 +179,8 @@ defmodule KickTrackerWeb.StreamLive do
         </div>
 
         <div class="mt-4 grid gap-4 lg:grid-cols-3">
-          <section class="rounded-box border border-base-300 p-3">
-            <h2 class="font-medium">{gettext("Title and category")}</h2>
+          <section class="card-surface p-4">
+            <h2 class="text-sm font-semibold">{gettext("Title and category")}</h2>
             <ol id="timeline" class="mt-2 space-y-2 text-sm">
               <li :for={e <- @timeline} class="flex gap-2">
                 <span class="w-14 shrink-0 text-xs opacity-60"><.time
@@ -178,8 +194,8 @@ defmodule KickTrackerWeb.StreamLive do
             </ol>
           </section>
           <%= if @people do %>
-            <section class="rounded-box border border-base-300 p-3">
-              <h2 class="font-medium">{gettext("Top chatters")}</h2>
+            <section class="card-surface p-4">
+              <h2 class="text-sm font-semibold">{gettext("Top chatters")}</h2>
               <ol id="top-chatters" class="mt-2 space-y-1 text-sm">
                 <li :for={p <- @people.chatters} class="flex gap-2">
                   <span class="flex-1 truncate">{p.name || gettext("user %{id}", id: p.user_id)}</span>
@@ -188,8 +204,8 @@ defmodule KickTrackerWeb.StreamLive do
                 </li>
               </ol>
             </section>
-            <section class="rounded-box border border-base-300 p-3">
-              <h2 class="font-medium">{gettext("Top supporters")}</h2>
+            <section class="card-surface p-4">
+              <h2 class="text-sm font-semibold">{gettext("Top supporters")}</h2>
               <ol id="top-supporters" class="mt-2 space-y-1 text-sm">
                 <li :for={p <- @people.supporters} class="flex gap-2">
                   <span class="flex-1 truncate">{p.name || gettext("user %{id}", id: p.user_id)}</span>

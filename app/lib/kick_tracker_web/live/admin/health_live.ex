@@ -133,7 +133,7 @@ defmodule KickTrackerWeb.Admin.HealthLive do
       </section>
 
       <div class="mt-10 grid gap-6 lg:grid-cols-3">
-        <section id="queue-health" class="rounded-box border border-base-300 p-4">
+        <section id="queue-health" class="card-surface p-4">
           <h2 class="font-semibold">{gettext("Queue")}</h2>
           <.async_result :let={queues} assign={@queues}>
             <:loading>
@@ -184,7 +184,7 @@ defmodule KickTrackerWeb.Admin.HealthLive do
           </dl>
         </section>
 
-        <section id="receiver-health" class="rounded-box border border-base-300 p-4">
+        <section id="receiver-health" class="card-surface p-4">
           <h2 class="font-semibold">{gettext("Receivers")}</h2>
           <p :if={@ingress.receivers == []} class="mt-2 text-sm opacity-60">
             {gettext("No deliveries in the last 7 days.")}
@@ -197,7 +197,7 @@ defmodule KickTrackerWeb.Admin.HealthLive do
           </dl>
         </section>
 
-        <section id="job-health" class="rounded-box border border-base-300 p-4">
+        <section id="job-health" class="card-surface p-4">
           <h2 class="font-semibold">{gettext("Jobs")}</h2>
           <dl class="mt-2 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
             <%= for c <- @jobs.counts do %>

@@ -1,10 +1,9 @@
 // The stream page (project.md §13.3): one time axis, stacked panels sharing
 // zoom and crosshair. Viewers at 60s with category bands, title ticks,
 // markers and "no data" shading; chat (messages and active chatters); support.
-import {baseOption, timeAxis, valueAxis, gapAreas, zip, fmt, palette} from "./theme"
+import {baseOption, tooltip, timeAxis, valueAxis, gapAreas, zip, line, bar, alpha} from "./theme"
 import {annotationAreas} from "./timeseries"
 
-const bandColors = ["rgba(86,180,233,0.10)", "rgba(230,159,0,0.10)", "rgba(0,158,115,0.10)", "rgba(204,121,167,0.10)"]
 
 export function option(data, opts, t) {
   const o = baseOption(t)
@@ -15,12 +14,19 @@ export function option(data, opts, t) {
     {left: 8, right: 8, top: "82%", height: "13%", containLabel: true},
   ]
   o.axisPointer = {link: [{xAxisIndex: "all"}]}
-  o.tooltip = {trigger: "axis", confine: true, valueFormatter: fmt}
+  o.tooltip = tooltip(t)
+  const P = t.palette
+  // Category bands: very light washes of the later palette slots, so they
+  // never compete with the viewer line (slot 1).
+  const bandColors = [alpha(P[2], 0.08), alpha(P[4], 0.08), alpha(P[6], 0.08), alpha(P[3], 0.08)]
   const min = data.stream.started_at * 1000
   const max = (data.stream.ended_at || Date.now() / 1000) * 1000
   o.xAxis = [0, 1, 2].map(i => timeAxis(t, {gridIndex: i, min, max, axisLabel: {show: i === 2, color: t.muted, hideOverlap: true}}))
   o.yAxis = [0, 1, 2].map(i => valueAxis(t, {gridIndex: i, min: 0, splitNumber: i === 0 ? 4 : 2}))
-  o.dataZoom = [{type: "inside", xAxisIndex: [0, 1, 2], filterMode: "none"}, {type: "slider", xAxisIndex: [0, 1, 2], bottom: 0, height: 14, showDetail: false}]
+  o.dataZoom = [{type: "inside", xAxisIndex: [0, 1, 2], filterMode: "none"},
+    {type: "slider", xAxisIndex: [0, 1, 2], bottom: 0, height: 14, showDetail: false, borderColor: t.grid,
+      fillerColor: alpha(P[0], 0.12), handleStyle: {color: t.surface, borderColor: t.axis},
+      dataBackground: {lineStyle: {color: t.axis}, areaStyle: {color: alpha(t.axis, 0.3)}}}]
 
   const segments = (data.segments || []).map((s, i) => [
     {xAxis: s.from * 1000, name: s.name, itemStyle: {color: bandColors[i % bandColors.length]},
@@ -30,31 +36,30 @@ export function option(data, opts, t) {
   const gaps = gapAreas(data.viewers.gaps, t)
   const titles = (data.titles || []).slice(1).map(x => ({xAxis: x.at * 1000, name: x.title,
     label: {show: false}, lineStyle: {color: t.muted, type: "dotted", width: 1}}))
+  const markerColor = (k) => (k === "gift" ? P[4] : k === "kicks" ? P[2] : k === "flagged" ? t.muted : P[1])
   const markers = (data.markers || []).map(m => ({
     coord: [m.at * 1000, m.kind === "flagged" ? m.value : nearest(data.viewers, m.at)],
     value: m.value, name: markerName(m, L),
     symbol: m.kind === "gift" ? "diamond" : m.kind === "kicks" ? "triangle" : m.kind === "flagged" ? "emptyCircle" : "pin",
     symbolSize: m.kind === "gift" || m.kind === "kicks" || m.kind === "flagged" ? 9 : 22,
-    itemStyle: {color: m.kind === "gift" ? palette[3] : m.kind === "kicks" ? palette[2] : m.kind === "flagged" ? palette[7] : palette[5]},
+    itemStyle: {color: markerColor(m.kind), borderColor: t.surface, borderWidth: 2},
     label: {show: false},
   }))
 
   o.series = [
-    {name: L.viewers || "Viewers", type: "line", xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, connectNulls: false,
-      data: zip(data.viewers.t, data.viewers.avg), lineStyle: {width: 1.6, color: palette[0]}, itemStyle: {color: palette[0]},
-      areaStyle: {opacity: 0.08},
+    line(L.viewers || "Viewers", zip(data.viewers.t, data.viewers.avg), P[0], {
+      xAxisIndex: 0, yAxisIndex: 0, areaStyle: {color: alpha(P[0], 0.1)},
       markArea: {silent: true, data: segments.concat(gaps).concat(annotationAreas(data.annotations, t))},
       markLine: {silent: false, symbol: "none", data: titles, tooltip: {formatter: (p) => p.name}},
-      markPoint: {data: markers, tooltip: {formatter: (p) => p.name}}},
-    {name: L.messages || "Messages / min", type: "bar", xAxisIndex: 1, yAxisIndex: 1, barMaxWidth: 4,
-      data: zip(data.chat.t, data.chat.messages), itemStyle: {color: palette[1], opacity: 0.6},
-      markArea: {silent: true, data: gapAreas(data.chat.gaps, t)}},
-    {name: L.chatters || "Active chatters", type: "line", xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, connectNulls: false,
-      data: data.chatters ? zip(data.chatters.t, data.chatters.chatters) : [], lineStyle: {width: 1.4, color: palette[4]}, itemStyle: {color: palette[4]}},
-    {name: L.subs || "Subs", type: "bar", stack: "support", xAxisIndex: 2, yAxisIndex: 2, barMaxWidth: 4, data: zip(data.support.t, data.support.subs), itemStyle: {color: palette[2]}},
-    {name: L.gifts || "Gifted subs", type: "bar", stack: "support", xAxisIndex: 2, yAxisIndex: 2, barMaxWidth: 4, data: zip(data.support.t, data.support.gifts), itemStyle: {color: palette[3]}},
+      markPoint: {data: markers, tooltip: {formatter: (p) => p.name}}}),
+    bar(L.messages || "Messages / min", zip(data.chat.t, data.chat.messages), alpha(P[0], 0.35), {
+      xAxisIndex: 1, yAxisIndex: 1, barMaxWidth: 4, itemStyle: {color: alpha(P[0], 0.35), borderRadius: [2, 2, 0, 0]},
+      markArea: {silent: true, data: gapAreas(data.chat.gaps, t)}}),
+    line(L.chatters || "Active chatters", data.chatters ? zip(data.chatters.t, data.chatters.chatters) : [], P[1], {xAxisIndex: 1, yAxisIndex: 1}),
+    bar(L.subs || "Subs", zip(data.support.t, data.support.subs), P[2], {stack: "support", xAxisIndex: 2, yAxisIndex: 2, barMaxWidth: 4}),
+    bar(L.gifts || "Gifted subs", zip(data.support.t, data.support.gifts), P[4], {stack: "support", xAxisIndex: 2, yAxisIndex: 2, barMaxWidth: 4}),
   ]
-  o.legend.data = o.series.map(s => s.name)
+  o.legend.data = o.series.map((s) => s.name)
   return o
 }
 

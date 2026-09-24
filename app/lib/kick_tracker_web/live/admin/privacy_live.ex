@@ -85,7 +85,7 @@ defmodule KickTrackerWeb.Admin.PrivacyLive do
       <section
         :if={@found}
         id="found"
-        class="mt-4 max-w-lg rounded-box border border-base-300 p-4 text-sm"
+        class="mt-4 max-w-lg card-surface p-4 text-sm"
       >
         <dl class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
           <dt>{gettext("User id")}</dt><dd class="font-mono">{@found.user_id}</dd>

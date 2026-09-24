@@ -221,54 +221,66 @@ defmodule KickTrackerWeb.ChannelLive do
     ~H"""
     <Layouts.app flash={@flash}>
       <div id="channel-page" phx-hook="Format">
-        <header class="flex flex-wrap items-center gap-3">
-          <h1 class="text-2xl font-semibold tracking-tight">{@channel.slug}</h1>
-          <%= if @live do %>
-            <.live_badge />
-            <span :if={@live.viewers} class="text-lg"><.num value={@live.viewers} />
-            <span class="text-sm opacity-70">{gettext("watching")}</span></span>
-            <.link navigate={~p"/c/#{@channel.slug}/streams/#{@live.stream_id}"} class="link text-sm">{gettext(
-              "Current stream"
-            )}</.link>
-          <% end %>
-          <span :if={!@channel.active} class="badge badge-ghost badge-sm">{gettext(
-            "not tracked at the moment"
-          )}</span>
-          <span class="flex-1"></span>
-          <span class="text-xs opacity-70">
-            {gettext("Tracked since")} <.time at={@channel.tracked_since} fmt="date" />
-          </span>
+        <header class="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <.avatar name={@channel.slug} class="size-12 text-xl sm:size-14 sm:text-2xl" />
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <h1 class="truncate text-2xl font-semibold tracking-tight sm:text-3xl">
+                {@channel.slug}
+              </h1>
+              <.live_badge :if={@live} />
+              <span :if={!@channel.active} class="badge badge-ghost badge-sm">{gettext(
+                "not tracked at the moment"
+              )}</span>
+            </div>
+            <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-base-content/60">
+              <span :if={@live && @live.viewers}>
+                <.num value={@live.viewers} class="font-semibold text-base-content" />
+                {gettext("watching")}
+              </span>
+              <.link
+                :if={@live}
+                navigate={~p"/c/#{@channel.slug}/streams/#{@live.stream_id}"}
+                class="inline-flex items-center gap-0.5 font-medium text-primary hover:underline"
+              >
+                {gettext("Current stream")}<.icon name="hero-arrow-right-micro" class="size-4" />
+              </.link>
+              <span>
+                {gettext("Tracked since")} <.time at={@channel.tracked_since} fmt="date" />
+              </span>
+            </div>
+          </div>
           <button
             id="tz-switch"
             phx-hook="TzSwitch"
             type="button"
-            class="btn btn-ghost btn-xs"
+            class="btn btn-ghost btn-sm aria-pressed:btn-active"
             aria-pressed="false"
+            aria-label={gettext("Channel time")}
             title={gettext("Show times in the channel's timezone (%{tz})", tz: @channel.timezone)}
           >
-            {gettext("Channel time")}
+            <.icon name="hero-globe-alt-micro" class="size-4" />
+            <span class="hidden sm:inline">{gettext("Channel time")}</span>
           </button>
         </header>
 
-        <nav class="mt-4 flex flex-wrap items-center gap-2 border-b border-base-300 pb-2">
-          <.link
-            :for={tab <- tabs()}
-            patch={page_path(@channel, tab, Period.to_params(@period))}
-            class={[
-              "rounded px-2 py-1 text-sm",
-              @live_action == tab && "bg-base-300 font-medium",
-              @live_action != tab && "opacity-70 hover:opacity-100"
-            ]}
-          >
-            {tab_label(tab)}
-          </.link>
-          <span class="flex-1"></span>
-          <.period_picker
-            period={@period}
-            path={page_path(@channel, @live_action, %{})}
-            params={@params}
+        <div class="mt-6 flex flex-wrap items-end gap-x-4 gap-y-3">
+          <.tabs
+            class="w-full min-w-0 sm:w-auto sm:flex-1"
+            active={@live_action}
+            tabs={
+              for tab <- tabs(),
+                  do: {tab, tab_label(tab), page_path(@channel, tab, Period.to_params(@period))}
+            }
           />
-        </nav>
+          <div class="pb-1.5">
+            <.period_picker
+              period={@period}
+              path={page_path(@channel, @live_action, %{})}
+              params={@params}
+            />
+          </div>
+        </div>
 
         <div class="mt-5">
           {render_tab(assigns)}
@@ -364,8 +376,8 @@ defmodule KickTrackerWeb.ChannelLive do
         opts={%{label: gettext("Category"), valueLabel: gettext("Hours watched")}}
         class="h-64"
       />
-      <section class="rounded-box border border-base-300 p-3">
-        <h2 class="font-medium">{gettext("Records")}</h2>
+      <section class="card-surface p-4">
+        <h2 class="text-sm font-semibold">{gettext("Records")}</h2>
         <dl class="mt-2 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-sm">
           <%= if r = @records.peak do %>
             <dt>{gettext("Highest peak")}</dt>
@@ -398,7 +410,7 @@ defmodule KickTrackerWeb.ChannelLive do
 
     <section class="mt-6">
       <div class="flex items-center">
-        <h2 class="font-medium">{gettext("Recent streams")}</h2>
+        <h2 class="text-lg font-semibold tracking-tight">{gettext("Recent streams")}</h2>
         <span class="flex-1"></span>
         <.link patch={page_path(@channel, :streams, Period.to_params(@period))} class="link text-sm">{gettext(
           "All streams"
@@ -462,8 +474,8 @@ defmodule KickTrackerWeb.ChannelLive do
         <:note>{gettext("Active chatters in a rolling window are on each stream's page.")}</:note>
       </.chart>
     </div>
-    <section class="mt-4 overflow-x-auto">
-      <h2 class="font-medium">{gettext("New and returning chatters")}</h2>
+    <section class="card-surface mt-4 overflow-x-auto p-4">
+      <h2 class="text-sm font-semibold">{gettext("New and returning chatters")}</h2>
       <p class="text-xs opacity-60">
         {gettext("New: chatting in this channel for the first time since we started tracking it.")}
       </p>
@@ -478,10 +490,10 @@ defmodule KickTrackerWeb.ChannelLive do
         <tbody>
           <tr :for={r <- Enum.reverse(@retention)}>
             <td>
-              <.link navigate={~p"/c/#{@channel.slug}/streams/#{r.stream_id}"} class="link"><.time
-                at={r.started_at}
-                tz={@channel.timezone}
-              /></.link>
+              <.link
+                navigate={~p"/c/#{@channel.slug}/streams/#{r.stream_id}"}
+                class="whitespace-nowrap hover:underline"
+              ><.time at={r.started_at} fmt="short" tz={@channel.timezone} /></.link>
             </td>
             <td class="text-end"><.num value={r.chatters} /></td>
             <td class="text-end"><.num value={r.new} /></td>
@@ -500,7 +512,7 @@ defmodule KickTrackerWeb.ChannelLive do
       <.kpi label={gettext("Renewals")} value={@support.resubs} />
       <.kpi label={gettext("Gifted subs")} value={@support.gifted_subs} />
       <.kpi label={gettext("Kicks")} value={@support.kicks} />
-      <div class="rounded-box border border-base-300 p-3">
+      <div class="card-surface p-4">
         <div class="flex items-center gap-1 text-xs opacity-70">
           {gettext("Revenue")} <.estimate />
         </div>
@@ -561,7 +573,7 @@ defmodule KickTrackerWeb.ChannelLive do
         opts={%{label: gettext("Category"), valueLabel: gettext("Hours watched")}}
         class="h-72"
       />
-      <div class="overflow-x-auto lg:col-span-2">
+      <div class="card-surface overflow-x-auto lg:col-span-2">
         <table id="category-table" class="table table-sm">
           <thead>
             <tr>
@@ -621,7 +633,7 @@ defmodule KickTrackerWeb.ChannelLive do
 
   defp stream_table(assigns) do
     ~H"""
-    <div class="mt-2 overflow-x-auto">
+    <div class="card-surface mt-3 overflow-x-auto">
       <table id="streams" class="table table-sm">
         <thead>
           <tr>
@@ -649,10 +661,10 @@ defmodule KickTrackerWeb.ChannelLive do
         <tbody>
           <tr :for={s <- @streams} id={"stream-#{s.id}"} class={s.excluded? && "opacity-50"}>
             <td>
-              <.link navigate={~p"/c/#{@channel.slug}/streams/#{s.id}"} class="link"><.time
-                at={s.started_at}
-                tz={@channel.timezone}
-              /></.link>
+              <.link
+                navigate={~p"/c/#{@channel.slug}/streams/#{s.id}"}
+                class="whitespace-nowrap font-medium hover:underline"
+              ><.time at={s.started_at} fmt="short" tz={@channel.timezone} /></.link>
               <span :if={is_nil(s.ended_at)} class="ms-1"><.live_badge /></span>
               <span
                 :if={s.excluded?}
@@ -673,7 +685,7 @@ defmodule KickTrackerWeb.ChannelLive do
           </tr>
         </tbody>
       </table>
-      <p :if={@streams == []} class="mt-3 text-sm opacity-60">
+      <p :if={@streams == []} class="p-6 text-center text-sm text-base-content/60">
         {gettext("No streams in this period.")}
       </p>
     </div>
@@ -697,8 +709,8 @@ defmodule KickTrackerWeb.ChannelLive do
 
   defp people_table(assigns) do
     ~H"""
-    <section id={@id} class="rounded-box border border-base-300 p-3">
-      <h2 class="font-medium">{@title}</h2>
+    <section id={@id} class="card-surface p-4">
+      <h2 class="text-sm font-semibold">{@title}</h2>
       <ol class="mt-2 space-y-1 text-sm">
         <li :for={p <- @people} class="flex gap-2">
           <span class="flex-1 truncate">{p.name || gettext("user %{id}", id: p.user_id)}</span>

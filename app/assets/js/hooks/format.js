@@ -22,7 +22,7 @@ export function formatAll(root) {
       el.textContent = compact.format(v)
       el.title = exact.format(v)
     } else {
-      el.textContent = exact.format(Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10)
+      el.textContent = exact.format(Math.abs(v) >= 10 ? Math.round(v) : Math.round(v * 10) / 10)
     }
   })
   const mode = tzMode()
@@ -34,6 +34,7 @@ export function formatAll(root) {
       datetime: {dateStyle: "medium", timeStyle: "short"},
       date: {dateStyle: "medium"},
       time: {timeStyle: "short"},
+      short: {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"},
     }[el.dataset.fmt] || {dateStyle: "medium", timeStyle: "short"}
     el.textContent = new Intl.DateTimeFormat(undefined, {...opts, timeZone}).format(d)
     el.title = d.toISOString()

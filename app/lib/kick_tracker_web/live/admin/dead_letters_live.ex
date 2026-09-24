@@ -105,7 +105,7 @@ defmodule KickTrackerWeb.Admin.DeadLettersLive do
         <li
           :for={m <- @messages}
           id={"dl-#{m.message_id}"}
-          class="rounded-box border border-base-300 p-3 text-sm"
+          class="card-surface p-4 text-sm"
         >
           <div class="flex flex-wrap items-center gap-2">
             <button phx-click="open" phx-value-id={m.message_id} class="link font-mono text-xs">{m.message_id ||

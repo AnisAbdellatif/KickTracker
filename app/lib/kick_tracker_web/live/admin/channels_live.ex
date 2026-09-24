@@ -157,7 +157,7 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
         </:subtitle>
       </.header>
 
-      <section class="rounded-box border border-base-300 p-4">
+      <section class="card-surface p-4">
         <.form for={@lookup} id="lookup-form" phx-submit="lookup" class="flex items-end gap-2">
           <div class="flex-1 max-w-sm">
             <.input

@@ -79,7 +79,7 @@ defmodule KickTrackerWeb.Admin.GroupsLive do
         <button class="btn btn-sm">{gettext("Create")}</button>
       </form>
       <ul id="groups" class="mt-4 space-y-3">
-        <li :for={g <- @groups} id={"group-#{g.id}"} class="rounded-box border border-base-300 p-3">
+        <li :for={g <- @groups} id={"group-#{g.id}"} class="card-surface p-4">
           <div class="flex items-center gap-2">
             <span class="font-medium">{g.name}</span>
             <span :if={g.public} class="badge badge-sm">{gettext("public")}</span>
