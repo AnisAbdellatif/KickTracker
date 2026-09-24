@@ -101,7 +101,7 @@ understanding their intent first.
 | `sim/` | The fake Kick + the recorder (§17) | All development and tests run against it |
 | `fixtures/` | Recorded, anonymized Kick payloads (§17.1) | Source for the simulator and parser tests |
 | `contracts/` | The event envelope (§8.1) | The only thing app and ingress share |
-| `deploy/` | Compose files, Caddy, RabbitMQ definitions | `compose.dev.yml` runs TimescaleDB (55432) and RabbitMQ (55672) for development and tests |
+| `deploy/` | Compose files, Caddy, RabbitMQ definitions, `deploy.sh` | `compose.dev.yml` runs TimescaleDB (55432) and RabbitMQ (55672) for development and tests; `rehearsal/rehearse.sh` runs the production stack locally and upgrades it under load: run it after changing anything on the deploy path |
 
 Follow the phase order in §20. Don't build ahead of the current phase without asking.
 

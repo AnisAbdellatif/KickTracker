@@ -269,6 +269,10 @@ defmodule Sim.Http.Control do
       "sent" => Enum.count(sent, &(not Map.get(&1, :dropped, false))),
       "dropped" => Enum.count(sent, &Map.get(&1, :dropped, false)),
       "drop_next" => Webhooks.dropping(),
+      # Every delivery's message id (not the dropped ones): to check what
+      # reached the app.
+      "message_ids" =>
+        for(%{message_id: id} = s <- sent, not Map.get(s, :dropped, false), do: id),
       "recent" =>
         sent
         |> Enum.take(20)

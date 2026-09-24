@@ -220,7 +220,9 @@ defmodule Sim.Webhooks do
     end
   end
 
-  defp record(state, entry), do: %{state | sent: Enum.take([entry | state.sent], 500)}
+  # The latest 10 000: enough for a long rehearsal to check every delivery
+  # arrived (deploy/rehearsal), little memory.
+  defp record(state, entry), do: %{state | sent: Enum.take([entry | state.sent], 10_000)}
 
   defp drop?, do: chance(Scenario.fault(Server.scenario(), :drop_webhooks, 0))
   defp duplicate?, do: chance(Scenario.fault(Server.scenario(), :duplicate_webhooks, 0))

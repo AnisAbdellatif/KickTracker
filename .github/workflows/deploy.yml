@@ -1,6 +1,7 @@
-# Deploy one role at a time (project.md §19.1, §15.3), by hand: migrations
-# first, as their own step, then only the chosen services. Receivers are
-# redeployed one after the other, so one always answers Kick.
+# Deploy one role at a time (project.md §19.1, §15.3), by hand: runs
+# deploy/deploy.sh on the server, which migrates first, then updates the
+# chosen pair one at a time (web, collectors standby first, receivers), so
+# the site, collection and webhook intake never stop.
 #
 # Needs the repository secrets DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY and
 # DEPLOY_KNOWN_HOSTS (the server's host key line), and the stack in
@@ -43,88 +44,7 @@ jobs:
           TAG: ${{ inputs.tag }}
           TARGET: ${{ secrets.DEPLOY_USER }}@${{ inputs.role == 'shadow' && secrets.DEPLOY_SHADOW_HOST || secrets.DEPLOY_HOST }}
         run: |
+          # The tag is typed by hand: only a sha or a plain tag goes into the command.
+          [[ "$TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad tag: $TAG" >&2; exit 1; }
           prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
-          ssh "$TARGET" ROLE="$ROLE" APP_IMAGE="$prefix-app:$TAG" RECEIVER_IMAGE="$prefix-receiver:$TAG" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          cd /srv/kick_tracker && git pull --ff-only
-          cd deploy
-          touch .env
-          compose_file=compose.single.yml
-          [ "$ROLE" = shadow ] && compose_file=compose.shadow.yml
-          # Images are pinned in deploy/.env, so a plain `docker compose up -d`
-          # never swaps one by accident (compose.single.yml).
-          pin() { grep -v "^$1=" .env > .env.new || true; echo "$1=$2" >> .env.new; mv .env.new .env; }
-          # Compose needs both pins for any command; a first deploy sets
-          # whichever is missing to this tag.
-          if [ "$ROLE" != shadow ]; then
-            grep -q '^APP_IMAGE=' .env || pin APP_IMAGE "$APP_IMAGE"
-            grep -q '^COLLECTOR_IMAGE=' .env || pin COLLECTOR_IMAGE "$APP_IMAGE"
-          fi
-          export RECEIVER_IMAGE
-          dc() { docker compose -f "$compose_file" "$@"; }
-          healthy() {
-            for _ in $(seq 1 60); do
-              [ "$(docker inspect -f '{{.State.Health.Status}}' "$(dc ps -q "$1")")" = healthy ] && return 0
-              sleep 2
-            done
-            echo "$1 did not become healthy" >&2
-            return 1
-          }
-          # Which collector collects now (its status port, inside the container).
-          leader() {
-            for c in collector-a collector-b; do
-              if dc exec -T "$c" curl -fsS http://127.0.0.1:4101/status 2>/dev/null | grep -q '"role":"leader"'; then
-                echo "$c"; return
-              fi
-            done
-          }
-          case "$ROLE" in
-            web|migrate-only)
-              pin APP_IMAGE "$APP_IMAGE"
-              dc pull migrate
-              dc run --rm migrate
-              if [ "$ROLE" = web ]; then
-                dc pull web
-                dc up -d --no-deps web
-              fi
-              ;;
-            collector)
-              # Migrations first, from the new image (the web pin stays as
-              # it is); they wait at most 5s for a lock, which the
-              # collectors' journals absorb.
-              dc pull migrate
-              dc run --rm migrate
-              # The standby first; then the leader, whose clean stop hands
-              # collection to the updated standby within a second.
-              pin COLLECTOR_IMAGE "$APP_IMAGE"
-              dc pull collector-a collector-b
-              first=collector-b; second=collector-a
-              [ "$(leader)" = collector-b ] && { first=collector-a; second=collector-b; }
-              dc up -d --no-deps "$first"
-              healthy "$first"
-              dc up -d --no-deps "$second"
-              healthy "$second"
-              ;;
-            shadow)
-              # The same order on the shadow machine: its standby first.
-              pin SHADOW_IMAGE "$APP_IMAGE"
-              dc pull migrate
-              dc run --rm migrate
-              dc pull collector-a collector-b
-              first=collector-b; second=collector-a
-              [ "$(leader)" = collector-b ] && { first=collector-a; second=collector-b; }
-              dc up -d --no-deps "$first"
-              healthy "$first"
-              dc up -d --no-deps "$second"
-              healthy "$second"
-              ;;
-            receivers)
-              dc pull receiver-1 receiver-2
-              dc up -d --no-deps receiver-1
-              healthy receiver-1
-              dc up -d --no-deps receiver-2
-              healthy receiver-2
-              ;;
-          esac
-          dc ps
-          REMOTE
+          ssh "$TARGET" "cd /srv/kick_tracker && git pull --ff-only && ROLE=$ROLE APP_IMAGE=$prefix-app:$TAG RECEIVER_IMAGE=$prefix-receiver:$TAG deploy/deploy.sh"

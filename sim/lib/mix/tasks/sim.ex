@@ -12,6 +12,8 @@ defmodule Mix.Tasks.Sim do
   Options:
 
     * `--port` — the port to listen on (default 4050)
+    * `--ip` — the address to listen on (default loopback; `0.0.0.0` to be
+      reachable from containers, as the deploy rehearsal needs)
     * `--scenario` — a scenario file (default: `Sim.Scenarios.default/0`)
     * `--speed` — how many simulated seconds pass per real second
     * `--from` — where simulated time starts (ISO 8601), for generating history
@@ -31,6 +33,7 @@ defmodule Mix.Tasks.Sim do
 
   @switches [
     port: :integer,
+    ip: :string,
     scenario: :string,
     speed: :float,
     from: :string,
@@ -55,6 +58,7 @@ defmodule Mix.Tasks.Sim do
         scenario: scenario,
         clock: clock,
         port: Keyword.get(opts, :port, 4050),
+        ip: parse_ip(opts[:ip]),
         webhook_url: opts[:webhook_url]
       )
 
@@ -81,6 +85,15 @@ defmodule Mix.Tasks.Sim do
     case DateTime.from_iso8601(value) do
       {:ok, at, _} -> at
       {:error, reason} -> Mix.raise("bad --from #{inspect(value)}: #{inspect(reason)}")
+    end
+  end
+
+  defp parse_ip(nil), do: :loopback
+
+  defp parse_ip(ip) do
+    case :inet.parse_address(String.to_charlist(ip)) do
+      {:ok, address} -> address
+      {:error, _} -> Mix.raise("--ip: not an IP address: #{ip}")
     end
   end
 end

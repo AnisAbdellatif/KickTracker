@@ -578,7 +578,7 @@ another queue with its own Broadway producer.
 | Database | **PostgreSQL + TimescaleDB**, one database | Hypertables, continuous aggregates, compression, retention, plain SQL. Self-hosted (see §12.1). |
 | DB access | **Ecto + Postgrex** | Schemas, migrations; Timescale features via `execute` in migrations. |
 | Background jobs | **Oban** | Subscription management, event processing retries, rollups, transfers; queues run on the leading collector. |
-| Clustering | **libcluster** | Joins the `collector` and `web` nodes so PubSub reaches live pages. |
+| Clustering | **DNSCluster**, Erlang distribution | Joins every app node (web and collectors, found by a shared DNS name, one cookie from the secrets) so PubSub carries live readings to the pages. |
 | Charts | **Apache ECharts** through one LiveView hook, loaded only where needed | Bands, markers, linked zoom, heatmaps, sampling in one library (§13.7). |
 | Styling | **Tailwind** (Phoenix default), logical properties, dark + light themes | RTL-ready, one set of tokens for UI and charts. |
 | Admin auth | Session tokens on phx.gen.auth's model, PBKDF2 (OTP `:crypto`) + TOTP (RFC 6238), no public sign-up | Admins invite admins. |
@@ -1395,7 +1395,7 @@ written by the collector, with the deletion itself.
 | `rabbitmq` | official | Rarely | Receivers spool to disk; nothing lost |
 | `collector-a`, `collector-b` | `app`, `ROLE=collector` | When tracking changes, standby first | One down: the other collects (within a second after a clean stop or a crash, ~7s if the leader freezes). Both down: events wait in the queue; polls and chat come from the shadow's backfill (§10.5) |
 | shadow (second VPS) | `app`, `COLLECTOR_MODE=shadow`, own database | With the collectors | Nothing, while the primary side collects; the main VPS down, it is what still collects |
-| `web` | `app`, `ROLE=web` | Often | Site down; collection unaffected |
+| `web-a`, `web-b` | `app`, `ROLE=web` | Often, one at a time | One down: Caddy sends everyone to the other. Both down: site down; collection unaffected |
 | `db` | TimescaleDB | Rarely | Collection continues into the leader's journal and is written when it is back; the consumer stops acking, events wait in the queue; the site is down |
 | `caddy` | official | Rarely | Ingress unreachable (see stage 2) |
 
@@ -1436,6 +1436,13 @@ change to the app beyond producer config.
   fields); a breaking change means a new `version` and a consumer that reads
   both.
 - Redeploy receivers one at a time; the other keeps answering.
+- Redeploy the web nodes one at a time too: Caddy health-checks both
+  every 2s, keeps a visitor on one (by address) and retries a request on
+  the other when one is being replaced.
+- Every deploy runs `deploy/deploy.sh` (the Deploy workflow over SSH, or
+  by hand), and the whole path is rehearsed on a development machine
+  with `deploy/rehearsal/rehearse.sh` (the production stack under load,
+  upgraded step by step, with what each step costs measured).
 - Redeploy collectors the standby first, waiting for it to be healthy, then
   the leader, whose clean stop hands over within a second (§10.1). The
   deploy workflow finds the leader from the collectors' status ports.
@@ -1859,6 +1866,18 @@ then covered: a leader process restarting left the previous collection
 tree running and couldn't start its own, and lock checks on `pg_locks`
 weren't scoped to our database, so a shadow on the same server ended the
 primary leader's session every few seconds.
+
+**Deploy rehearsal** (2026-09-24, §15.3). Two web nodes behind Caddy, all
+app containers in one cluster, the deploy steps in `deploy/deploy.sh`, and
+`deploy/rehearsal/rehearse.sh` running the production stack on a
+development machine under load while upgrading it. Measured: no failed
+request through web, collector and receiver deploys, a RabbitMQ restart,
+a collector killed and a rollback; about 3s during a database restart; no
+minute of viewer readings missing; 910 of 910 webhooks stored. Its runs
+found four production faults first: the site down from the first deploy
+(Caddy's health check redirected to HTTPS), RabbitMQ unable to read its
+definitions, the live broadcasts never reaching the site (the nodes weren't
+clustered), and deploy script details.
 
 **Later** (not planned yet): history before tracking from v2's VOD list
 (marked as imported), streamer accounts via Kick login with private stats and

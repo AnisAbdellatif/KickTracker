@@ -15,7 +15,9 @@ config :kick_tracker, KickTrackerWeb.Endpoint,
   force_ssl: [
     rewrite_on: [:x_forwarded_proto],
     exclude: [
-      # paths: ["/health"],
+      # Caddy's health checks come over plain HTTP, straight to the node:
+      # redirected, they fail, and Caddy sends no one to the site.
+      paths: ["/healthz"],
       hosts: ["localhost", "127.0.0.1"]
     ]
   ]

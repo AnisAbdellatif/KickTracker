@@ -31,6 +31,9 @@ for u in d["users"]:
 
 with open("definitions.prod.json", "w") as f:
     json.dump(d, f, indent=2)
-os.chmod("definitions.prod.json", 0o640)
+# Readable by the broker, which runs as its own user in its container (a
+# 0640 file of ours is unreadable to it, and RabbitMQ refuses to boot).
+# It holds salted hashes, not passwords.
+os.chmod("definitions.prod.json", 0o644)
 print("wrote definitions.prod.json")
 PY

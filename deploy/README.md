@@ -44,37 +44,36 @@ On a fresh VPS with Docker, `sops` and `age`:
    `ops/check-host.sh`.
 7. Invite the first admin and open the link from an allowed network:
 
-       docker compose -f compose.single.yml exec web /app/bin/invite you@example.org
+       docker compose -f compose.single.yml exec web-a /app/bin/invite you@example.org
 
 8. Point the Kick app's webhook URL (in Kick's developer settings) at
    `https://$INGRESS_HOST/`.
 
 ## Deploying a change
 
-Use the Deploy workflow (`.github/workflows/deploy.yml`); by hand it does
-this. Migrations first, as their own step, and only expand-then-contract
-ones (§15.3); each statement waits at most 5s for a lock. Then the role
-that changed, with its image pinned in `deploy/.env`:
+Use the Deploy workflow (`.github/workflows/deploy.yml`), which runs
+`deploy.sh` on the server; by hand, from `deploy/`:
 
-    docker compose -f compose.single.yml run --rm migrate
-    docker compose -f compose.single.yml up -d --no-deps web   # the site only
+    ROLE=web APP_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha> ./deploy.sh
+    ROLE=collector APP_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha> ./deploy.sh
+    ROLE=receivers RECEIVER_IMAGE=ghcr.io/<owner>/kicktracker-receiver:<sha> ./deploy.sh
 
-Collectors (§10.1): two run, one collects. Update the **standby first**,
-wait for it to be healthy, then the leader: its clean stop releases the
-lease and the updated standby collects within a second. Which one leads:
+Migrations run first, as their own step, and only expand-then-contract
+ones (§15.3); each statement waits at most 5s for a lock. Then the pair
+is updated one at a time, each waiting for the other to be healthy:
+`web-a` then `web-b` (Caddy sends visitors to whichever answers); the
+collectors' **standby first**, then the leader, whose clean stop hands
+collection over within a second; `receiver-1` then `receiver-2`. Images
+are pinned in `deploy/.env`, so a plain `docker compose up -d` never
+swaps one by accident. A rollback is the same command with the previous
+tag.
+
+Which collector leads:
 
     docker compose -f compose.single.yml exec collector-a curl -s http://127.0.0.1:4101/status
 
-    docker compose -f compose.single.yml up -d --no-deps collector-b   # the standby
-    docker compose -f compose.single.yml up -d --no-deps collector-a   # then the leader
-
-A plain `docker compose up -d` leaves the collectors alone unless
-`COLLECTOR_IMAGE` or their settings changed.
-
-Receivers, one at a time; the other keeps answering Kick:
-
-    docker compose -f compose.single.yml up -d receiver-1
-    docker compose -f compose.single.yml up -d receiver-2
+Before trusting a change to any of this, rehearse it on a development
+machine: `rehearsal/rehearse.sh` (rehearsal/README.md).
 
 ## The shadow collector (§10.5)
 

@@ -1,10 +1,11 @@
 # Stage 1 (project.md §15.2): everything on one VPS.
 #
-#   Caddy ─► receiver-1 / receiver-2 (lb_policy first) ─► RabbitMQ ─► collector ─► db
-#         └► web ───────────────────────────────────────────────────────────────┘
+#   Caddy ─► receiver-1 / receiver-2 (lb_policy first) ─► RabbitMQ ─► collector-a/b ─► db
+#         └► web-a / web-b (by visitor address) ─────────────────────────────────────┘
 #
-# Each service is redeployed on its own; `docker compose up -d web` touches
-# only the site, and webhook intake never stops for an app deploy (§15.3).
+# Each service is redeployed on its own, one of a pair at a time
+# (deploy.sh): the site, the collectors and webhook intake never stop for
+# a deploy (§15.3).
 # Two collectors run; one collects, the other stands by and takes over in
 # about a second on a deploy, or ~20s if the first dies (§10.1).
 #
@@ -22,6 +23,9 @@ x-app: &app
   # Exports and imports: web takes uploads and serves downloads, the
   # collector does the work (TRANSFER_DIR, project.md §13.8).
   volumes: [transfers:/transfers]
+  # Every app container answers to "app": how the nodes find each other
+  # (DNS_CLUSTER_QUERY=app) and form one cluster for PubSub.
+  networks: {default: {aliases: [app]}}
   depends_on:
     db: {condition: service_healthy}
 
@@ -33,6 +37,7 @@ x-collector: &collector
   env_file: [secrets/collector.env]
   restart: always
   stop_grace_period: 60s
+  networks: {default: {aliases: [app]}}
   depends_on:
     db: {condition: service_healthy}
     rabbitmq: {condition: service_healthy}
@@ -105,7 +110,12 @@ services:
     environment: {ROLE: collector, COLLECTOR_ID: collector-b}
     volumes: [journal-b:/journal, transfers:/transfers]
 
-  web:
+  # Two, behind Caddy: a site deploy updates one while the other serves.
+  web-a:
+    <<: *app
+    environment: {ROLE: web}
+
+  web-b:
     <<: *app
     environment: {ROLE: web}
 

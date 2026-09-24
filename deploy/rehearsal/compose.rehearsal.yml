@@ -1,0 +1,21 @@
+# The deploy rehearsal (rehearsal/README.md): compose.single.yml as it runs
+# in production, on one development machine, against the fake Kick (sim/,
+# on the host). Only what a laptop can't do differs: plain HTTP on
+# 127.0.0.1:8080 instead of 80/443, backups to a local WAL-G store, the
+# fake Kick reached on the host.
+x-host: &host ["host.docker.internal:host-gateway"]
+
+services:
+  caddy:
+    ports: !override ["127.0.0.1:8080:80"]
+  rabbitmq:
+    ports: !reset []
+  db:
+    ports: !reset []
+  receiver-1: {extra_hosts: *host}
+  receiver-2: {extra_hosts: *host}
+  collector-a: {extra_hosts: *host}
+  collector-b: {extra_hosts: *host}
+  web-a: {extra_hosts: *host}
+  web-b: {extra_hosts: *host}
+  migrate: {extra_hosts: *host}
