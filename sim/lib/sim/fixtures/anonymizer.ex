@@ -15,6 +15,10 @@ defmodule Sim.Fixtures.Anonymizer do
     * **free text** (chat `content`, titles, descriptions, bios, reasons) and
       **social handles** become placeholders; empty strings stay empty;
     * **every URL** becomes `https://example.invalid/asset/N`;
+    * **UUIDs anywhere** and **string ids** (e.g. `channel_01abc…`) become
+      consistent fakes of the same shape, so links between messages survive;
+    * **cursors**, media **file names** and embedded **image data** are
+      replaced;
     * category, subcategory, emote, badge and gift data is kept.
 
   Anything else is kept as is. Every kept string under a field not known to
@@ -22,7 +26,7 @@ defmodule Sim.Fixtures.Anonymizer do
   can review the report before fixtures are committed.
   """
 
-  defstruct ids: %{}, names: %{}, urls: %{}, texts: 0, unknown: %{}
+  defstruct ids: %{}, names: %{}, urls: %{}, tokens: %{}, texts: 0, unknown: %{}
 
   @type t :: %__MODULE__{}
 
@@ -34,11 +38,16 @@ defmodule Sim.Fixtures.Anonymizer do
               livestream_id owner_id)
   # Numbers under any other `*_id` key are mapped too (a missed id is a leak,
   # an extra mapping is harmless), except these, which identify no one.
+  # `subscription_id` and `message_id` are ids Kick issues to our app for its
+  # webhook subscriptions and deliveries; they also appear verbatim in the
+  # webhook headers, and must match there.
   @safe_id_keys ~w(category_id subcategory_id parent_category_id emote_id badge_id
-                   gift_id reward_id)
+                   gift_id reward_id subscription_id message_id)
   @name_keys ~w(username slug channel_slug display_name)
   @text_keys ~w(content message stream_title session_title title channel_description
-                description bio reason offline_banner_text)
+                description bio reason offline_banner_text file_name)
+  @cursor_keys ~w(cursor next_cursor nextcursor prev_cursor previous_cursor)
+  @image_data_keys ~w(base64svg)
   @social_keys ~w(instagram twitter youtube discord tiktok facebook email website)
   @safe_keys ~w(event type language status method version color
                 event_type kind direction access_token token_type playback_url
@@ -46,7 +55,8 @@ defmodule Sim.Fixtures.Anonymizer do
                 created_at updated_at started_at ended_at expires_at
                 redeemed_at start_time date at recorded_at
                 chat_mode chat_mode_old chatable_type socket_id message_ref
-                lang_iso followers_count public_key)
+                lang_iso followers_count public_key collection_name conversions_disk
+                disk mime_type model_type privacy amount)
 
   @first_id 900_000_001
 
@@ -56,6 +66,7 @@ defmodule Sim.Fixtures.Anonymizer do
       ids: Map.get(saved, "ids", %{}),
       names: Map.get(saved, "names", %{}),
       urls: Map.get(saved, "urls", %{}),
+      tokens: Map.get(saved, "tokens", %{}),
       texts: Map.get(saved, "texts", 0)
     }
   end
@@ -63,7 +74,13 @@ defmodule Sim.Fixtures.Anonymizer do
   @doc "The mapping to persist between runs (contains real values: keep it out of git)."
   @spec to_saved(t()) :: map()
   def to_saved(%__MODULE__{} = s),
-    do: %{"ids" => s.ids, "names" => s.names, "urls" => s.urls, "texts" => s.texts}
+    do: %{
+      "ids" => s.ids,
+      "names" => s.names,
+      "urls" => s.urls,
+      "tokens" => s.tokens,
+      "texts" => s.texts
+    }
 
   @doc "Anonymizes a decoded JSON value. `path` is the list of keys above it, innermost first."
   @spec anonymize(term(), [String.t()], t()) :: {term(), t()}
@@ -91,12 +108,17 @@ defmodule Sim.Fixtures.Anonymizer do
 
     cond do
       is_binary(value) and url?(value) -> url(value, state)
+      k in @image_data_keys and is_binary(value) -> {"[image data removed]", state}
+      is_binary(value) and uuid?(value) -> token(value, state)
       kept? -> anonymize(value, [k | path], state)
       person_id_key?(k) and id_like?(value) -> id(value, state)
+      k in @safe_id_keys and is_binary(value) -> {value, state}
+      person_id_key?(k) and is_binary(value) and value != "" -> token(value, state)
+      k in @cursor_keys and is_binary(value) -> text(value, "cursor", state)
       k in @name_keys and is_binary(value) -> name(value, state)
       k == "channel" and is_binary(value) and pusher_channel?(value) -> channel_name(value, state)
-      id_key?(k) and is_binary(value) and uuid?(value) -> {value, state}
       k == "name" and is_binary(value) and person?(path) -> name(value, state)
+      k == "name" and is_binary(value) and "media" in path -> text(value, "text", state)
       k == "message" and path == [] -> {value, state}
       k in @text_keys and is_binary(value) -> text(value, "text", state)
       k in @social_keys and is_binary(value) -> text(value, "handle", state)
@@ -124,6 +146,37 @@ defmodule Sim.Fixtures.Anonymizer do
   def id(value, state) when is_binary(value) do
     {fake, state} = id(String.to_integer(value), state)
     {Integer.to_string(fake), state}
+  end
+
+  @doc """
+  Maps an opaque string id to a consistent fake one. UUIDs stay UUID-shaped
+  (so links between messages still work); prefixed ids like `channel_01abc…`
+  keep their prefix (`channel_anon0001`).
+  """
+  @spec token(String.t(), t()) :: {String.t(), t()}
+  def token(value, state) do
+    case state.tokens do
+      %{^value => fake} ->
+        {fake, state}
+
+      tokens ->
+        n = map_size(tokens) + 1
+        fake = fake_token(value, n)
+        {fake, %{state | tokens: Map.put(tokens, value, fake)}}
+    end
+  end
+
+  defp fake_token(value, n) do
+    cond do
+      uuid?(value) ->
+        "00000000-0000-4000-8000-" <> String.pad_leading(Integer.to_string(n), 12, "0")
+
+      match = Regex.run(~r/^([a-z]+)_/, value) ->
+        Enum.at(match, 1) <> "_anon" <> String.pad_leading(Integer.to_string(n), 4, "0")
+
+      true ->
+        "anon" <> String.pad_leading(Integer.to_string(n), 4, "0")
+    end
   end
 
   @doc "Maps one username or slug to a pseudonym, ignoring case."
@@ -216,10 +269,6 @@ defmodule Sim.Fixtures.Anonymizer do
 
   # Kick event names, e.g. `livestream.status.updated`.
   defp event_name?(value), do: value =~ ~r/^[a-z_]+(\.[a-z_]+)+$/
-
-  # Message and thread ids are random UUIDs: not personal, and needed to link
-  # replies to their parent.
-  defp id_key?(k), do: k in @id_keys or String.ends_with?(k, "_id")
 
   defp person_id_key?(k),
     do: k in @id_keys or (String.ends_with?(k, "_id") and k not in @safe_id_keys)

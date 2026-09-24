@@ -36,6 +36,22 @@ defmodule Sim.Fixtures.LeakCheckTest do
     assert LeakCheck.leaks(sensitive, ["user0001", %{"id" => 900_000_001}]) == %{}
   end
 
+  test "string ids and uuids are sensitive too" do
+    raw = %{
+      "user" => %{"id" => "user_01jzyxwvutsrqponmlkjihg"},
+      "video" => %{"uuid" => "0b5c7e1a-2f3d-4c5b-9a8e-1f2e3d4c5b6a"},
+      "category_id" => "cat_01jkabcdef"
+    }
+
+    sensitive = LeakCheck.sensitive(raw)
+    assert sensitive["user_01jzyxwvutsrqponmlkjihg"] == "user.id"
+    assert sensitive["0b5c7e1a-2f3d-4c5b-9a8e-1f2e3d4c5b6a"] == "video.uuid"
+    refute Map.has_key?(sensitive, "cat_01jkabcdef")
+
+    {out, _} = Anonymizer.anonymize(raw, [], Anonymizer.new())
+    assert LeakCheck.leaks(sensitive, [out]) == %{}
+  end
+
   test "the anonymizer's output of a v2-like document passes the check" do
     {out, _} = Anonymizer.anonymize(@raw, [], Anonymizer.new())
     assert LeakCheck.leaks(LeakCheck.sensitive(@raw), [out]) == %{}
