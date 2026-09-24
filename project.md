@@ -144,29 +144,49 @@ KickPlus uses). The only source of the **total follower count**
   zeros; `channel.followed` keeps counting gross follows meanwhile.
 - Observed (2026-09-24): 200 with `followers_count` from a home machine; the
   datacenter test is still open. The response repeats the channel id under
-  `chatroom.chatable_id`.
+  `chatroom.chatable_id`. `followers_count` came as a **number in one
+  recording and a string in another**: parse both.
 
-### 2.3b Other undocumented website endpoints (being probed)
+### 2.3b Other undocumented website endpoints (probed)
 
 The community list fb-sean/kick-website-endpoints documents Kick's website
-API. Read-only candidates that could feed the tracker:
+API. Same status as v2: undocumented, can change, a grey area under Kick's
+terms; used only isolated and optional, failures are gaps. `mix
+record.probe` requested each read-only candidate once for one live channel
+(2026-09-24, from a home machine, no auth unless noted):
 
-| Endpoint | Could give |
-|---|---|
-| `api.kick.com/channels/:id/followers-count` | Follower total **without v2**; might avoid v2's Cloudflare risk |
-| `api.kick.com/private/v0/channels/:id/viewer-count` | Viewer count, maybe refreshed faster |
-| `kick.com/current-viewers?ids[]=` | Viewer counts for several streams at once |
-| `kick.com/api/v2/channels/{slug}/leaderboards` | Gift/sub leaderboards: history from before tracking |
-| `kick.com/api/v2/channels/{slug}/videos` (and `/latest`) | Past streams: airtime, titles, categories before tracking |
-| `kick.com/api/v2/channels/{slug}/clips` | Clips per channel |
-| `api.kick.com/private/v1/livestreams` | All live streams, for category rankings |
+| Endpoint | Result | Use |
+|---|---|---|
+| `api.kick.com/channels/:id/followers-count` | 404 (by user id and by channel id) | Gone |
+| `api.kick.com/private/v0/channels/:id/viewer-count` | 404 | Gone |
+| `api.kick.com/private/v1/channels/{slug}` | **200** | **Possible v2 replacement for the follower total** (below) |
+| `api.kick.com/private/v1/livestreams` | 200: all of Kick's live streams, sorted by viewers, 20 per page, cursor | Rankings; the official `/livestreams` (sorts by viewers, 100 per page) is preferred |
+| `kick.com/current-viewers?ids[]=` | 200: `[{livestream_id, viewers, show_view_count}]` | Several streams' viewers in one call; not needed while the public API works |
+| `kick.com/api/v2/channels/{slug}/leaderboards` | 200: top gifters all time (10), month (10), week (5) | **Partial gift history from before tracking**; a cross-check for our gift counts |
+| `kick.com/api/v2/channels/{slug}/videos` | 200: the last ~27 days of streams (14 here) | **Airtime history from before tracking** (below) |
+| `kick.com/api/v1/channels/{slug}` | 200 (51 KB): same past streams under `previous_livestreams`, `followersCount` equal to v2's | Alternative to the two above |
+| `kick.com/api/v2/channels/{slug}/clips` | 200: clips with `view_count`, `likes_count`, cursor | A later clips feature |
+| `kick.com/api/v2/channels/{slug}/livestream` | 200: live stream details, `viewers` | Not needed |
+| `kick.com/api/v2/channels/{slug}/chatroom` | 200: chat settings (followers-only, slow mode…) | Maybe later, as context on chat activity |
+| `kick.com/api/v2/channels/{slug}/subscribers/last` | 401 (needs a login) | Not usable |
+| `…/videos/latest`, `private/v1/channels/{slug}/clips` | 404 | Gone |
 
-Same status as v2: undocumented, may be outdated, may need auth or be
-blocked from servers, a grey area under Kick's terms; used only if isolated
-and optional. `mix record.probe` records each once to find out which work;
-nothing here enters the design until that recording says so. Endpoints
-needing a user login (moderation, payments, internal chatroom data) and
-personal profile data (`links`) are not probed.
+What that means:
+
+- **`private/v1/channels/{slug}` as a follower source.** It answers on
+  `api.kick.com` without auth, so it may avoid v2's Cloudflare risk from a
+  server. But its count was **0.06% higher than v2's** at almost the same
+  moment (v1 and v2 agreed exactly), and it uses **opaque string ids**
+  (`channel_…`, `user_…`), not Kick's numeric ids. So: a channel's follower
+  history comes from **one source only**, never mixed. The probe from the
+  VPS decides which (§16).
+- **Past streams (`videos`)**: start time, `duration` in **milliseconds**,
+  title, categories, VOD views, for about the last month. `viewer_count` is
+  **0 for every finished stream**: no viewer history. When a channel is
+  added, about a month of airtime and category history could be imported,
+  marked as imported, never mixed with observed data. Not planned yet.
+- **Leaderboards** are top lists, not every gift, so they can't become a
+  full history; they're for display and checking.
 
 ### 2.4 Pusher websocket: chat, raids and hosts (unofficial)
 
@@ -1178,8 +1198,9 @@ Still open:
    whether and when it is delivered again. Decides how urgent stages 2 and 3
    are.
 2. **Does v2 answer from the VPS** (datacenter IP), not just from home?
-   And the undocumented endpoints (§2.3b): which answer, with or without our
-   token, from home and from the VPS (`mix record.probe`).
+   And `api.kick.com/private/v1/channels/{slug}` (§2.3b): if v2 is blocked
+   from a datacenter and this isn't, it becomes the follower source. Run
+   `mix record.probe` and `mix record.v2` from the VPS.
 3. **Pusher from a datacenter IP**, any limit on subscriptions per
    connection, and the exact raid/host event names.
 4. **Outgoing raids:** visible from the raiding channel's feed, or only in the
@@ -1219,8 +1240,12 @@ person across files and runs (the mapping stays in `sim/recordings/`). It
 reports every text field it kept without a rule, by path only, for review
 before committing, and then runs an independent **leak check**: every real
 username, slug, chat text and id in the raw files is searched for in the
-output, and the run fails if any is found. (On the first real data it caught
-the channel id under `chatroom.chatable_id`, which the rules had missed.) Signed webhook fixtures keep their original
+output (names, chat texts, numeric and string ids, UUIDs), and the run fails
+if any is found. (On the first real data it caught the channel id under
+`chatroom.chatable_id`, which the rules had missed.) UUIDs and opaque string
+ids are replaced by consistent fakes of the same shape, so links between
+messages survive; the ids Kick issues to our app for webhook subscriptions
+and deliveries are kept, since they also appear in webhook headers. Signed webhook fixtures keep their original
 body next to the anonymized one, since re-signing is impossible without
 Kick's key; signature tests use the originals, and those files stay out of
 the public repo if it ever becomes public.

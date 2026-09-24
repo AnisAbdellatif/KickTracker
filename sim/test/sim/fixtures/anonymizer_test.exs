@@ -95,7 +95,7 @@ defmodule Sim.Fixtures.AnonymizerTest do
     assert first == second
   end
 
-  test "a reply keeps its message ids (UUIDs) but loses who and what" do
+  test "a reply keeps its links (UUIDs mapped consistently) but loses who and what" do
     reply = %{
       "id" => "0b5c7e1a-2f3d-4c5b-9a8e-1f2e3d4c5b6a",
       "thread_parent_id" => "9f8e7d6c-5b4a-4321-8765-0fedcba98765",
@@ -126,9 +126,11 @@ defmodule Sim.Fixtures.AnonymizerTest do
 
     {out, state} = anon(reply)
 
-    assert out["id"] == reply["id"]
-    assert out["thread_parent_id"] == reply["thread_parent_id"]
-    assert out["metadata"]["original_message"]["id"] == reply["thread_parent_id"]
+    # Real UUIDs are gone, but the reply still points at its parent.
+    refute out["id"] == reply["id"]
+    assert out["id"] =~ ~r/^00000000-0000-4000-8000-\d{12}$/
+    refute out["thread_parent_id"] == reply["thread_parent_id"]
+    assert out["metadata"]["original_message"]["id"] == out["thread_parent_id"]
     assert out["metadata"]["message_ref"] == "1790217929123"
     assert out["content"] == "text-1"
     assert out["metadata"]["original_message"]["content"] == "text-2"
@@ -140,9 +142,63 @@ defmodule Sim.Fixtures.AnonymizerTest do
     assert state.unknown == %{}
   end
 
-  test "a non-UUID string under an id key is still reported" do
-    {_, state} = anon(%{"id" => "not-a-uuid"})
-    assert state.unknown == %{"id" => 1}
+  test "string ids are mapped consistently, keeping a prefix when there is one" do
+    {out, state} =
+      anon(%{
+        "data" => %{
+          "account" => %{
+            "channel" => %{"id" => "channel_01jabcdefghijklmnopqrstuv"},
+            "user" => %{"id" => "user_01jzyxwvutsrqponmlkjihg"}
+          },
+          "livestreams" => [
+            %{"streamer" => %{"channel" => %{"id" => "channel_01jabcdefghijklmnopqrstuv"}}}
+          ]
+        },
+        "clips" => [
+          %{
+            "id" => "clip_01jklmnopqrstuvwxyzabcd",
+            "category_id" => "cat_01jk",
+            "privacy" => "public"
+          }
+        ],
+        "next_cursor" => "eyJpZCI6MTIzfQ",
+        "plan" => %{"stripe_plan_id" => "price_1AbCdEf", "amount" => "4.99"}
+      })
+
+    channel_id = out["data"]["account"]["channel"]["id"]
+    assert channel_id =~ ~r/^channel_anon\d{4}$/
+    assert out["data"]["account"]["user"]["id"] =~ ~r/^user_anon\d{4}$/
+    assert hd(out["data"]["livestreams"])["streamer"]["channel"]["id"] == channel_id
+    [clip] = out["clips"]
+    assert clip["id"] =~ ~r/^clip_anon\d{4}$/
+    assert clip["category_id"] == "cat_01jk"
+    assert out["next_cursor"] =~ ~r/^cursor-\d+$/
+    assert out["plan"]["stripe_plan_id"] =~ ~r/^price_anon\d{4}$/
+    assert state.unknown == %{}
+  end
+
+  test "media: file names, names, image data and uuids replaced; storage fields kept" do
+    {out, state} =
+      anon(%{
+        "media" => [
+          %{
+            "uuid" => "0b5c7e1a-2f3d-4c5b-9a8e-1f2e3d4c5b6a",
+            "file_name" => "somestreamer-avatar.png",
+            "name" => "somestreamer-avatar",
+            "mime_type" => "image/png",
+            "disk" => "s3",
+            "responsive_images" => %{
+              "fullsize" => %{"base64svg" => "data:image/svg+xml;base64,PHN2Zz4="}
+            }
+          }
+        ]
+      })
+
+    [m] = out["media"]
+    refute inspect(m) =~ "somestreamer"
+    assert m["mime_type"] == "image/png"
+    assert m["responsive_images"]["fullsize"]["base64svg"] == "[image data removed]"
+    assert state.unknown == %{}
   end
 
   test "a Pusher channel name anywhere has its ids mapped" do
@@ -187,6 +243,27 @@ defmodule Sim.Fixtures.AnonymizerTest do
       })
 
     assert out["events"] == [%{"name" => "livestream.status.updated"}]
+    assert state.unknown == %{}
+  end
+
+  test "our app's webhook subscription and message ids are kept (they must match the headers)" do
+    {out, state} =
+      anon(%{
+        "data" => [
+          %{
+            "subscription_id" => "01JH6WZQ7F0M1S8Y2D3C4B5A6V",
+            "message_id" => "01JH6X0T5B6Z6W9JQ3E4V8N2QK"
+          }
+        ]
+      })
+
+    assert out["data"] == [
+             %{
+               "subscription_id" => "01JH6WZQ7F0M1S8Y2D3C4B5A6V",
+               "message_id" => "01JH6X0T5B6Z6W9JQ3E4V8N2QK"
+             }
+           ]
+
     assert state.unknown == %{}
   end
 

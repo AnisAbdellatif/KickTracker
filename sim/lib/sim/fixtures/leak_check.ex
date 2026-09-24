@@ -11,6 +11,8 @@ defmodule Sim.Fixtures.LeakCheck do
     * strings under `username`, `slug`, `channel_slug`, `display_name`;
     * strings of 6+ characters under `content`;
     * integers of 4+ digits under `id` or any `*_id` key;
+    * strings of 8+ characters under `id`, `uuid` or any `*_id` key (UUIDs,
+      opaque ids like `channel_01abc…`);
 
   all outside category, emote, badge and gift data, which is kept on purpose.
   """
@@ -19,7 +21,7 @@ defmodule Sim.Fixtures.LeakCheck do
                     parent_category emote emotes badge badges badges_v2 gift reward)
   @name_keys ~w(username slug channel_slug display_name)
   @safe_id_keys ~w(category_id subcategory_id parent_category_id emote_id badge_id
-                   gift_id reward_id)
+                   gift_id reward_id subscription_id message_id)
 
   @doc "Sensitive values in a decoded raw document, as `%{value => field path}`."
   @spec sensitive(term()) :: %{String.t() => String.t()}
@@ -75,6 +77,10 @@ defmodule Sim.Fixtures.LeakCheck do
 
       id_key?(key) and is_integer(value) and value >= 1000 ->
         put(acc, Integer.to_string(value), here)
+
+      (id_key?(key) or key == "uuid") and is_binary(value) and byte_size(value) >= 8 and
+          nested_json(value) == :error ->
+        put(acc, value, here)
 
       true ->
         collect(value, here, acc)
