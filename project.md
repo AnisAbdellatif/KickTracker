@@ -837,19 +837,25 @@ kick_users         (id, username, seen_at)
                    -- the only place usernames live; facts hold ids only
 
 -- ingest (normal tables)
-webhook_events     (message_id PK, subscription_id, type, version,
-                    occurred_at, received_at, receiver, body jsonb,
-                    signature, processed_at NULL)
+webhook_events     (message_id PK, subscription_id, event_type, event_version,
+                    sent_at (verbatim text), occurred_at, signature,
+                    body bytea, received_at, receiver, stored_at,
+                    processed_at NULL)
                    -- every delivered event, permanently; source for
-                   -- reprocessing if handling logic changes
+                   -- reprocessing if handling logic changes. The body is
+                   -- raw bytes, not jsonb, and sent_at the header's own
+                   -- string: together they're the signed text, and jsonb
+                   -- would reformat it
 coverage           (id, channel_id NULL, source: api | chat | ingress | followers,
-                    from, to, ok)
+                    from_at, to_at NULL, ok)
                    -- our own gaps, so every stat can say how complete it is
 
 -- streams (normal tables)
 streams            (id, channel_id, started_at, ended_at NULL,
                     end_source: event | poll, kick_livestream_id NULL,
                     UNIQUE (channel_id, started_at))
+                   -- ended_at >= started_at; an end always says how it
+                   -- was learnt
 stream_changes     (id, stream_id, occurred_at, field: title | category |
                     language | tags | mature, old_value, new_value)
 

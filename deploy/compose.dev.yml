@@ -1,0 +1,42 @@
+# Local development infrastructure: the database and the queue.
+#
+#   docker compose -f deploy/compose.dev.yml up -d
+#
+# Bound to 127.0.0.1 on non-default ports so it can't clash with other
+# projects' Postgres or RabbitMQ. The fake Kick runs outside Docker
+# (`cd sim && mix sim`), and so does the app (`cd app && mix phx.server`).
+# Passwords here are local-only development defaults, not secrets.
+name: kicktracker-dev
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    ports:
+      - "127.0.0.1:55672:5672"
+      - "127.0.0.1:15673:15672"
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+volumes:
+  db:
+  rabbitmq:
