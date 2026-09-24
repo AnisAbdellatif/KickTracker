@@ -133,6 +133,7 @@ export const Chart = {
         this.data = data
         if (chatters) this.data.chatters = chatters
         this.el.classList.remove("chart-loading", "chart-error")
+        this.showNote(data.note)
         this.render()
         if (this.el.dataset.chattersSrc) this.loadChatters(this.chattersWindow || this.opts.window || 5)
       })
@@ -193,6 +194,15 @@ export const Chart = {
     d.t.push(t)
     for (const [k, v] of Object.entries(values)) (d[k] ||= []).push(v)
     this.render()
+  },
+
+  // A caveat the server attaches to the data (already translated), e.g.
+  // days drawn in whole hours for a half-hour timezone.
+  showNote(note) {
+    const el = this.figure && this.figure.querySelector("[data-chart-note]")
+    if (!el) return
+    el.textContent = note || ""
+    el.hidden = !note
   },
 
   rows() {

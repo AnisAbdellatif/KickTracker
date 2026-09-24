@@ -122,6 +122,7 @@ defmodule KickTrackerWeb.ChannelLive do
     if Settings.get("support_page_public") do
       assign(socket,
         support: Reports.support_summary(c, p.from, p.to),
+        ingress: Series.coverage(c, "ingress", p.from, p.to),
         stream_rows: Reports.streams(c, from: p.from, to: p.to, limit: 50)
       )
     else
@@ -189,6 +190,10 @@ defmodule KickTrackerWeb.ChannelLive do
 
     if params == %{}, do: base, else: base <> "?" <> URI.encode_query(params)
   end
+
+  # Webhook counts are unknown, not 0, when nothing was being received.
+  defp known(_value, coverage) when coverage == 0, do: nil
+  defp known(value, _coverage), do: value
 
   defp tab_label(:overview), do: gettext("Overview")
   defp tab_label(:streams), do: gettext("Streams")
@@ -336,6 +341,12 @@ defmodule KickTrackerWeb.ChannelLive do
         label={gettext("Follower gain")}
         value={@kpis.now.follower_gain}
         previous={@kpis.before.follower_gain}
+        note={
+          @kpis.now.follower_gain_since &&
+            gettext("since the first reading, %{date}",
+              date: Calendar.strftime(@kpis.now.follower_gain_since, "%Y-%m-%d")
+            )
+        }
       />
       <.kpi
         label={gettext("Unique chatters")}
@@ -532,17 +543,28 @@ defmodule KickTrackerWeb.ChannelLive do
 
   defp render_tab(%{live_action: :support} = assigns) do
     ~H"""
-    <section class="grid grid-cols-2 gap-3 sm:grid-cols-5">
-      <.kpi label={gettext("New subs")} value={@support.subs} />
-      <.kpi label={gettext("Renewals")} value={@support.resubs} />
-      <.kpi label={gettext("Gifted subs")} value={@support.gifted_subs} />
-      <.kpi label={gettext("Kicks")} value={@support.kicks} />
+    <div class="flex flex-wrap items-center gap-2 text-xs opacity-80">
+      <.coverage_badge fraction={@ingress} label={gettext("webhook coverage")} />
+      <span :if={@ingress == 0}>
+        {gettext(
+          "We weren't receiving this channel's events in this period, so these figures are unknown."
+        )}
+      </span>
+    </div>
+    <section id="support-kpis" class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <.kpi label={gettext("New subs")} value={known(@support.subs, @ingress)} />
+      <.kpi label={gettext("Renewals")} value={known(@support.resubs, @ingress)} />
+      <.kpi label={gettext("Gifted subs")} value={known(@support.gifted_subs, @ingress)} />
+      <.kpi label={gettext("Kicks")} value={known(@support.kicks, @ingress)} />
       <div class="card-surface p-4">
         <div class="flex items-center gap-1 text-xs opacity-70">
           {gettext("Revenue")} <.estimate />
         </div>
         <div class="mt-1 text-xl font-semibold">
-          $<.num value={Float.round(@support.estimated_revenue_usd, 0)} compact />
+          $<.num
+            value={known(Float.round(@support.estimated_revenue_usd, 0), @ingress)}
+            compact
+          />
         </div>
         <div class="text-xs opacity-60">
           {gettext("subs at $%{p}, %{s}% share; a Kick at $%{k}",

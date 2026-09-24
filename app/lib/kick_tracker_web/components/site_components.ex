@@ -178,6 +178,7 @@ defmodule KickTrackerWeb.SiteComponents do
   attr :kind, :atom, default: :number, values: [:number, :duration, :decimal]
   attr :hint, :string, default: nil
   attr :id, :string, default: nil
+  attr :note, :string, default: nil, doc: "a qualifier shown under the value (e.g. since when)"
 
   def kpi(assigns) do
     ~H"""
@@ -193,7 +194,8 @@ defmodule KickTrackerWeb.SiteComponents do
             <.num value={@value} compact />
         <% end %>
       </div>
-      <.change value={@value} previous={@previous} />
+      <div :if={@note} class="mt-1 text-xs text-base-content/70">{@note}</div>
+      <.change :if={!@note} value={@value} previous={@previous} />
     </div>
     """
   end
@@ -316,7 +318,8 @@ defmodule KickTrackerWeb.SiteComponents do
         class={["relative", @class]}
       >
       </div>
-      <p :if={@note != []} class="mt-3 text-xs text-base-content/60">{render_slot(@note)}</p>
+      <p :if={@note != []} class="mt-3 text-xs text-base-content/70">{render_slot(@note)}</p>
+      <p data-chart-note class="mt-2 text-xs text-base-content/70" hidden></p>
     </figure>
     """
   end

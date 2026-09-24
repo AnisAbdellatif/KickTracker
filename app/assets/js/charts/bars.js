@@ -4,7 +4,7 @@ import {baseOption, timeAxis, valueAxis, dayFormatter, zip, bar} from "./theme"
 
 export function option(data, opts, t) {
   const o = baseOption(t)
-  const xFmt = data.res === "1d" ? {axisLabel: {color: t.muted, formatter: dayFormatter(data.tz)}} : {}
+  const xFmt = (data.res === "1d" || data.res === "1w") ? {axisLabel: {color: t.muted, formatter: dayFormatter(data.tz)}} : {}
   o.xAxis = timeAxis(t, xFmt)
   o.yAxis = valueAxis(t, {min: 0})
   o.dataZoom = [{type: "inside", filterMode: "none"}]
