@@ -86,7 +86,9 @@ defmodule Mix.Tasks.Fixtures.Anonymize do
 
   defp file(path, run, out, state) do
     source = path |> Path.dirname() |> Path.basename()
-    task = run |> Path.basename() |> String.replace(~r/^\d{8}T\d{6}Z-/, "")
+    # The whole run name, so two runs of the same task can't overwrite each
+    # other's files (and each fixture says which run it came from).
+    task = Path.basename(run)
 
     if Path.extname(path) == ".jsonl" do
       # Pusher files are named after the channel slug.
