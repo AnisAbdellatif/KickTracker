@@ -125,28 +125,7 @@ defmodule KickTracker.Collector.SourceRunner do
       |> Enum.zip(units)
 
     {ops, effects, sstate, failed} =
-      Enum.reduce(outcomes, {[], [], sstate, 0}, fn {result, unit}, {ops, effects, s, failed} ->
-        {outcome, at} =
-          case result do
-            {:ok, {outcome, at}} -> {outcome, at}
-            {:exit, reason} -> {{:error, {:exit, reason}}, stamp()}
-          end
-
-        {recorded?, {more_ops, more_effects, s}} =
-          case guard(source, :record, :failed, fn -> source.record(unit, outcome, at, s) end) do
-            :failed -> {false, {[], [], s}}
-            result -> {true, result}
-          end
-
-        ok? = match?({:ok, _}, outcome)
-        if not ok?, do: Logger.warning("#{source.name()}: #{describe(outcome)}")
-
-        # An answer whose meaning couldn't be recorded wrote nothing: a gap.
-        coverage = if ok? and not recorded?, do: [], else: coverage(source, unit, outcome, at)
-
-        {ops ++ more_ops ++ coverage, effects ++ more_effects, s,
-         if(ok?, do: failed, else: failed + 1)}
-      end)
+      Enum.reduce(outcomes, {[], [], sstate, 0}, &record_outcome(source, &1, &2))
 
     {end_ops, end_effects, sstate} =
       if function_exported?(source, :finish, 2),
@@ -168,6 +147,30 @@ defmodule KickTracker.Collector.SourceRunner do
     })
 
     %{state | sstate: sstate}
+  end
+
+  # One unit's outcome: what it writes, what it sets off, and whether it failed.
+  defp record_outcome(source, {result, unit}, {ops, effects, s, failed}) do
+    {outcome, at} =
+      case result do
+        {:ok, {outcome, at}} -> {outcome, at}
+        {:exit, reason} -> {{:error, {:exit, reason}}, stamp()}
+      end
+
+    {recorded?, {more_ops, more_effects, s}} =
+      case guard(source, :record, :failed, fn -> source.record(unit, outcome, at, s) end) do
+        :failed -> {false, {[], [], s}}
+        result -> {true, result}
+      end
+
+    ok? = match?({:ok, _}, outcome)
+    if not ok?, do: Logger.warning("#{source.name()}: #{describe(outcome)}")
+
+    # An answer whose meaning couldn't be recorded wrote nothing: a gap.
+    coverage = if ok? and not recorded?, do: [], else: coverage(source, unit, outcome, at)
+
+    {ops ++ more_ops ++ coverage, effects ++ more_effects, s,
+     if(ok?, do: failed, else: failed + 1)}
   end
 
   defp fetch(source, unit) do
