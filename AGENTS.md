@@ -10,7 +10,7 @@ touching before changing it; section numbers below (§n) refer to it.
 
 ## 1. The project in one paragraph
 
-kick_tracker tracks the stats of a chosen set of Kick channels over time (viewers every 15s,
+kick_tracker tracks the stats of a chosen set of Kick channels over time (viewers every 60s,
 streams, title and category changes, followers, chat activity, subs, gifted subs, Kicks,
 raids) and shows them on a public site with an admin interface. **History only exists from
 the moment we record it**, and webhook events we miss are gone for good, so correctness and
@@ -141,7 +141,8 @@ one, stop and ask.
 - **Ack after commit.** The consumer acks only after the database commit; the receiver
   answers Kick only after a publisher confirm or a spool write.
 - **UTC in storage**, channel timezone for daily and weekday figures at read time.
-- **Hours watched** = Σ `viewers × min(Δt, 60s)`; never interpolate across a gap.
+- **Hours watched** = Σ `viewers × min(Δt, 75s)` (viewers polled every 60s); never
+  interpolate across a gap.
 - **No chat text is ever stored.** Only ids, counts and times. Usernames live only in
   `kick_users`. `chat_minute_users` is kept 90 days.
 - Estimates (revenue, anything modeled) are labeled as such wherever they appear.
