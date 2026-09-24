@@ -952,11 +952,22 @@ channel_events     (id, channel_id, occurred_at,
 
 - `stream_segments` (view): periods of constant title, category, language.
 - `stream_stats` (cache, rebuildable): airtime, avg and peak viewers, hours
-  watched, follower gain, gross follows, unique chatters, messages, subs,
-  gifted subs, Kicks.
-- Continuous aggregates by **UTC hour**: viewers (avg, peak, hours watched),
-  chat (messages), followers (last value), support totals. Daily, weekday and
-  30-day figures are built from them in the channel's timezone.
+  watched, followers at start and end and the gain, gross follows, unique
+  chatters, messages, subs, resubs, gifted subs, Kicks. Unknown is null,
+  never 0.
+- `hourly_stats` by **UTC hour** (cache, rebuildable, a hypertable):
+  samples, avg and peak viewers, hours watched, chat minutes and messages,
+  last follower total, follows, subs, gifted subs, Kicks. Daily, weekday and
+  30-day figures are built from it in the channel's timezone.
+- Both are recomputed by a job (last 3 hours every 5 minutes, last 2 days
+  nightly) and by `mix kick_tracker.rebuild` for any range.
+- **Not continuous aggregates**, as first planned: hours watched weights
+  each sample by the time since the previous one (capped at 75s), which
+  needs a window function a continuous aggregate can't run, and TimescaleDB
+  Toolkit (time-weighted averages) isn't in the community image. One job-
+  maintained table keeps a single definition: `KickTracker.Metrics` is the
+  reference, the SQL is tested to agree with it, and hourly hours watched
+  add up exactly to the stream's.
 
 ### 12.7 Retention and privacy
 
@@ -1521,7 +1532,7 @@ Tests are written alongside every step (§17.3), not as a step of their own.
     `SubscriptionSync`.
 11. `FollowerPoll` (v2), `follows`, support events.
 12. `ChatSocket`, the three chat tables, raids and hosts.
-13. `Metrics`; `stream_stats`; continuous aggregates.
+13. `Metrics`; `stream_stats`; hourly rollups (job-maintained, see §12.6).
 13b. Bulk mode: months of history written straight into the raw tables.
 
 **Phase 3: admin core**

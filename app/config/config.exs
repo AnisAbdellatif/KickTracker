@@ -22,7 +22,9 @@ config :kick_tracker, Oban,
      crontab: [
        {"*/15 * * * *", KickTracker.Workers.SubscriptionSync},
        {"*/5 * * * *", KickTracker.Workers.ProcessEvents},
-       {"*/5 * * * *", KickTracker.Workers.FollowerSchedule}
+       {"*/5 * * * *", KickTracker.Workers.FollowerSchedule},
+       {"*/5 * * * *", KickTracker.Workers.Rollups},
+       {"17 3 * * *", KickTracker.Workers.Rollups, args: %{"hours" => 48}}
      ]}
   ]
 
