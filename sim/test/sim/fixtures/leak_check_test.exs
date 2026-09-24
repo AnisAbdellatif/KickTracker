@@ -52,6 +52,36 @@ defmodule Sim.Fixtures.LeakCheckTest do
     assert LeakCheck.leaks(sensitive, [out]) == %{}
   end
 
+  test "UUIDs inside longer strings and order_column numbers are sensitive" do
+    raw = %{
+      "media" => [
+        %{
+          "order_column" => 59_143_283,
+          "urls" => ["0b5c7e1a-2f3d-4c5b-9a8e-1f2e3d4c5b6a___fullsize_491_276.webp"]
+        }
+      ]
+    }
+
+    sensitive = LeakCheck.sensitive(raw)
+    assert sensitive["0b5c7e1a-2f3d-4c5b-9a8e-1f2e3d4c5b6a"] == "media.[].urls.[]"
+    assert sensitive["59143283"] == "media.[].order_column"
+    # Found even glued to the rest of a file name.
+    assert LeakCheck.leaks(sensitive, [raw]) != %{}
+
+    {out, _} = Anonymizer.anonymize(raw, [], Anonymizer.new())
+    assert LeakCheck.leaks(sensitive, [out]) == %{}
+  end
+
+  test "real_uuids finds UUIDs that aren't the anonymizer's fakes, inside nested JSON too" do
+    doc = %{
+      "body" => ~s({"media":[{"urls":["0b5c7e1a-2f3d-4c5b-9a8e-1f2e3d4c5b6a___x.webp"]}]}),
+      "id" => "00000000-0000-4000-8000-000000000001"
+    }
+
+    assert LeakCheck.real_uuids(doc) == %{"body.media.[].urls.[]" => 1}
+    assert LeakCheck.real_uuids(%{"id" => "00000000-0000-4000-8000-000000000001"}) == %{}
+  end
+
   test "the anonymizer's output of a v2-like document passes the check" do
     {out, _} = Anonymizer.anonymize(@raw, [], Anonymizer.new())
     assert LeakCheck.leaks(LeakCheck.sensitive(@raw), [out]) == %{}

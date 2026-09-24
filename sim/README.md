@@ -242,7 +242,9 @@ It then runs a **leak check**, independent of those rules: every real
 username, slug, chat text and id found in the raw files is searched for in
 the output. If any is found, the task fails, showing field paths (never
 values). Don't commit `fixtures/` after a failed run. Then skim a few
-fixture files yourself.
+fixture files yourself. `mix test` also checks the committed fixtures on
+their own (`Sim.Fixtures.CommittedFixturesTest`): every UUID in them must be
+one of the anonymizer's fakes.
 
 ## Tests
 

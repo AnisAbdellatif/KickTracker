@@ -15,8 +15,14 @@ defmodule Sim.Fixtures.Anonymizer do
     * **free text** (chat `content`, titles, descriptions, bios, reasons) and
       **social handles** become placeholders; empty strings stay empty;
     * **every URL** becomes `https://example.invalid/asset/N`;
-    * **UUIDs anywhere** and **string ids** (e.g. `channel_01abc…`) become
-      consistent fakes of the same shape, so links between messages survive;
+    * **UUIDs anywhere**, whole or embedded in a longer string (a media
+      file name like `<uuid>___fullsize_1200_675.webp`), and **string ids**
+      (e.g. `channel_01abc…`) become consistent fakes of the same shape, so
+      links between messages survive;
+    * `order_column` (a media library's row sequence, as good as an id) is
+      mapped like an id;
+    * a string directly in a list takes the rules of the list's key (a list
+      of URLs is replaced like a URL);
     * **cursors**, media **file names** and embedded **image data** are
       replaced;
     * category, subcategory, emote, badge and gift data is kept.
@@ -43,6 +49,8 @@ defmodule Sim.Fixtures.Anonymizer do
   # webhook headers, and must match there.
   @safe_id_keys ~w(category_id subcategory_id parent_category_id emote_id badge_id
                    gift_id reward_id subscription_id message_id)
+  # Numbers that identify a record without being called `id` or `*_id`.
+  @other_id_keys ~w(order_column)
   @name_keys ~w(username slug channel_slug display_name)
   @text_keys ~w(content message stream_title session_title title channel_description
                 description bio reason offline_banner_text file_name)
@@ -59,6 +67,7 @@ defmodule Sim.Fixtures.Anonymizer do
                 disk mime_type model_type privacy amount)
 
   @first_id 900_000_001
+  @uuid_in_string ~r/(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])/i
 
   @spec new(map()) :: t()
   def new(saved \\ %{}) do
@@ -94,15 +103,27 @@ defmodule Sim.Fixtures.Anonymizer do
   end
 
   def anonymize(list, path, state) when is_list(list) do
-    {items, state} =
-      Enum.map_reduce(list, state, fn item, state -> anonymize(item, ["[]" | path], state) end)
-
-    {items, state}
+    Enum.map_reduce(list, state, fn
+      # A string in a list (`urls: [...]`, `tags: [...]`) goes through the
+      # rules of the list's own key; left alone, it would be kept unseen.
+      item, state when is_binary(item) -> list_item(item, path, state)
+      item, state -> anonymize(item, ["[]" | path], state)
+    end)
   end
 
   def anonymize(value, _path, state), do: {value, state}
 
-  defp field(key, value, path, state) do
+  defp list_item(item, [key | path], state) when key != "[]",
+    do: field(key, item, path, ["[]", key], state)
+
+  defp list_item(item, path, state), do: field("[]", item, path, ["[]"], state)
+
+  # `report` is how the field is named in the report of kept strings: its
+  # key, or its key and `[]` for an item of a list.
+  defp field(key, value, path, state),
+    do: field(key, value, path, [String.downcase(key)], state)
+
+  defp field(key, value, path, report, state) do
     k = String.downcase(key)
     kept? = keep_context?(path)
 
@@ -110,8 +131,9 @@ defmodule Sim.Fixtures.Anonymizer do
       is_binary(value) and url?(value) -> url(value, state)
       k in @image_data_keys and is_binary(value) -> {"[image data removed]", state}
       is_binary(value) and uuid?(value) -> token(value, state)
+      kept? and is_binary(value) -> embedded_uuids(value, state)
       kept? -> anonymize(value, [k | path], state)
-      person_id_key?(k) and id_like?(value) -> id(value, state)
+      (person_id_key?(k) or k in @other_id_keys) and id_like?(value) -> id(value, state)
       k in @safe_id_keys and is_binary(value) -> {value, state}
       person_id_key?(k) and is_binary(value) and value != "" -> token(value, state)
       k in @cursor_keys and is_binary(value) -> text(value, "cursor", state)
@@ -123,7 +145,7 @@ defmodule Sim.Fixtures.Anonymizer do
       k in @text_keys and is_binary(value) -> text(value, "text", state)
       k in @social_keys and is_binary(value) -> text(value, "handle", state)
       is_binary(value) and nested_json?(value) -> nested(value, [k | path], state)
-      is_binary(value) -> {value, note_unknown(k, value, path, state)}
+      is_binary(value) -> keep(value, k, report ++ path, state)
       true -> anonymize(value, [k | path], state)
     end
   end
@@ -155,15 +177,37 @@ defmodule Sim.Fixtures.Anonymizer do
   """
   @spec token(String.t(), t()) :: {String.t(), t()}
   def token(value, state) do
+    # A UUID is the same whatever its case (whole or embedded in a string).
+    key = if uuid?(value), do: String.downcase(value), else: value
+
     case state.tokens do
-      %{^value => fake} ->
+      %{^key => fake} ->
         {fake, state}
 
       tokens ->
         n = map_size(tokens) + 1
         fake = fake_token(value, n)
-        {fake, %{state | tokens: Map.put(tokens, value, fake)}}
+        {fake, %{state | tokens: Map.put(tokens, key, fake)}}
     end
+  end
+
+  @doc """
+  Replaces every UUID inside a longer string (e.g. a media file name
+  `<uuid>___fullsize_1200_675.webp`) with the same fake `token/2` gives the
+  UUID on its own. Fakes already in the string are left alone.
+  """
+  @spec embedded_uuids(String.t(), t()) :: {String.t(), t()}
+  def embedded_uuids(value, state) do
+    @uuid_in_string
+    |> Regex.split(value, include_captures: true)
+    |> Enum.reduce({"", state}, fn part, {acc, state} ->
+      if uuid?(part) and not fake_uuid?(part) do
+        {fake, state} = token(part, state)
+        {acc <> fake, state}
+      else
+        {acc <> part, state}
+      end
+    end)
   end
 
   defp fake_token(value, n) do
@@ -226,16 +270,23 @@ defmodule Sim.Fixtures.Anonymizer do
     end
   end
 
+  # A string kept as it is: any UUID inside it replaced all the same, and
+  # its path reported for review unless the field is known to be safe.
+  defp keep(value, key, here, state) do
+    {value, state} = embedded_uuids(value, state)
+    {value, note_unknown(key, value, here, state)}
+  end
+
   defp text("", _kind, state), do: {"", state}
 
   defp text(_value, kind, state),
     do: {"#{kind}-#{state.texts + 1}", %{state | texts: state.texts + 1}}
 
-  defp note_unknown(key, value, path, state) do
+  defp note_unknown(key, value, here, state) do
     if key in @safe_keys or timestamp?(value) or event_name?(value) or value == "" do
       state
     else
-      at = [key | path] |> Enum.reverse() |> Enum.join(".")
+      at = here |> Enum.reverse() |> Enum.join(".")
       %{state | unknown: Map.update(state.unknown, at, 1, &(&1 + 1))}
     end
   end
@@ -275,6 +326,8 @@ defmodule Sim.Fixtures.Anonymizer do
 
   defp uuid?(value),
     do: value =~ ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  defp fake_uuid?(value), do: String.starts_with?(value, "00000000-0000-4000-8000-")
 
   defp pusher_channel?(value), do: value =~ ~r/^[a-z_]+[._]\d+/
   defp timestamp?(value), do: value =~ ~r/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/

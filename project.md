@@ -1538,9 +1538,12 @@ before committing, and then runs an independent **leak check**: every real
 username, slug, chat text and id in the raw files is searched for in the
 output (names, chat texts, numeric and string ids, UUIDs), and the run fails
 if any is found. (On the first real data it caught the channel id under
-`chatroom.chatable_id`, which the rules had missed.) UUIDs and opaque string
-ids are replaced by consistent fakes of the same shape, so links between
-messages survive; the ids Kick issues to our app for webhook subscriptions
+`chatroom.chatable_id`, which the rules had missed.) UUIDs (whole, or inside a
+longer string such as a media file name) and opaque string ids are replaced
+by consistent fakes of the same shape, so links between messages survive;
+strings directly in a list get the rules of the list's key. A test also
+checks the committed `fixtures/` themselves, raw data or not: no UUID in
+them may be a real one. the ids Kick issues to our app for webhook subscriptions
 and deliveries are kept, since they also appear in webhook headers. Signed webhook fixtures keep their original
 body next to the anonymized one, since re-signing is impossible without
 Kick's key; signature tests use the originals, and those files stay out of
