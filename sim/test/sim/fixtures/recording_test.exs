@@ -47,6 +47,25 @@ defmodule Sim.Fixtures.RecordingTest do
     refute inspect(out) =~ ~r/somestreamer|me@example/i
   end
 
+  test "http: numeric ids after /channels/ and in id params are mapped like other ids" do
+    rec = %{
+      "kind" => "http",
+      "request" => %{
+        "method" => "GET",
+        "url" => "https://api.kick.com/private/v0/channels/7654321/viewer-count",
+        "params" => %{"ids[]" => 555}
+      },
+      "response" => %{"status" => 200, "headers" => [], "body" => ~s({"viewer_count":10})}
+    }
+
+    {out, _} = Recording.anonymize(rec, Anonymizer.new())
+
+    assert out["request"]["url"] ==
+             "https://api.kick.com/private/v0/channels/900000001/viewer-count"
+
+    assert out["request"]["params"] == %{"ids[]" => 900_000_002}
+  end
+
   test "http: a non-JSON body (e.g. a Cloudflare page) is replaced by a note" do
     rec = %{
       "kind" => "http",

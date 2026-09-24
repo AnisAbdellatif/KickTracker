@@ -57,7 +57,22 @@ mix record.pusher --slug <channel> --minutes 20
 Records every frame from the chatroom and the channel feed, to learn the
 exact event names for chat, raids, hosts, subs.
 
-### 4. Webhooks (needs a tunnel)
+### 4. Undocumented website endpoints
+
+```bash
+mix record.probe --slug <channel>
+```
+
+Requests each candidate endpoint from Kick's undocumented website API once
+(one per second), for one live channel: follower and viewer counts on
+`api.kick.com`, leaderboards, videos, clips and more (the list is in
+`Sim.Recorder.Probe`). An `api.kick.com` endpoint answering 401/403 is tried
+once more with our app token. `summary.json` shows per endpoint the status,
+whether it was JSON or a Cloudflare page, top-level keys, and count-like
+fields (names only). Run it **from the VPS too**: if the `api.kick.com`
+follower count answers from a datacenter, it can replace v2.
+
+### 5. Webhooks (needs a tunnel)
 
 Kick sends webhooks to the URL in **your app's settings on kick.com**.
 
@@ -99,7 +114,7 @@ cloudflared tunnel --url http://localhost:4040   # prints a https://….trycloud
    mix record.subscribe --delete-all
    ```
 
-### 5. Anonymize into fixtures
+### 6. Anonymize into fixtures
 
 ```bash
 mix fixtures.anonymize

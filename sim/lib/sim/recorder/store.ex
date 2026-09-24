@@ -10,7 +10,8 @@ defmodule Sim.Recorder.Store do
 
   @redacted "[redacted]"
   @secret_headers ~w(authorization cookie set-cookie)
-  @secret_keys ~w(access_token refresh_token client_secret playback_url)
+  @secret_keys ~w(access_token refresh_token client_secret playback_url stream_key
+                   publish_token)
 
   @doc "Creates a new run directory named after the time and the task, and returns it."
   @spec new_run(String.t(), Path.t()) :: Path.t()

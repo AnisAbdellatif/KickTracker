@@ -113,7 +113,8 @@ defmodule Sim.Fixtures.Recording do
     {%{"method" => req["method"], "url" => url, "params" => params, "json" => json}, state}
   end
 
-  # The only personal part of our URLs is a slug after /channels/ (v2).
+  # The personal parts of our URLs: whatever follows /channels/, a slug or a
+  # numeric id.
   defp url(nil, state), do: {nil, state}
 
   defp url(url, state) do
@@ -124,10 +125,13 @@ defmodule Sim.Fixtures.Recording do
       segments
       |> Enum.with_index()
       |> Enum.map_reduce(state, fn {seg, i}, state ->
-        if i > 0 and Enum.at(segments, i - 1) == "channels" and seg != "" and
-             not (seg =~ ~r/^\d+$/),
-           do: Anonymizer.name(URI.decode(seg), state),
-           else: {seg, state}
+        after_channels? = i > 0 and Enum.at(segments, i - 1) == "channels" and seg != ""
+
+        cond do
+          after_channels? and seg =~ ~r/^\d+$/ -> Anonymizer.id(seg, state)
+          after_channels? -> Anonymizer.name(URI.decode(seg), state)
+          true -> {seg, state}
+        end
       end)
 
     {URI.to_string(%{uri | path: Enum.join(segments, "/")}), state}
@@ -137,9 +141,14 @@ defmodule Sim.Fixtures.Recording do
     Enum.reduce(params, {%{}, state}, fn {key, value}, {acc, state} ->
       {value, state} =
         cond do
-          key == "slug" and is_binary(value) -> Anonymizer.name(value, state)
-          key == "broadcaster_user_id" -> Anonymizer.id(value, state)
-          true -> {value, state}
+          key == "slug" and is_binary(value) ->
+            Anonymizer.name(value, state)
+
+          key in ["broadcaster_user_id", "ids[]", "id"] and not is_nil(value) ->
+            Anonymizer.id(value, state)
+
+          true ->
+            {value, state}
         end
 
       {Map.put(acc, key, value), state}
