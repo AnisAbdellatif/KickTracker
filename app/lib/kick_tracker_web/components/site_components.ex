@@ -187,6 +187,11 @@ defmodule KickTrackerWeb.SiteComponents do
   attr :title, :string, default: nil
   attr :class, :any, default: "h-64"
   attr :chatters_src, :string, default: nil
+
+  attr :refresh, :integer,
+    default: nil,
+    doc: "seconds between fetches of `src`, for a range that ends now"
+
   slot :controls
   slot :note
 
@@ -238,6 +243,7 @@ defmodule KickTrackerWeb.SiteComponents do
         data-values={@values && Jason.encode!(@values)}
         data-opts={Jason.encode!(@opts)}
         data-chatters-src={@chatters_src}
+        data-refresh={@refresh}
         data-filename={@id}
         class={["relative", @class]}
       >

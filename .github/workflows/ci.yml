@@ -2,7 +2,10 @@
 # warnings, Credo, Sobelow, Dialyzer, vulnerable and retired dependencies,
 # and every test suite against real TimescaleDB and RabbitMQ
 # (deploy/compose.dev.yml) and the fake Kick (sim/, a path dependency).
-# On main, the images are built and pushed to GHCR.
+# On main, the images are built and pushed to GHCR, then deployed
+# (deploy/release.sh over SSH): every merge to main goes live once its
+# checks pass. Set the repository variable AUTO_DEPLOY to "false" to stop
+# that; the Deploy workflow stays for rollbacks and single roles.
 name: CI
 
 on:
@@ -10,9 +13,11 @@ on:
     branches: [dev, main]
   pull_request:
 
+# A newer push cancels a run in progress, except on main: a run there ends
+# in a deploy, which must never be cut off halfway.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   OTP_VERSION: "28"
@@ -175,3 +180,41 @@ jobs:
             ${{ steps.name.outputs.image }}:latest
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    name: Deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AUTO_DEPLOY != 'false'
+    needs: [images]
+    runs-on: ubuntu-24.04
+    environment: production
+    # One deploy at a time, shared with the Deploy workflow; a waiting one
+    # is replaced by a newer one (it deploys a later main).
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    steps:
+      - name: Server configured?
+        id: server
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          if [ -n "$HOST" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Not deployed: set the production environment's DEPLOY_* secrets (deploy/README.md)."
+          fi
+      - name: SSH key
+        if: steps.server.outputs.ready == 'true'
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519
+      - name: Release
+        if: steps.server.outputs.ready == 'true'
+        env:
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        # This commit's images, even if main has moved on since: the run
+        # for the newer commit deploys that one next.
+        run: |
+          ssh "$TARGET" "cd /srv/kick_tracker && git pull --ff-only && TAG=$GITHUB_SHA IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,} deploy/release.sh"

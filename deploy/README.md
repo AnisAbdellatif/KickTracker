@@ -88,12 +88,38 @@ proxy's address for the rate limits.
 
 ## Deploying a change
 
-Use the Deploy workflow (`.github/workflows/deploy.yml`), which runs
-`deploy.sh` on the server; by hand, from `deploy/`:
+Merge to `main`. CI runs the checks, builds the images, then deploys them:
+the `deploy` job in `.github/workflows/ci.yml` runs `release.sh` on the
+server over SSH, which pulls, decrypts the secrets, and deploys the
+collectors, web and the receivers in turn with `deploy.sh`. A step that
+fails stops the release and the job goes red; what wasn't reached keeps
+running the previous version.
 
-    ROLE=web APP_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha> ./deploy.sh
-    ROLE=collector APP_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha> ./deploy.sh
-    ROLE=receivers RECEIVER_IMAGE=ghcr.io/<owner>/kicktracker-receiver:<sha> ./deploy.sh
+It needs, once:
+
+- in GitHub, the `production` environment's secrets `DEPLOY_HOST`,
+  `DEPLOY_USER`, `DEPLOY_SSH_KEY` (a key only for deploying, its public
+  half in that user's `~/.ssh/authorized_keys`) and `DEPLOY_KNOWN_HOSTS`
+  (`ssh-keyscan <host>`). Without them the job skips with a notice;
+- on the server, as that user: the checkout in `/srv/kick_tracker` able to
+  `git pull`, `docker login ghcr.io` done, `sops` installed and the
+  server's age key in `~/.config/sops/age/keys.txt`.
+
+To stop deploying on merge, set the repository variable `AUTO_DEPLOY` to
+`false` (Settings, Secrets and variables, Actions, Variables).
+
+By hand, from the checkout (the same as CI):
+
+    git pull && deploy/release.sh
+
+or one role from `deploy/`: `ROLE=collector ./deploy.sh` (or `web`,
+`receivers`). The Deploy workflow does either from GitHub (`all` or a
+role). Each deploys the images CI built from the checkout's commit (they
+are tagged with the `main` commit they were built from). `TAG=<sha>`
+deploys another build, e.g. to roll back; `APP_IMAGE` / `RECEIVER_IMAGE`
+name an image outright. An image that doesn't exist yet (CI still
+building) stops the script before anything changes. A change to
+`caddy/sites.caddy` also needs the host's Caddy reloaded, by hand.
 
 Migrations run first, as their own step, and only expand-then-contract
 ones (§15.3); each statement waits at most 5s for a lock. Then the pair
@@ -102,8 +128,7 @@ is updated one at a time, each waiting for the other to be healthy:
 collectors' **standby first**, then the leader, whose clean stop hands
 collection over within a second; `receiver-1` then `receiver-2`. Images
 are pinned in `deploy/.env`, so a plain `docker compose up -d` never
-swaps one by accident. A rollback is the same command with the previous
-tag.
+swaps one by accident. A rollback is the same command with `TAG=` the previous sha.
 
 Which collector leads:
 

@@ -150,6 +150,7 @@ defmodule KickTrackerWeb.CompareLive do
           <div class="mt-2">
             <.chart
               id={"compare-chart-#{@metric}"}
+              refresh={Period.refresh(@period)}
               kind="timeseries"
               title={metric_label(@metric)}
               src={"/data/v1/compare?" <> URI.encode_query(Map.merge(Period.to_params(@period), %{"c" => Enum.map_join(@channels, ",", & &1.slug), "metric" => @metric}))}

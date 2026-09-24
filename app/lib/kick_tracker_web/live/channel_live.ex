@@ -50,6 +50,7 @@ defmodule KickTrackerWeb.ChannelLive do
       socket =
         socket
         |> assign(period: period, params: params, query: data_query(period, params))
+        |> assign(refresh: Period.refresh(period))
         |> assign(page_title: title(channel, socket.assigns.live_action))
         |> load(socket.assigns.live_action)
 
@@ -335,6 +336,7 @@ defmodule KickTrackerWeb.ChannelLive do
       <div class="lg:col-span-2">
         <.chart
           id="viewers-chart"
+          refresh={@refresh}
           kind="timeseries"
           title={gettext("Viewers")}
           src={"/data/v1/channels/#{@channel.slug}/viewers?#{@query}"}
@@ -355,6 +357,7 @@ defmodule KickTrackerWeb.ChannelLive do
       </div>
       <.chart
         id="followers-chart"
+        refresh={@refresh}
         kind="timeseries"
         title={gettext("Followers")}
         src={"/data/v1/channels/#{@channel.slug}/followers?#{@query}"}
@@ -363,6 +366,7 @@ defmodule KickTrackerWeb.ChannelLive do
       />
       <.chart
         id="heatmap-chart"
+        refresh={@refresh}
         kind="heatmap"
         title={gettext("When they stream (avg viewers, %{tz})", tz: @channel.timezone)}
         src={"/data/v1/channels/#{@channel.slug}/heatmap?#{@query}"}
@@ -370,6 +374,7 @@ defmodule KickTrackerWeb.ChannelLive do
       />
       <.chart
         id="categories-chart"
+        refresh={@refresh}
         kind="share"
         title={gettext("Hours watched by category")}
         src={"/data/v1/channels/#{@channel.slug}/categories?#{@query}"}
@@ -465,6 +470,7 @@ defmodule KickTrackerWeb.ChannelLive do
     <div class="mt-4">
       <.chart
         id="chat-chart"
+        refresh={@refresh}
         kind="timeseries"
         title={gettext("Messages")}
         src={"/data/v1/channels/#{@channel.slug}/chat?#{@query}"}
@@ -531,6 +537,7 @@ defmodule KickTrackerWeb.ChannelLive do
     <div class="mt-4">
       <.chart
         id="support-chart"
+        refresh={@refresh}
         kind="bars"
         title={gettext("Support")}
         src={"/data/v1/channels/#{@channel.slug}/support?#{@query}"}
@@ -567,6 +574,7 @@ defmodule KickTrackerWeb.ChannelLive do
     <div class="grid gap-4 lg:grid-cols-3">
       <.chart
         id="categories-share"
+        refresh={@refresh}
         kind="share"
         title={gettext("Hours watched by category")}
         src={"/data/v1/channels/#{@channel.slug}/categories?#{@query}"}

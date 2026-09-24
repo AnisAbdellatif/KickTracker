@@ -20,7 +20,14 @@ defmodule KickTrackerWeb.HomeLive do
 
   defp load_live(socket) do
     live = Reports.live_now()
-    assign(socket, live: live, sparks: Reports.sparklines(Enum.map(live, & &1.channel_id)))
+    assign(socket, live: live, sparks: sparks(live))
+  end
+
+  # The last 3 hours, moving with each reading; shared by every visitor for
+  # a minute (the buckets are 5 minutes).
+  defp sparks(live) do
+    ids = live |> Enum.map(& &1.channel_id) |> Enum.sort()
+    KickTracker.Cache.fetch({:sparks, ids}, 60, fn -> Reports.sparklines(ids) end)
   end
 
   @impl true
@@ -73,7 +80,8 @@ defmodule KickTrackerWeb.HomeLive do
           &%{&1 | viewers: Map.get(viewers, &1.channel_id, &1.viewers)}
         )
 
-      {:noreply, assign(socket, live: Enum.sort_by(live, &(-(&1.viewers || 0))))}
+      {:noreply,
+       assign(socket, live: Enum.sort_by(live, &(-(&1.viewers || 0))), sparks: sparks(live))}
     else
       # Someone went live or offline: read the list again.
       {:noreply, load_live(socket)}
