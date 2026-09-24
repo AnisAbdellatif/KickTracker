@@ -7,7 +7,8 @@ config :kick_tracker, KickTracker.Repo,
   hostname: "localhost",
   # deploy/compose.dev.yml publishes TimescaleDB here.
   port: 55432,
-  database: "kick_tracker_dev",
+  # DEV_DATABASE keeps a run against the real Kick apart from simulator data.
+  database: System.get_env("DEV_DATABASE", "kick_tracker_dev"),
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
