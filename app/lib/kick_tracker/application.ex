@@ -9,6 +9,9 @@ defmodule KickTracker.Application do
 
   @impl true
   def start(_type, _args) do
+    KickTracker.ErrorLogger.install()
+    KickTracker.Alerts.attach_error_notifications()
+
     KickTracker.Role.current()
     |> children(collect: Application.get_env(:kick_tracker, :collect, true))
     |> Supervisor.start_link(strategy: :one_for_one, name: KickTracker.Supervisor)

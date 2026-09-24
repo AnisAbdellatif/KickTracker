@@ -71,7 +71,8 @@ defmodule KickTracker.Kick.Token do
     case Req.post(state.id_url <> "/oauth/token",
            form: form,
            retry: false,
-           receive_timeout: 15_000
+           receive_timeout: 15_000,
+           headers: KickTracker.Kick.UserAgent.headers()
          ) do
       {:ok, %{status: 200, body: %{"access_token" => token} = body}} when is_binary(token) ->
         {:ok, token, body["expires_in"]}

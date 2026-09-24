@@ -27,6 +27,24 @@ defmodule KickTrackerWeb.Admin.HealthLiveTest do
     assert html =~ "failing"
   end
 
+  test "open alerts are listed first", %{conn: conn} do
+    KickTracker.Repo.insert_all("alerts", [
+      %{
+        key: "dead_letters",
+        message: "2 message(s) in the dead-letter queue",
+        first_at: DateTime.utc_now(),
+        last_at: DateTime.utc_now()
+      }
+    ])
+
+    {:ok, _view, html} = live(conn, ~p"/admin")
+    assert html =~ "Open alerts" and html =~ "dead-letter queue"
+  end
+
+  test "/healthz answers while the database does", %{conn: conn} do
+    assert response(get(conn, "/healthz"), 200) == "ok"
+  end
+
   test "a source that stopped reporting is stale, not ok" do
     channel = Fixtures.channel!()
     now = DateTime.utc_now()

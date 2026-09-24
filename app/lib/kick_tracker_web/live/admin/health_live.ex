@@ -26,7 +26,8 @@ defmodule KickTrackerWeb.Admin.HealthLive do
       now: DateTime.utc_now(),
       rows: Health.channels(),
       ingress: Health.ingress(),
-      jobs: Health.jobs()
+      jobs: Health.jobs(),
+      alerts: KickTracker.Alerts.open_alerts()
     )
     |> assign_async([:queues, :subscriptions], fn ->
       {:ok, %{queues: Health.queues(), subscriptions: Health.subscriptions()}}
@@ -41,6 +42,16 @@ defmodule KickTrackerWeb.Admin.HealthLive do
         {gettext("Health")}
         <:subtitle>{gettext("Updated %{at} UTC", at: Calendar.strftime(@now, "%H:%M:%S"))}</:subtitle>
       </.header>
+
+      <section :if={@alerts != []} id="open-alerts" class="mb-6 rounded-box border border-error p-3">
+        <h2 class="font-semibold text-error">{gettext("Open alerts")}</h2>
+        <ul class="mt-2 space-y-1 text-sm">
+          <li :for={a <- @alerts}>
+            {a.message}
+            <span class="text-xs opacity-60">({gettext("since")} {ago(a.first_at, @now)})</span>
+          </li>
+        </ul>
+      </section>
 
       <div class="overflow-x-auto">
         <table id="channel-health" class="table table-sm">

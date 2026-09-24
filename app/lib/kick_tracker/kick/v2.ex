@@ -22,7 +22,7 @@ defmodule KickTracker.Kick.V2 do
     case Req.get(base <> "/channels/" <> URI.encode(slug, &URI.char_unreserved?/1),
            retry: false,
            receive_timeout: 15_000,
-           headers: [{"accept", "application/json"}]
+           headers: [{"accept", "application/json"} | KickTracker.Kick.UserAgent.headers()]
          ) do
       {:ok, %{status: 200, body: body}} -> extract(body)
       # Only the status: the body may hold the signed playback URL.

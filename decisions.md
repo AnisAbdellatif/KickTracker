@@ -149,6 +149,24 @@ The web role writes only admin tables (AGENTS.md §8), so anything touching raw 
 
 This is the one exception to append-only raw facts, because the law requires it; it is audited. Nulling ids instead of deleting rows keeps follows, subs and gifts counted, which identify no one once the id is gone. The body search is by the id's digits, so it may look at bodies that only contain them inside a longer number; the JSON-aware scrub changes only real matches.
 
+## Alerts and Errors
+
+**Current:** Alerts are evaluated every minute on the collector (`Workers.Alerts`) by the pure `Alerts.Rules` over a snapshot (per channel: live, last poll, chat, 24h coverage; system: last webhook, oldest unprocessed event, dead letters, queue depth, clock drift). Each problem has a stable key and a row in `alerts` while it lasts: notified when it starts, reminded every 6 hours, and notified when resolved. Targets: a Discord/Slack webhook (`ALERT_WEBHOOK_URL`) and/or Telegram; a `HEARTBEAT_URL` is pinged each minute as a dead man's switch for the collector itself. Errors go to ErrorTracker (in our database, dashboard at `/admin/errors`), including crashes of any process through a `:logger` handler, and a new kind of error is notified. `/healthz` is for external uptime checks. (updated 2026-09-24 07:15)
+
+A job on the collector can't report the collector being down, hence the heartbeat to an outside service; the receivers' `/health` and the site's `/healthz` are for an external uptime checker. Host-level checks (disk, certificates, backups) are scripts in `deploy/`, not the app. ErrorTracker over Sentry: self-hosted, in the same database, and its only dependencies were already ours; on its own it sees requests, LiveViews and Oban jobs, so the logger handler adds GenServer, proc_lib and Task crashes. Thresholds sit above normal jitter (a live channel without a reading for 5 minutes has missed five polls).
+
+## Dependencies Added After Phase 2
+
+**Current:** `error_tracker`, `plug_attack`, and in dev/test `credo`, `dialyxir`, `sobelow`, `mix_audit` (with their dependencies `bunt`, `erlex`, `yaml_elixir`, `yamerl`). Their `mix.lock` entries were written from hex.pm's API with the outer checksum and without the inner one, which the first `mix deps.get` with access to hex.pm fills in. (updated 2026-09-24 07:15)
+
+The development container this was built in could reach hex.pm's API and GitHub but not the package repository, so sources were fetched from each package's tagged GitHub release. Hex verifies a package against the registry's checksums and skips the lock's inner checksum only when it is absent, so the lock stays safe; running `mix deps.get` once (CI does) completes it. Each was the library the design named (ErrorTracker, PlugAttack, Credo, Dialyzer, Sobelow, mix_audit).
+
+## Removal Requests
+
+**Current:** A channel has a `public` flag: hidden, it disappears from every public page, list, leaderboard and data endpoint, and its data stays. "Delete all data" (the slug typed again) queues `Workers.DeleteChannel` on the collector, which stops tracking, deletes every row of the channel including its webhook events, then the channel, and resyncs subscriptions. Every request to Kick carries a User-Agent naming the site and a contact (`KICK_USER_AGENT`, or built from `SITE_NAME`, `PHX_HOST`, `CONTACT_EMAIL`). (updated 2026-09-24 07:15)
+
+Hiding first answers a streamer at once without losing anything if the request is withdrawn; deletion is the explicit second step. Deleting raw facts is, with privacy deletion, the only exception to append-only, and both are audited.
+
 ## Development Approach
 
 **Current:** Record real payloads once (anonymized into `fixtures/`), then build a fake Kick (`sim/`) with scenarios, fault injection and a bulk history mode before any tracking logic; all development and tests run against it, switched purely by configuration. (updated 2026-09-24 04:04)

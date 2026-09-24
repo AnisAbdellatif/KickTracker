@@ -105,6 +105,9 @@ defmodule KickTrackerWeb.Layouts do
           <.admin_link to={~p"/admin/admins"} active={@active == :admins}>
             {gettext("Admins")}
           </.admin_link>
+          <a href={~p"/admin/errors"} class="opacity-70 hover:opacity-100">
+            {gettext("Errors")}
+          </a>
           <a href={~p"/admin/dashboard"} class="opacity-70 hover:opacity-100">
             {gettext("Dashboard")}
           </a>

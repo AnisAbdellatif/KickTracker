@@ -18,7 +18,7 @@ defmodule KickTrackerWeb.StreamLive do
   def mount(%{"slug" => slug, "id" => id}, _session, socket) do
     with {id, ""} <- Integer.parse(id),
          %{} = stream <- Reports.stream(id),
-         channel = Channels.get!(stream.channel_id),
+         %{public: true} = channel <- Channels.get!(stream.channel_id),
          true <-
            String.downcase(channel.slug) == String.downcase(slug) or
              Reports.channel_by_slug(slug) == channel,

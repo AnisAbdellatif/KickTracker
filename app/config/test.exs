@@ -51,3 +51,6 @@ config :kick_tracker, :pbkdf2_iterations, 1_000
 
 # The query cache would outlive each test's rolled-back database.
 config :kick_tracker, :cache, false
+
+# Tests raise on purpose; nothing to track.
+config :error_tracker, enabled: false

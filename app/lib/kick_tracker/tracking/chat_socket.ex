@@ -81,7 +81,8 @@ defmodule KickTracker.Tracking.ChatSocket do
     path = (url.path || "/") <> if(url.query, do: "?" <> url.query, else: "")
 
     with {:ok, conn} <- Mint.HTTP.connect(http, url.host, url.port, protocols: [:http1]),
-         {:ok, conn, ref} <- Mint.WebSocket.upgrade(ws, conn, path, []) do
+         {:ok, conn, ref} <-
+           Mint.WebSocket.upgrade(ws, conn, path, KickTracker.Kick.UserAgent.headers()) do
       {:noreply, %{state | conn: conn, ref: ref, ws: nil, upgrade: %{}, last_in: now_s()}}
     else
       {:error, reason} -> {:noreply, reconnect(state, reason)}

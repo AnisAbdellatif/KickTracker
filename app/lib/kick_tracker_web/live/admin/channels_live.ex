@@ -13,7 +13,7 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(page_title: gettext("Channels"), preview: nil, editing: nil)
+     |> assign(page_title: gettext("Channels"), preview: nil, editing: nil, deleting: nil)
      |> assign(lookup: to_form(%{"slug" => ""}, as: "lookup"))
      |> assign(timezones: Channels.timezones())
      |> load()}
@@ -85,6 +85,45 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
     )
 
     {:noreply, load(socket)}
+  end
+
+  def handle_event("toggle_public", %{"id" => id}, socket) do
+    channel = Channels.get!(String.to_integer(id))
+    {:ok, channel} = Channels.set_public(channel, not channel.public)
+
+    Audit.log(
+      socket.assigns.current_admin,
+      if(channel.public, do: "channel.show", else: "channel.hide"),
+      channel.slug
+    )
+
+    {:noreply, load(socket)}
+  end
+
+  def handle_event("ask_delete", %{"id" => id}, socket),
+    do: {:noreply, assign(socket, deleting: String.to_integer(id))}
+
+  def handle_event("cancel_delete", _, socket), do: {:noreply, assign(socket, deleting: nil)}
+
+  def handle_event("delete", %{"channel_id" => id, "slug" => typed}, socket) do
+    channel = Channels.get!(String.to_integer(id))
+
+    if typed == channel.slug do
+      {:ok, _} =
+        KickTracker.Workers.DeleteChannel.new(%{"channel_id" => channel.id}) |> Oban.insert()
+
+      Audit.log(socket.assigns.current_admin, "channel.delete_data", channel.slug, %{
+        "channel_id" => channel.id
+      })
+
+      {:noreply,
+       socket
+       |> assign(deleting: nil)
+       |> put_flash(:info, gettext("Deleting %{slug} and all its data.", slug: channel.slug))
+       |> load()}
+    else
+      {:noreply, put_flash(socket, :error, gettext("Type the slug exactly to confirm."))}
+    end
   end
 
   def handle_event("edit_tz", %{"id" => id}, socket),
@@ -211,6 +250,25 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
         </:col>
         <:col :let={c} label={gettext("Status")}>
           {if c.active, do: gettext("tracking"), else: gettext("paused")}
+          <span :if={!c.public} class="badge badge-warning badge-xs">{gettext("hidden")}</span>
+          <form
+            :if={@deleting == c.id}
+            id={"delete-#{c.id}"}
+            phx-submit="delete"
+            class="mt-1 flex gap-1"
+          >
+            <input type="hidden" name="channel_id" value={c.id} />
+            <input
+              name="slug"
+              class="input input-xs w-36"
+              placeholder={gettext("type %{slug}", slug: c.slug)}
+              autocomplete="off"
+            />
+            <button class="btn btn-xs btn-error">{gettext("Delete all data")}</button>
+            <button type="button" phx-click="cancel_delete" class="btn btn-xs btn-ghost">{gettext(
+              "Cancel"
+            )}</button>
+          </form>
         </:col>
         <:action :let={c}>
           <button
@@ -225,6 +283,22 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
             class="btn btn-ghost btn-xs"
           >
             {if c.active, do: gettext("Pause"), else: gettext("Resume")}
+          </button>
+          <button
+            id={"public-#{c.id}"}
+            phx-click="toggle_public"
+            phx-value-id={c.id}
+            class="btn btn-ghost btn-xs"
+          >
+            {if c.public, do: gettext("Hide"), else: gettext("Show")}
+          </button>
+          <button
+            id={"ask-delete-#{c.id}"}
+            phx-click="ask_delete"
+            phx-value-id={c.id}
+            class="btn btn-ghost btn-xs text-error"
+          >
+            {gettext("Delete…")}
           </button>
         </:action>
       </.table>

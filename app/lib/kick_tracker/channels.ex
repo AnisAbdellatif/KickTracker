@@ -156,6 +156,14 @@ defmodule KickTracker.Channels do
     end
   end
 
+  @doc "Shows or hides a channel on the public site (a removal request, §18.3)."
+  @spec set_public(Channel.t(), boolean()) :: {:ok, Channel.t()}
+  def set_public(%Channel{} = channel, public?) do
+    result = channel |> Ecto.Changeset.change(public: public?) |> Repo.update()
+    KickTracker.Cache.clear()
+    result
+  end
+
   @doc "Channels with an open stream, and when it started."
   @spec open_streams() :: %{integer() => DateTime.t()}
   def open_streams do

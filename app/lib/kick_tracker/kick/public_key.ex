@@ -62,7 +62,11 @@ defmodule KickTracker.Kick.PublicKey do
     url = state.api_url <> "/public/v1/public-key"
     now = System.monotonic_time(:millisecond)
 
-    case Req.get(url, retry: false, receive_timeout: 10_000) do
+    case Req.get(url,
+           retry: false,
+           receive_timeout: 10_000,
+           headers: KickTracker.Kick.UserAgent.headers()
+         ) do
       {:ok, %{status: 200, body: %{"data" => %{"public_key" => pem}}}} when is_binary(pem) ->
         %{state | pem: pem, fetched_at: now}
 

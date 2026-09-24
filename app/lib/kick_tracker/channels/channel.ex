@@ -11,6 +11,7 @@ defmodule KickTracker.Channels.Channel do
     field :timezone, :string, default: "Etc/UTC"
     field :tracked_since, :utc_datetime_usec, read_after_writes: true
     field :active, :boolean, default: true
+    field :public, :boolean, default: true
 
     timestamps(type: :utc_datetime_usec)
   end

@@ -80,6 +80,7 @@ defmodule KickTracker.Kick.API do
             method: method,
             url: url,
             auth: {:bearer, token},
+            headers: KickTracker.Kick.UserAgent.headers(),
             receive_timeout: 15_000,
             retry: &retry?/2,
             max_retries: 2,

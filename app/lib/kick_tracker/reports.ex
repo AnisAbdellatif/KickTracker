@@ -18,18 +18,24 @@ defmodule KickTracker.Reports do
 
   ## Channels
 
-  @doc "Public channels: tracked ones, including paused (their history stays public)."
+  @doc """
+  Public channels: tracked ones, including paused (their history stays
+  public), but not those hidden at the streamer's request.
+  """
   @spec channels() :: [Channel.t()]
-  def channels, do: Repo.all(from c in Channel, order_by: c.slug)
+  def channels, do: Repo.all(from c in Channel, where: c.public, order_by: c.slug)
 
   @spec channel_by_slug(String.t()) :: Channel.t() | nil
   def channel_by_slug(slug) do
-    Repo.one(from c in Channel, where: fragment("lower(?)", c.slug) == ^String.downcase(slug)) ||
+    Repo.one(
+      from c in Channel,
+        where: c.public and fragment("lower(?)", c.slug) == ^String.downcase(slug)
+    ) ||
       Repo.one(
         from c in Channel,
           join: s in "channel_slugs",
           on: s.channel_id == c.id,
-          where: fragment("lower(?)", s.slug) == ^String.downcase(slug),
+          where: c.public and fragment("lower(?)", s.slug) == ^String.downcase(slug),
           limit: 1
       )
   end
@@ -42,7 +48,7 @@ defmodule KickTracker.Reports do
 
     Repo.all(
       from c in Channel,
-        where: fragment("lower(?) LIKE ?", c.slug, ^like),
+        where: c.public and fragment("lower(?) LIKE ?", c.slug, ^like),
         order_by: c.slug,
         limit: 20
     )
@@ -70,7 +76,7 @@ defmodule KickTracker.Reports do
       ORDER BY observed_at DESC LIMIT 1
     ) v ON true
     LEFT JOIN categories cat ON cat.id = v.category_id
-    WHERE s.ended_at IS NULL
+    WHERE s.ended_at IS NULL AND c.public
     ORDER BY v.viewers DESC NULLS LAST
     """).rows
     |> Enum.map(fn [cid, slug, sid, started, viewers, at, category, title] ->
@@ -664,7 +670,7 @@ defmodule KickTracker.Reports do
       )
       SELECT c.id, c.slug, (sum(w.viewers * greatest(w.w, 0)) / 3600)::float, sum(greatest(w.w, 0))::float,
              avg(w.viewers)::float, max(w.viewers)
-      FROM weighted w JOIN channels c ON c.id = w.channel_id
+      FROM weighted w JOIN channels c ON c.id = w.channel_id AND c.public
       GROUP BY 1, 2 ORDER BY 3 DESC
       """,
       [category_id, from, to, Metrics.cap_s()]
@@ -701,7 +707,7 @@ defmodule KickTracker.Reports do
                max(h.peak_viewers), sum(h.kicks), sum(h.samples)
         FROM channels c
         LEFT JOIN hourly_stats h ON h.channel_id = c.id AND h.hour >= $1 AND h.hour < $2
-        WHERE ($3::bigint[] IS NULL OR c.id = ANY($3))
+        WHERE c.public AND ($3::bigint[] IS NULL OR c.id = ANY($3))
         GROUP BY c.id, c.slug
         """,
         [from, to, channel_ids]
@@ -770,7 +776,7 @@ defmodule KickTracker.Reports do
       Repo.query!(
         """
         SELECT c.slug, s.id, s.started_at, st.peak_viewers FROM stream_stats st
-        JOIN streams s ON s.id = st.stream_id JOIN channels c ON c.id = s.channel_id
+        JOIN streams s ON s.id = st.stream_id JOIN channels c ON c.id = s.channel_id AND c.public
         WHERE s.started_at >= $1 AND s.started_at < $2 AND st.peak_viewers IS NOT NULL
           AND s.id NOT IN (SELECT stream_id FROM excluded_streams)
           AND s.id NOT IN (SELECT other_stream_id FROM merged_streams)
@@ -793,7 +799,7 @@ defmodule KickTracker.Reports do
         SELECT c.slug, e.occurred_at, e.quantity, k.username,
                (SELECT id FROM streams s WHERE s.channel_id = e.channel_id AND s.started_at <= e.occurred_at
                   AND coalesce(s.ended_at, now()) >= e.occurred_at LIMIT 1)
-        FROM support_events e JOIN channels c ON c.id = e.channel_id
+        FROM support_events e JOIN channels c ON c.id = e.channel_id AND c.public
         LEFT JOIN kick_users k ON k.id = e.user_id
         WHERE e.kind = 'gift' AND e.occurred_at >= $1 AND e.occurred_at < $2 AND e.quantity >= 10
         ORDER BY e.quantity DESC, e.occurred_at DESC LIMIT $3
@@ -808,7 +814,7 @@ defmodule KickTracker.Reports do
       Repo.query!(
         """
         SELECT c.slug, e.occurred_at, e.viewers, e.other_channel, e.kind FROM channel_events e
-        JOIN channels c ON c.id = e.channel_id
+        JOIN channels c ON c.id = e.channel_id AND c.public
         WHERE e.occurred_at >= $1 AND e.occurred_at < $2 ORDER BY e.viewers DESC NULLS LAST LIMIT $3
         """,
         [from, to, limit]

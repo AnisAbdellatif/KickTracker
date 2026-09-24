@@ -14,8 +14,8 @@ defmodule KickTrackerWeb.Data.StreamController do
 
   def show(conn, %{"id" => id}) do
     with {id, ""} <- Integer.parse(id),
-         %{} = stream <- Reports.stream(id) do
-      channel = Channels.get!(stream.channel_id)
+         %{} = stream <- Reports.stream(id),
+         %{public: true} = channel <- Channels.get!(stream.channel_id) do
       to = stream.ended_at || DateTime.utc_now()
       # A minute either side, so the first and last samples show.
       from = DateTime.add(stream.started_at, -60)

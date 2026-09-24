@@ -78,8 +78,19 @@ config :kick_tracker, :amqp_url, setting.("AMQP_URL")
 # The public name (never Kick's, project.md §18.3).
 config :kick_tracker, :site_name, System.get_env("SITE_NAME", "Stream Tracker")
 
+# Where alerts go (project.md §18.2); all optional.
+config :kick_tracker, :alerts,
+  webhook_url: System.get_env("ALERT_WEBHOOK_URL"),
+  telegram_bot_token: System.get_env("TELEGRAM_BOT_TOKEN"),
+  telegram_chat_id: System.get_env("TELEGRAM_CHAT_ID"),
+  heartbeat_url: System.get_env("HEARTBEAT_URL")
+
 # Where privacy and removal requests go (project.md §18.3).
 config :kick_tracker, :contact_email, System.get_env("CONTACT_EMAIL")
+
+# Sent to Kick with every request (§18.3); built from the site name, host and
+# contact address when unset.
+config :kick_tracker, :kick_user_agent, System.get_env("KICK_USER_AGENT")
 config :kick_tracker, :amqp_queue, System.get_env("AMQP_QUEUE", "kick_tracker.events")
 
 # RabbitMQ's management API, for queue depths on the health page: a

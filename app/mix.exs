@@ -80,6 +80,15 @@ defmodule KickTracker.MixProject do
       {:broadway_rabbitmq, "~> 0.8.2"},
       {:oban, "~> 2.24"},
       {:mint_web_socket, "~> 1.0"},
+      # Errors kept in our own database, with a dashboard under /admin (§18.2).
+      {:error_tracker, "~> 0.9"},
+      # Rate limits on the public site and /data (§19.3).
+      {:plug_attack, "~> 0.4"},
+      # Static checks run in CI (§19.1, §19.3).
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.15", only: [:dev, :test], runtime: false},
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.4", only: [:dev, :test]},
       # The fake Kick (../sim): integration tests run against it, and bulk
       # mode writes its history into the raw tables. Never in production.

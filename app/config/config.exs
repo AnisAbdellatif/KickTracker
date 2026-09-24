@@ -20,6 +20,7 @@ config :kick_tracker, Oban,
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 3600},
     {Oban.Plugins.Cron,
      crontab: [
+       {"* * * * *", KickTracker.Workers.Alerts},
        {"*/15 * * * *", KickTracker.Workers.SubscriptionSync},
        {"*/5 * * * *", KickTracker.Workers.ProcessEvents},
        {"*/5 * * * *", KickTracker.Workers.FollowerSchedule},
@@ -29,6 +30,14 @@ config :kick_tracker, Oban,
   ]
 
 # Configure the endpoint
+# Errors are kept in our own database (project.md §18.2), browsable at
+# /admin/errors. Resolved errors are pruned after 30 days.
+config :error_tracker,
+  repo: KickTracker.Repo,
+  otp_app: :kick_tracker,
+  enabled: true,
+  plugins: [{ErrorTracker.Plugins.Pruner, max_age: :timer.hours(24 * 30)}]
+
 config :kick_tracker, KickTrackerWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,

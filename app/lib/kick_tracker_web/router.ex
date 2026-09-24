@@ -3,6 +3,7 @@ defmodule KickTrackerWeb.Router do
 
   import KickTrackerWeb.AdminAuth
   import Phoenix.LiveDashboard.Router
+  import ErrorTracker.Web.Router
 
   pipeline :browser do
     plug :accepts, ["html"]
@@ -39,6 +40,10 @@ defmodule KickTrackerWeb.Router do
       live "/c/:slug/categories", ChannelLive, :categories
       live "/c/:slug/streams/:id", StreamLive
     end
+  end
+
+  scope "/", KickTrackerWeb do
+    get "/healthz", HealthzController, :show
   end
 
   # History as cacheable JSON (§13.5), versioned from the start.
@@ -94,6 +99,8 @@ defmodule KickTrackerWeb.Router do
     live_dashboard "/dashboard",
       metrics: KickTrackerWeb.Telemetry,
       on_mount: [{KickTrackerWeb.AdminAuth, :require_admin}]
+
+    error_tracker_dashboard("/errors", on_mount: [{KickTrackerWeb.AdminAuth, :require_admin}])
   end
 
   # The Swoosh mailbox preview in development.
