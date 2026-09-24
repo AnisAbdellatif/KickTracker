@@ -81,6 +81,18 @@ defmodule KickTracker.Workers.DeleteChannelTest do
     alias KickTracker.Tracking.{ChannelServer, Manager}
 
     gone = Channels.get_by_slug("gonestreamer")
+
+    # The channels have chatroom ids: their chat sockets try to connect.
+    # Nothing answers here, so they only retry (no chat, no coverage writes).
+    kick = Application.get_env(:kick_tracker, :kick)
+
+    Application.put_env(
+      :kick_tracker,
+      :kick,
+      Keyword.put(kick, :pusher_url, "ws://127.0.0.1:1/app/test?protocol=7")
+    )
+
+    on_exit(fn -> Application.put_env(:kick_tracker, :kick, kick) end)
     start_supervised!({Registry, keys: :unique, name: Tracking.registry()})
 
     start_supervised!(

@@ -53,6 +53,10 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   @impl true
   def init(%Channel{} = channel) do
+    # Stopped (its channel restarting or removed, a deploy) between two
+    # messages, never in the middle of one: a coverage write under way
+    # finishes, and the connection is closed properly in `terminate/2`.
+    Process.flag(:trap_exit, true)
     channel = KickTracker.Tracking.ChannelSup.current(channel)
     Phoenix.PubSub.subscribe(KickTracker.PubSub, "channel_row:#{channel.id}")
     send(self(), :connect)
@@ -177,6 +181,12 @@ defmodule KickTracker.Tracking.ChatSocket do
         {:noreply, state}
     end
   end
+
+  # Trapping exits: a linked process going down still takes this one down
+  # (its supervisor's exit is handled by GenServer itself). A socket port
+  # closing is news the connection's own messages already carry.
+  def handle_info({:EXIT, pid, reason}, state) when is_pid(pid), do: {:stop, reason, state}
+  def handle_info({:EXIT, port, _reason}, state) when is_port(port), do: {:noreply, state}
 
   def handle_info(message, %{conn: conn} = state) when conn != nil do
     case Mint.WebSocket.stream(conn, message) do

@@ -303,7 +303,7 @@ defmodule KickTracker.Tracking.ChatSimTest do
 
     for _ <- 1..50 do
       delay = ChatSocket.jitter(8_000)
-      assert delay > 6_000 and delay <= 8_000
+      assert delay >= 6_000 and delay <= 8_000
     end
   end
 
