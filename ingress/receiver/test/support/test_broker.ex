@@ -47,6 +47,33 @@ defmodule Receiver.TestBroker do
     AMQP.Connection.close(conn)
   end
 
+  @management "http://127.0.0.1:15673/api"
+
+  @doc "The broker's names of the open connections with this client-provided name (management API)."
+  def connections(client_name) do
+    %{status: 200, body: all} =
+      Req.get!(@management <> "/connections",
+        auth: {:basic, "admin:admin-dev"},
+        params: [columns: "name,user_provided_name"],
+        retry: false
+      )
+
+    for %{"user_provided_name" => ^client_name, "name" => name} <- all, do: name
+  end
+
+  @doc "Has the broker close every connection with this client-provided name."
+  def close_connections(client_name) do
+    for name <- connections(client_name) do
+      Req.delete!(@management <> "/connections/" <> URI.encode(name, &URI.char_unreserved?/1),
+        auth: {:basic, "admin:admin-dev"},
+        headers: [{"x-reason", "test"}],
+        retry: false
+      )
+    end
+
+    :ok
+  end
+
   defp poll(chan, queue, deadline) do
     case AMQP.Basic.get(chan, queue, no_ack: true) do
       {:ok, payload, meta} ->

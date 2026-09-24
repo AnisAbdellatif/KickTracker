@@ -6,6 +6,12 @@ defmodule Receiver.Envelope do
   `message_id`, `sent_at` and the body are copied exactly: together they
   are the text Kick signed, so the app can verify the delivery again and
   trust neither the queue nor the receiver.
+
+  The headers are checked against the schema's limits
+  (`contracts/envelope.schema.json`) before anything else, so nothing that
+  breaks the contract is published: `event_type`, `subscription_id` and
+  `event_version` are **not** signed, and the event type becomes the
+  routing key.
   """
 
   @version 1
@@ -19,12 +25,23 @@ defmodule Receiver.Envelope do
     "signature" => "kick-event-signature"
   }
 
+  # The schema's rules for each header field (contracts/envelope.schema.json).
+  @rules %{
+    "message_id" => {:length, 128},
+    "subscription_id" => {:length, 128},
+    "event_type" => {:pattern, ~r/\A[a-z0-9_]+(\.[a-z0-9_]+)+\z/},
+    "event_version" => {:length, 16},
+    "sent_at" => {:length, 64},
+    "signature" => {:pattern, ~r/\A[A-Za-z0-9+\/]+={0,2}\z/}
+  }
+
   @doc """
   Builds the envelope from the request's headers (lowercased names), its
   raw body, when it was received, and which receiver took it.
   """
   @spec build(%{String.t() => String.t()}, binary(), DateTime.t(), String.t()) ::
-          {:ok, map()} | {:error, {:missing_header, String.t()}}
+          {:ok, map()}
+          | {:error, {:missing_header, String.t()} | {:invalid_header, String.t()}}
   def build(headers, body, %DateTime{} = received_at, receiver) do
     with {:ok, fields} <- from_headers(headers) do
       envelope =
@@ -61,13 +78,40 @@ defmodule Receiver.Envelope do
     ]
   end
 
+  @doc """
+  Whether `sent_at` is older than `max_age_s` at `now`. A timestamp that
+  can't be parsed is not judged here (the app dead-letters it, where it
+  can still be looked at); only a readable, too old one is.
+  """
+  @spec too_old?(String.t(), DateTime.t(), pos_integer() | nil) :: boolean()
+  def too_old?(_sent_at, _now, nil), do: false
+
+  def too_old?(sent_at, %DateTime{} = now, max_age_s) do
+    case DateTime.from_iso8601(sent_at) do
+      {:ok, at, _offset} -> DateTime.diff(now, at, :second) > max_age_s
+      {:error, _} -> false
+    end
+  end
+
   defp from_headers(headers) do
     Enum.reduce_while(@headers, {:ok, %{}}, fn {field, header}, {:ok, acc} ->
       case Map.get(headers, header) do
-        value when is_binary(value) and value != "" -> {:cont, {:ok, Map.put(acc, field, value)}}
-        _ -> {:halt, {:error, {:missing_header, header}}}
+        value when is_binary(value) and value != "" ->
+          if valid?(field, value),
+            do: {:cont, {:ok, Map.put(acc, field, value)}},
+            else: {:halt, {:error, {:invalid_header, header}}}
+
+        _ ->
+          {:halt, {:error, {:missing_header, header}}}
       end
     end)
+  end
+
+  defp valid?(field, value) do
+    case @rules[field] do
+      {:length, max} -> String.valid?(value) and length(String.codepoints(value)) <= max
+      {:pattern, regex} -> Regex.match?(regex, value)
+    end
   end
 
   # The body travels as a string when it is UTF-8 (Kick's always is), and

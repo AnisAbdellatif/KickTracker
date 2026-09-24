@@ -60,6 +60,26 @@ The ingress also verifies before publishing and **rejects** (HTTP 401, not
 published) a delivery whose signature fails. Only verified deliveries enter
 the queue.
 
+### What the signature does not cover
+
+Only `message_id`, `sent_at` and `body` are signed. `event_type`,
+`event_version` and `subscription_id` come from unsigned headers, and
+`received_at` and `receiver` from the ingress. So:
+
+- The ingress checks every header against this schema's limits (pattern
+  of `event_type`, lengths, base64 `signature`) and refuses a delivery that
+  breaks them with HTTP 400, so nothing outside the contract is published.
+- The ingress refuses (HTTP 400) a delivery whose `sent_at` is readable
+  and older than its configured maximum age (3 days by default; Kick
+  retries a failed delivery for about a day). A `sent_at` it can't read is
+  passed on: the app dead-letters it, where it can still be looked at.
+- The app routes on `event_type`, trusting it as far as it trusts the
+  ingress and the queue (only the ingress's publish-only user may publish
+  to `kick.events`). A signed body relabeled with another type is not
+  undetected: the app's shape check (`Events.Shape`, project.md §19.2)
+  counts a body that lacks its type's fields as a payload issue and
+  alerts.
+
 ## Transport (RabbitMQ)
 
 | | Value |
@@ -71,7 +91,7 @@ the queue.
 | `type` property | same as `event_type` |
 | `timestamp` property | `received_at`, in Unix seconds |
 | `delivery_mode` | 2 (persistent) |
-| Publishing | With publisher confirms. The ingress answers Kick 200 only after the confirm, or after writing the envelope to its local spool. |
+| Publishing | With publisher confirms. The ingress answers Kick 200 only after the confirm, or after writing the envelope to its local spool (it spools when no confirm comes within its confirm timeout). |
 
 Another queue can replace RabbitMQ as long as the guarantees below hold; the
 body of the message is the same envelope.

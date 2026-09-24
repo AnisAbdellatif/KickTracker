@@ -551,6 +551,37 @@ didn't have:
   the mailbox first (200 of 200 in a test).
 - A failed signature refetches Kick's key once, at most once a minute, in
   case Kick rotated it, without letting bad requests hammer Kick's API.
+  The fetch runs in the background and the key is read from memory, so a
+  slow Kick API never holds up other deliveries; the failed one waits at
+  most 3s for a different key.
+
+Hardened after an audit (2026-09-24):
+
+- **Bounded waits.** The confirm wait is `CONFIRM_TIMEOUT_MS` (5s by
+  default; the Erlang client reads a bare number as *seconds*, so it is
+  passed as milliseconds explicitly), and a delivery waits at most that
+  plus 1s for the publisher before it is spooled. Requests whose caller
+  already gave up are not published. While the broker blocks publishers (a
+  memory or disk alarm) deliveries are spooled at once.
+- **One connection.** Losing the connection or channel tears both down
+  and schedules a single reconnect (exponential backoff with jitter);
+  monitors of older connections are ignored. A test kills the connection
+  repeatedly and counts the broker's connections by name.
+- **Health never waits on RabbitMQ.** `/health` reads the connection state
+  from memory. It answers 503 when RabbitMQ has been unreachable for more
+  than `HEALTH_BROKER_GRACE_S` (30s) **and** the peer receiver
+  (`PEER_HEALTH_URL`, polled in the background) says it can publish: Caddy
+  (`lb_policy first`) then sends deliveries to the peer. If neither can
+  reach RabbitMQ, both stay healthy and spool: refusing would turn a broker
+  outage into lost webhooks. The spool has no hard cap; past
+  `SPOOL_WARN_BYTES` `/health` reports `spool_over_limit`.
+- **Headers checked.** `event_type`, `subscription_id` and `event_version`
+  are not covered by Kick's signature (only `message_id`, `sent_at` and the
+  body are), so the receiver checks every header against the envelope
+  schema's limits and answers 400 to one that breaks them. A delivery whose
+  signed `sent_at` is older than `MAX_EVENT_AGE_S` (3 days: Kick retries
+  for about a day) is refused with 400, so an old captured delivery can't
+  be replayed. The trust boundary is in `contracts/envelope.md`.
 
 A live run (fake Kick → receiver → RabbitMQ, with RabbitMQ stopped
 mid-way) delivered every event: the ones sent during the outage were

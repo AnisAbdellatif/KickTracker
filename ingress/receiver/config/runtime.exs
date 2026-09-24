@@ -33,4 +33,21 @@ config :receiver,
   amqp_url: setting.("AMQP_URL", "amqp://receiver:receiver-dev@127.0.0.1:55672"),
   exchange: System.get_env("AMQP_EXCHANGE", "kick.events"),
   spool_path: setting.("SPOOL_PATH", "spool.sqlite3"),
-  confirm_timeout_ms: String.to_integer(System.get_env("CONFIRM_TIMEOUT_MS", "5000"))
+  # How long to wait for RabbitMQ's confirm before spooling, in milliseconds.
+  confirm_timeout_ms: String.to_integer(System.get_env("CONFIRM_TIMEOUT_MS", "5000")),
+  # Refuse (400) deliveries whose signed timestamp is older than this, so a
+  # captured delivery can't be replayed much later. Lenient on purpose: Kick
+  # retries failed deliveries (for up to about a day). 0 turns it off.
+  max_event_age_s:
+    (case String.to_integer(System.get_env("MAX_EVENT_AGE_S", "259200")) do
+       0 -> nil
+       seconds -> seconds
+     end),
+  # After RabbitMQ has been unreachable this long, /health says 503 if the
+  # peer receiver (PEER_HEALTH_URL, its /health) can publish, so the load
+  # balancer sends deliveries there instead.
+  broker_grace_s: String.to_integer(System.get_env("HEALTH_BROKER_GRACE_S", "30")),
+  peer_health_url: System.get_env("PEER_HEALTH_URL"),
+  # /health flags the spool (spool_over_limit) past this size; nothing is
+  # refused for it.
+  spool_warn_bytes: String.to_integer(System.get_env("SPOOL_WARN_BYTES", "1073741824"))
