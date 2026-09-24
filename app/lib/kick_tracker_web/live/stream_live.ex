@@ -198,7 +198,7 @@ defmodule KickTrackerWeb.StreamLive do
           <.kpi label={gettext("Follower gain")} value={s.follower_gain} />
           <.kpi label={gettext("Unique chatters")} value={s.unique_chatters} />
           <.kpi label={gettext("Messages")} value={s.messages} />
-          <.kpi label={gettext("Subs + gifts")} value={s.subs + s.resubs + s.gifted_subs} />
+          <.kpi label={gettext("Subs + gifts")} value={known_sum([s.subs, s.resubs, s.gifted_subs])} />
         </section>
 
         <div class="mt-4">

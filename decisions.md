@@ -375,7 +375,9 @@ A zero would read as "nobody watched" when it means "nothing was measured", the 
 
 ## Testing Strategy
 
-**Current:** Tests written alongside each feature; unit + property tests for the pure core, fixture-based parser tests, integration tests against the simulator with real TimescaleDB and RabbitMQ. (updated 2026-09-24 04:04)
+**Current:** Tests written alongside each feature; unit + property tests for the pure core, fixture-based parser tests, integration tests against the simulator with real TimescaleDB and RabbitMQ. Plus one test of unknown figures (`app/test/kick_tracker_web/unknown_figures_test.exs`): it reads every nullable column of the collected and derived tables from the schema, sets them all to NULL, and loads every public page, data endpoint and admin page. (updated 2026-09-24 23:40)
+
+The webhook counts in `stream_stats` were made nullable (unknown without ingress coverage) and the stream page, which added them up, crashed in production on every stream from before the change: each reader had been written when the columns were NOT NULL, and nothing exercised them with NULLs. Reviewing readers by hand when a column changes was the rule and was missed; a test that derives the columns from the schema covers the next one without anyone remembering to add it. Columns whose NULL is a state rather than an unknown figure (an open stream's `ended_at`, and `end_source` tied to it) are listed as exceptions with the reason.
 
 ## Phase Order
 

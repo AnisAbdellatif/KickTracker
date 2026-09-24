@@ -735,7 +735,7 @@ defmodule KickTrackerWeb.ChannelLive do
             <td class="text-end"><.num value={s.follower_gain} /></td>
             <td class="text-end"><.num value={s.unique_chatters} /></td>
             <td class="text-end">
-              <.num value={s.subs && s.subs + (s.resubs || 0) + (s.gifted_subs || 0)} />
+              <.num value={known_sum([s.subs, s.resubs, s.gifted_subs])} />
             </td>
           </tr>
         </tbody>
