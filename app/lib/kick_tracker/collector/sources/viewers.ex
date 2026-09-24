@@ -7,7 +7,9 @@ defmodule KickTracker.Collector.Sources.Viewers do
   missed start event visible within a minute.
 
   A request that fails sends nothing: no reading is a gap, never
-  "offline" and never zero (coverage source `api`). At the end of each
+  "offline" and never zero (coverage source `api`, recorded failed here;
+  a reading handled is recorded covered by the channel's process, so one
+  that no process was there to write stays a gap). At the end of each
   cycle, one aggregated broadcast for the home page (§13.5) with every
   channel seen live and its viewers.
   """
@@ -71,6 +73,12 @@ defmodule KickTracker.Collector.Sources.Viewers do
 
   # Unknown, not offline: the channels keep whatever was known.
   def record(_unit, {:error, _}, _at, state), do: {[], [], state}
+
+  # A reading is written by the channel's process, which records its
+  # coverage when it does: one that isn't running (restarting,
+  # quarantined) drops the reading, and that stays a gap.
+  @impl true
+  def covered(_unit, _ok), do: []
 
   @impl true
   def finish(state, at) do

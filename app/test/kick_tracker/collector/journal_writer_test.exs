@@ -121,7 +121,8 @@ defmodule KickTracker.Collector.JournalWriterTest do
         :test_journal,
         [
           sample(c, 0, 1),
-          {:follower_sample, 999_999_999, ~U[2026-09-01 12:01:00Z], 5},
+          # Breaks a check constraint: can never apply.
+          sample(c, 60, -5),
           sample(c, 120, 3)
         ],
         0
@@ -131,6 +132,38 @@ defmodule KickTracker.Collector.JournalWriterTest do
     assert :ok = Writer.drain(:test_writer)
     assert followers() == [1, 3]
     assert %{depth: 0, buried: 1} = Journal.stats(:test_journal)
+  end
+
+  test "writes for a channel deleted meanwhile are dropped, keeping what they hold for others" do
+    c = channel!()
+    gone = channel!()
+    at = ~U[2026-09-01 12:00:00Z]
+    Repo.query!("DELETE FROM channels WHERE id = $1", [gone.id])
+
+    :ok =
+      Journal.append_to(
+        :test_journal,
+        [
+          sample(c, 0, 1),
+          {:follower_sample, gone.id, at, 5},
+          {:coverage, [c.id, gone.id], "api", true, at, 150},
+          {:subscriber_samples,
+           [
+             %{channel_id: gone.id, observed_at: at, active: 1, active_gifted: 0, canceled: 0},
+             %{channel_id: c.id, observed_at: at, active: 2, active_gifted: 0, canceled: 0}
+           ]}
+        ],
+        0
+      )
+
+    writer()
+    assert :ok = Writer.drain(:test_writer)
+    assert followers() == [1]
+    assert [%{channel_id: id}] = rows("coverage", ["channel_id"])
+    assert id == c.id
+    assert [%{channel_id: ^id, active: 2}] = rows("subscriber_samples", ["channel_id"])
+    # Nothing set aside: there was nothing wrong with them.
+    assert %{depth: 0, buried: 0} = Journal.stats(:test_journal)
   end
 
   test "writes a superseded collector made after the takeover are dropped" do

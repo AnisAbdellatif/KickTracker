@@ -18,14 +18,20 @@ defmodule KickTracker.Collector.Source do
     4. `finish/2` (optional) runs once at the end of the cycle.
 
   A failed or timed-out fetch writes nothing (a gap, never a zero) and is
-  recorded in `coverage` for the unit's channels, under `coverage/0`.
+  recorded in `coverage` for the unit's channels, under `coverage/0`, as
+  failed. A fetch that worked is recorded as covering the channels
+  `covered/2` names (by default all of the unit's): only those whose
+  reading is written, so a channel missing from Kick's answer stays a
+  gap. (A source whose readings are written by the channel processes
+  names none; those processes record coverage for what they write.)
 
   Effects:
 
     * `{:send, kick_user_id, message}` — to the channel's process;
     * `{:broadcast, topic, message}` — on PubSub;
-    * `{:channel, %Channel{}}` — a channel row changed (a rename, an id
-      learnt): refreshes the tracked list and tells its processes.
+    * `{:channel, channel_id, fields}` — some fields of a channel's row
+      changed (a rename, an id learnt): updates the tracked list and tells
+      its processes, those fields only.
   """
 
   alias KickTracker.Channels.Channel
@@ -33,7 +39,9 @@ defmodule KickTracker.Collector.Source do
   @type unit :: %{required(:channels) => [Channel.t()], optional(atom()) => term()}
   @type outcome :: {:ok, term()} | {:error, term()}
   @type effect ::
-          {:send, integer(), term()} | {:broadcast, String.t(), term()} | {:channel, Channel.t()}
+          {:send, integer(), term()}
+          | {:broadcast, String.t(), term()}
+          | {:channel, integer(), map()}
   @type state :: term()
 
   @doc "A short name, for logs and status."
@@ -58,5 +66,11 @@ defmodule KickTracker.Collector.Source do
   @doc "A request from elsewhere (e.g. a reading asked for at a stream's start)."
   @callback handle_request(term(), state()) :: state()
 
-  @optional_callbacks finish: 2, handle_request: 2
+  @doc """
+  The ids of the unit's channels a fetch that worked covers: their readings
+  are written. Channels left out get no coverage from it (a gap).
+  """
+  @callback covered(unit(), {:ok, term()}) :: [integer()]
+
+  @optional_callbacks finish: 2, handle_request: 2, covered: 2
 end

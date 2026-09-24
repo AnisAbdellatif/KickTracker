@@ -96,6 +96,17 @@ defmodule KickTracker.Tracking.PipelineSimTest do
            |> Enum.map(& &1.ok) == [true, false]
   end
 
+  test "a reading no channel process was there to write is a gap, not coverage", %{live: live} do
+    # The channel's processes are down (restarting, quarantined) during a
+    # poll that worked. Before, the whole batch was recorded as covered.
+    sup = KickTracker.Tracking.whereis({:channel_sup, live.id})
+    DynamicSupervisor.terminate_child(KickTracker.Tracking.ChannelsSupervisor, sup)
+    poll()
+
+    assert rows("viewer_samples", ["observed_at"]) == []
+    assert Enum.filter(rows("coverage", ["id"]), &(&1.channel_id == live.id)) == []
+  end
+
   test "webhook subscriptions follow the tracked set, and come back if Kick drops them",
        %{off: off} do
     :ok = SubscriptionSync.perform(%Oban.Job{})
@@ -274,6 +285,56 @@ defmodule KickTracker.Tracking.ChatSimTest do
              flush(c)
              rows("chat_minutes", ["minute"]) != []
            end)
+
+    chat = rows("coverage", ["id"]) |> Enum.filter(&(&1.source == "chat")) |> Enum.map(& &1.ok)
+    assert chat == [true, false, true]
+  end
+
+  test "a connection dropped soon after it came up doesn't start the backoff over",
+       %{socket: socket} do
+    # Before, every successful subscription reset the backoff to 1s, so a
+    # server that accepted and then dropped was retried every second or two.
+    for expected <- [2_000, 4_000] do
+      sim_ctl(:post, "/pusher/disconnect")
+      assert eventually(fn -> not ChatSocket.subscribed?(socket) end)
+      assert eventually(fn -> ChatSocket.subscribed?(socket) end, 200)
+      assert :sys.get_state(socket).backoff_ms == expected
+    end
+
+    for _ <- 1..50 do
+      delay = ChatSocket.jitter(8_000)
+      assert delay > 6_000 and delay <= 8_000
+    end
+  end
+
+  test "when the channel's process restarts, the socket restarts knowing the chatroom", %{
+    channel: c,
+    socket: socket
+  } do
+    # The channel's supervisor was started before the chatroom id was
+    # known; before, the restarted socket got that first row (no chatroom)
+    # and never connected again.
+    Process.exit(ChannelServer.whereis(c.kick_user_id), :kill)
+
+    new_socket =
+      eventually(fn ->
+        pid = KickTracker.Tracking.whereis({:chat, c.id})
+        pid != socket and pid != nil and pid
+      end)
+
+    assert new_socket
+    assert eventually(fn -> ChatSocket.subscribed?(new_socket) end, 200)
+    assert :sys.get_state(new_socket).channel.chatroom_id == c.chatroom_id
+  end
+
+  test "a chatroom id that changes moves the socket to the new chatroom", %{
+    channel: c,
+    socket: socket
+  } do
+    Channels.announce(c.id, %{chatroom_id: c.chatroom_id + 1})
+
+    assert eventually(fn -> :sys.get_state(socket).channel.chatroom_id == c.chatroom_id + 1 end)
+    assert eventually(fn -> ChatSocket.subscribed?(socket) end, 200)
 
     chat = rows("coverage", ["id"]) |> Enum.filter(&(&1.source == "chat")) |> Enum.map(& &1.ok)
     assert chat == [true, false, true]

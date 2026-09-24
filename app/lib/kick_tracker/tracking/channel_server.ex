@@ -21,20 +21,28 @@ defmodule KickTracker.Tracking.ChannelServer do
   term (writes may still be on their way), it starts from the snapshot of
   its state it keeps in the journal instead.
 
+  It starts from the channel's row as it is then (not as it was when the
+  channel was first started), and hears later changes to it as the
+  changed fields only.
+
   An event whose handling raises is logged, reported and marked
   processed, so one bad payload can't crash the channel in a loop; it
-  stays in `webhook_events` to be replayed once fixed.
+  stays in `webhook_events` to be replayed once fixed. One that takes the
+  process down some other way is set aside after a few starts (see
+  `catch_up/2`).
   """
 
   use GenServer, restart: :permanent
   require Logger
 
   @flush_every_ms 15_000
+  @held_meta_window_s 300
+  @max_catch_up_attempts 3
 
   alias KickTracker.{Collector, Events, Stats, Tracking}
   alias KickTracker.Channels.Channel
   alias KickTracker.Collector.{Journal, Tracked}
-  alias KickTracker.Collector.Sources.Followers
+  alias KickTracker.Collector.Sources.{Followers, Viewers}
   alias KickTracker.Events.Envelope
   alias KickTracker.Metrics.{ChatMinutes, Changes, Sessionizer}
 
@@ -60,6 +68,7 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   @impl true
   def init(%Channel{} = channel) do
+    channel = Tracking.ChannelSup.current(channel)
     # So a shutdown (a deploy) writes the chat gathered so far.
     Process.flag(:trap_exit, true)
     Phoenix.PubSub.subscribe(KickTracker.PubSub, "channel_row:#{channel.id}")
@@ -70,6 +79,7 @@ defmodule KickTracker.Tracking.ChannelServer do
       sessions: Sessionizer.new(),
       changes: nil,
       changes_for: nil,
+      closed_changes: nil,
       pending_meta: nil,
       chat: ChatMinutes.new(),
       unknown_events: MapSet.new()
@@ -82,12 +92,45 @@ defmodule KickTracker.Tracking.ChannelServer do
   def handle_continue(:catch_up, state) do
     state =
       case safe(fn -> Events.unprocessed_for(state.channel.kick_user_id) end) do
-        {:ok, envelopes} -> Enum.reduce(envelopes, state, &handle_event(&2, &1))
+        {:ok, envelopes} -> catch_up(state, envelopes)
         # They stay unprocessed; `ProcessEvents` hands them over later.
         :error -> state
       end
 
-    {:noreply, state}
+    {:noreply, state |> snapshot()}
+  end
+
+  # Each event handed over at start is counted (in the journal) before it
+  # is handled. One that was already tried @max_catch_up_attempts times
+  # took the process down each time (an exception is caught and the event
+  # marked below; an exit isn't): it is set aside, marked processed and
+  # logged, so it can't crash the channel at every start. It stays in
+  # `webhook_events` to be replayed once fixed.
+  defp catch_up(state, envelopes) do
+    key = {:catch_up_attempts, state.channel.id}
+    attempts = Journal.get(key) || %{}
+
+    {state, _} =
+      Enum.reduce(envelopes, {state, attempts}, fn e, {state, attempts} ->
+        tried = Map.get(attempts, e.message_id, 0)
+
+        if tried >= @max_catch_up_attempts do
+          Logger.error(
+            "event #{e.message_id} for channel #{state.channel.id} stopped the channel " <>
+              "#{tried} times, set aside (marked processed)"
+          )
+
+          record(state, [{:processed, [e.message_id]}])
+          {state, attempts}
+        else
+          attempts = Map.put(attempts, e.message_id, tried + 1)
+          Journal.put(key, attempts)
+          {handle_event(state, e), attempts}
+        end
+      end)
+
+    if attempts != %{} or envelopes != [], do: Journal.put(key, %{})
+    state
   end
 
   @impl true
@@ -104,19 +147,19 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   @impl true
   def handle_info({:reading, :offline, at}, state) do
-    {:noreply, state |> observe({:offline, at}) |> snapshot()}
+    {:noreply, state |> observe({:offline, at}) |> covered(at) |> snapshot()}
   end
 
   def handle_info({:reading, %{} = livestream, at}, state) do
-    {:noreply, state |> reading(livestream, at) |> snapshot()}
+    {:noreply, state |> reading(livestream, at) |> covered(at) |> snapshot()}
   end
 
   def handle_info({:event, %Envelope{} = envelope}, state) do
     {:noreply, state |> handle_event(envelope) |> snapshot()}
   end
 
-  def handle_info({:channel, %Channel{} = channel}, state) do
-    {:noreply, %{state | channel: channel}}
+  def handle_info({:channel_fields, fields}, state) do
+    {:noreply, %{state | channel: struct(state.channel, fields)}}
   end
 
   def handle_info({:chat, message}, state) do
@@ -207,6 +250,7 @@ defmodule KickTracker.Tracking.ChannelServer do
       | sessions: snap.sessions,
         changes: snap.changes,
         changes_for: snap.changes_for,
+        closed_changes: Map.get(snap, :closed_changes),
         pending_meta: snap.pending_meta
     }
   end
@@ -218,6 +262,7 @@ defmodule KickTracker.Tracking.ChannelServer do
       sessions: state.sessions,
       changes: state.changes,
       changes_for: state.changes_for,
+      closed_changes: state.closed_changes,
       pending_meta: state.pending_meta
     }
 
@@ -296,15 +341,25 @@ defmodule KickTracker.Tracking.ChannelServer do
     end
   end
 
+  # The viewers poll's coverage, for this channel: recorded here, once the
+  # reading is handled, so a reading that no process was there to handle
+  # (restarting, stopped) stays a gap (AGENTS.md §7).
+  defp covered(state, at) do
+    {source, gap_s} = Viewers.coverage()
+    record(state, [{:coverage, [state.channel.id], source, true, at, gap_s}])
+    state
+  end
+
   # The livestream carries Kick's channel id, which the chat feed's
   # per-channel topic uses.
+  # Only that field is passed on: this process's copy of the row may be
+  # older than what others learnt meanwhile (a chatroom id).
   defp learn_channel_id(%{channel: %{kick_channel_id: nil} = channel} = state, id)
        when is_integer(id) do
     record(state, [{:channel_ids, channel.id, id, nil}])
-    channel = %{channel | kick_channel_id: id}
-    Tracked.put(channel)
-    KickTracker.Channels.announce(channel)
-    %{state | channel: channel}
+    Tracked.update(channel.id, kick_channel_id: id)
+    KickTracker.Channels.announce(channel.id, %{kick_channel_id: id})
+    %{state | channel: %{channel | kick_channel_id: id}}
   end
 
   defp learn_channel_id(state, _id), do: state
@@ -382,10 +437,33 @@ defmodule KickTracker.Tracking.ChannelServer do
     Enum.each(actions, &announce(state, &1))
 
     case Sessionizer.open_stream(sessions) do
-      ^before -> state
-      nil -> %{state | changes: nil, changes_for: nil}
-      opened -> start_changes(state, opened)
+      ^before ->
+        state
+
+      nil ->
+        # Kept: a stream closed from polling may reopen, and its change log
+        # then continues where it was.
+        %{
+          state
+          | changes: nil,
+            changes_for: nil,
+            closed_changes: {state.changes_for, state.changes}
+        }
+
+      opened ->
+        attribute_chat(state, opened)
+        start_changes(state, opened, {:reopen, opened} in actions)
     end
+  end
+
+  # Chat written before this stream was known here (its start learnt
+  # late: a missed start event, the API's lag) was written with no stream;
+  # it is the stream's (project.md §12.3). Attributed in the database, as
+  # a journaled write like every other.
+  defp attribute_chat(state, started_at) do
+    record(state, [
+      {:chat_stream, state.channel.id, started_at, Sessionizer.norm(DateTime.utc_now())}
+    ])
   end
 
   # A follower reading at each stream's start and end gives its exact
@@ -407,23 +485,63 @@ defmodule KickTracker.Tracking.ChannelServer do
   end
 
   # A stream just became the open one: start its change log, with any
-  # metadata that arrived before its status event.
-  defp start_changes(state, started_at) do
+  # metadata that arrived shortly before its status event. A stream closed
+  # from polling that reopens continues its own log (from memory, else
+  # from the database), so its values aren't recorded again as new.
+  defp start_changes(state, started_at, reopened?) do
     state =
-      if state.changes_for == started_at,
-        do: state,
-        else: %{state | changes: Changes.new(), changes_for: started_at}
+      cond do
+        state.changes_for == started_at ->
+          state
+
+        match?({^started_at, %Changes{}}, state.closed_changes) ->
+          %{state | changes: elem(state.closed_changes, 1), changes_for: started_at}
+
+        reopened? ->
+          {values, as_of} =
+            case safe(fn -> Stats.current_values(state.channel.id, started_at) end) do
+              {:ok, found} -> found
+              :error -> {nil, nil}
+            end
+
+          %{state | changes: Changes.new(values, as_of), changes_for: started_at}
+
+        true ->
+          %{state | changes: Changes.new(), changes_for: started_at}
+      end
+
+    state = %{state | closed_changes: nil}
 
     case state.pending_meta do
       {snapshot, at} ->
         state = %{state | pending_meta: nil}
-        at = if DateTime.before?(at, started_at), do: started_at, else: at
-        track_changes(state, :event, snapshot, at)
+
+        if held_meta_applies?(at, started_at) do
+          at = if DateTime.before?(at, started_at), do: started_at, else: at
+          track_changes(state, :event, snapshot, at)
+        else
+          # Older than any status event could precede its stream by: it
+          # described an earlier stream, or none. Dropped, nothing written.
+          Logger.info(
+            "channel #{state.channel.id}: metadata from #{at} dropped, too old for the stream started #{started_at}"
+          )
+
+          state
+        end
 
       nil ->
         state
     end
   end
+
+  @doc false
+  # Metadata held while no stream was open goes to the stream that opens
+  # next only if it came at most this long before that stream's start (or
+  # after it).
+  def held_meta_window_s, do: @held_meta_window_s
+
+  defp held_meta_applies?(at, started_at),
+    do: DateTime.diff(started_at, at) <= @held_meta_window_s
 
   defp track_changes(state, source, snapshot, at) do
     tracker = state.changes || Changes.new()

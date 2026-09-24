@@ -310,6 +310,48 @@ defmodule KickTracker.Stats do
     :ok
   end
 
+  @doc """
+  Gives a stream the channel's chat minutes that were written with no
+  stream although they fall inside it (from its start, up to its end or
+  `until`): minutes the collector wrote before it knew the stream had
+  started (a missed start event, the API's lag). Their chatters are added
+  to `chat_stream_users`, from `chat_minute_users` (so to minute
+  precision for `first_at` and `last_at`).
+
+  Only minutes with no stream change, so running it twice changes nothing.
+  `chat_minutes.stream_id` and `chat_stream_users` are derived from
+  `chat_minute_users` and the streams' ranges, like the rest of a minute's
+  row (it is recounted from them); no raw fact changes.
+  """
+  @spec attribute_chat(integer(), integer(), DateTime.t()) :: :ok
+  def attribute_chat(channel_id, stream_id, until) do
+    Repo.query!(
+      """
+      WITH s AS (SELECT started_at, ended_at FROM streams WHERE id = $2),
+      moved AS (
+        UPDATE chat_minutes m SET stream_id = $2
+        FROM s
+        WHERE m.channel_id = $1 AND m.stream_id IS NULL
+          AND m.minute >= date_trunc('minute', s.started_at)
+          AND m.minute < LEAST(COALESCE(s.ended_at, $3::timestamptz), $3::timestamptz)
+        RETURNING m.minute
+      )
+      INSERT INTO chat_stream_users AS u (stream_id, user_id, messages, first_at, last_at)
+      SELECT $2, cu.user_id, sum(cu.messages), min(cu.minute), max(cu.minute)
+      FROM chat_minute_users cu
+      WHERE cu.channel_id = $1 AND cu.minute IN (SELECT minute FROM moved)
+      GROUP BY cu.user_id
+      ON CONFLICT (stream_id, user_id) DO UPDATE SET
+        messages = u.messages + EXCLUDED.messages,
+        first_at = LEAST(u.first_at, EXCLUDED.first_at),
+        last_at = GREATEST(u.last_at, EXCLUDED.last_at)
+      """,
+      [channel_id, stream_id, until]
+    )
+
+    :ok
+  end
+
   # One row per stream and user, so one statement never touches a row twice.
   defp merge_stream_rows(rows) do
     rows

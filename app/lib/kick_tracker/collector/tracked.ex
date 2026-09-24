@@ -29,7 +29,7 @@ defmodule KickTracker.Collector.Tracked do
   def refresh do
     case safe_list_active() do
       {:ok, channels} ->
-        store(channels)
+        channels = replace(channels)
         Journal.put(:tracked_channels, channels)
         {:ok, channels}
 
@@ -59,18 +59,68 @@ defmodule KickTracker.Collector.Tracked do
     ArgumentError -> Channels.list_active()
   end
 
-  @doc "Replaces one channel's row (a rename or an id learnt)."
-  @spec put(Channel.t()) :: :ok
-  def put(%Channel{} = channel) do
+  @doc """
+  One tracked channel's row as last known, or nil: from memory, or from
+  the database when this isn't running (tests, a node without
+  collection) or doesn't know it.
+  """
+  @spec get(integer()) :: Channel.t() | nil
+  def get(channel_id) do
     case :ets.lookup(@table, :active) do
-      [{:active, channels}] ->
-        store(Enum.map(channels, &if(&1.id == channel.id, do: channel, else: &1)))
-
-      [] ->
-        :ok
+      [{:active, channels}] -> Enum.find(channels, &(&1.id == channel_id)) || from_db(channel_id)
+      [] -> from_db(channel_id)
     end
   rescue
-    ArgumentError -> :ok
+    ArgumentError -> from_db(channel_id)
+  end
+
+  @doc """
+  Sets some fields of one channel's row (a rename, an id learnt) and
+  returns the row as it now is, or nil if the channel isn't tracked here.
+  Only the fields given change: a caller holding an older copy of the row
+  can't undo what another learnt meanwhile. Serialized, so two updates at
+  once both land.
+  """
+  @spec update(integer(), map() | keyword()) :: Channel.t() | nil
+  def update(channel_id, fields) do
+    GenServer.call(__MODULE__, {:update, channel_id, Map.new(fields)})
+  catch
+    :exit, _ -> nil
+  end
+
+  defp from_db(channel_id) do
+    KickTracker.Repo.get(Channel, channel_id)
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
+  end
+
+  # In this process, so it can't interleave with an `update/2`. An id
+  # learnt a moment ago may still be on its way through the journal: the
+  # database's nil doesn't forget it.
+  defp replace(channels) do
+    GenServer.call(__MODULE__, {:replace, channels})
+  catch
+    :exit, _ -> channels
+  end
+
+  defp keep_learnt_ids(fresh, known) do
+    known = Map.new(known, &{&1.id, &1})
+
+    Enum.map(fresh, fn c ->
+      case known[c.id] do
+        nil ->
+          c
+
+        old ->
+          %{
+            c
+            | kick_channel_id: c.kick_channel_id || old.kick_channel_id,
+              chatroom_id: c.chatroom_id || old.chatroom_id
+          }
+      end
+    end)
   end
 
   defp store(channels) do
@@ -92,5 +142,30 @@ defmodule KickTracker.Collector.Tracked do
   def init(_opts) do
     :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
     {:ok, nil}
+  end
+
+  @impl true
+  def handle_call({:replace, channels}, _from, state) do
+    channels = keep_learnt_ids(channels, active())
+    store(channels)
+    {:reply, channels, state}
+  end
+
+  def handle_call({:update, channel_id, fields}, _from, state) do
+    case :ets.lookup(@table, :active) do
+      [{:active, channels}] ->
+        case Enum.find(channels, &(&1.id == channel_id)) do
+          nil ->
+            {:reply, nil, state}
+
+          channel ->
+            updated = struct(channel, fields)
+            store(Enum.map(channels, &if(&1.id == channel_id, do: updated, else: &1)))
+            {:reply, updated, state}
+        end
+
+      [] ->
+        {:reply, nil, state}
+    end
   end
 end

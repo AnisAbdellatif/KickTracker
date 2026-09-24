@@ -16,6 +16,8 @@ defmodule KickTracker.Collector.Ops do
     * `{:changes, channel_id, started_at, changes}`
     * `{:category, %{id, name} | nil, at}`
     * `{:chat, channel_id, minutes}` — each `%{minute, started_at, users}`
+    * `{:chat_stream, channel_id, started_at, until}` — chat written with no
+      stream before this stream was known, up to `until`, is the stream's
     * `{:kick_users, [{id, username, seen_at}]}`
     * `{:processed, message_ids}` — stream events handled
     * `{:channel_ids, channel_id, kick_channel_id, chatroom_id}`
@@ -24,6 +26,61 @@ defmodule KickTracker.Collector.Ops do
 
   alias KickTracker.{Channels, Events, KickUsers, Stats}
   alias KickTracker.Stats.Coverage
+
+  @doc """
+  The operation without what it writes for channels that no longer exist
+  (deleted while the write waited in the journal): the same operation when
+  every channel it names exists, nil when nothing of it is left.
+  """
+  @spec without_deleted_channels(term()) :: term() | nil
+  def without_deleted_channels(op) do
+    case channel_ids(op) do
+      [] ->
+        op
+
+      ids ->
+        existing =
+          KickTracker.Repo.query!("SELECT id FROM channels WHERE id = ANY($1)", [ids]).rows
+          |> MapSet.new(&hd/1)
+
+        if Enum.all?(ids, &MapSet.member?(existing, &1)),
+          do: op,
+          else: keep_channels(op, existing)
+    end
+  end
+
+  defp channel_ids({:coverage, ids, _, _, _, _}), do: Enum.uniq(ids)
+
+  defp channel_ids({:subscriber_samples, rows}),
+    do: rows |> Enum.map(& &1.channel_id) |> Enum.uniq()
+
+  defp channel_ids({kind, channel_id, _})
+       when kind in [:stream, :chat] and is_integer(channel_id),
+       do: [channel_id]
+
+  defp channel_ids({kind, channel_id, _, _})
+       when kind in [:follower_sample, :changes, :chat_stream, :channel_ids, :slug] and
+              is_integer(channel_id),
+       do: [channel_id]
+
+  defp channel_ids({kind, channel_id, _, _, _, _}) when kind == :viewer_sample, do: [channel_id]
+  defp channel_ids(_op), do: []
+
+  defp keep_channels({:coverage, ids, source, ok?, at, gap}, existing) do
+    case Enum.filter(ids, &MapSet.member?(existing, &1)) do
+      [] -> nil
+      kept -> {:coverage, kept, source, ok?, at, gap}
+    end
+  end
+
+  defp keep_channels({:subscriber_samples, rows}, existing) do
+    case Enum.filter(rows, &MapSet.member?(existing, &1.channel_id)) do
+      [] -> nil
+      kept -> {:subscriber_samples, kept}
+    end
+  end
+
+  defp keep_channels(_single_channel_op, _existing), do: nil
 
   @doc "Applies operations in order, in the caller's transaction if any."
   @spec apply_all!([term()]) :: :ok
@@ -72,6 +129,10 @@ defmodule KickTracker.Collector.Ops do
       end
 
     Stats.write_chat(channel_id, rows)
+  end
+
+  def apply!({:chat_stream, channel_id, started_at, until}) do
+    Stats.attribute_chat(channel_id, Stats.ensure_stream_id(channel_id, started_at), until)
   end
 
   def apply!({:kick_users, users}), do: KickUsers.upsert(users)

@@ -127,7 +127,7 @@ defmodule KickTracker.Collector.Writer do
   end
 
   defp one_by_one(entries, journal_id, state) do
-    Enum.reduce_while(entries, {:ok, 0}, fn {id, _, _, op} = entry, {:ok, n} ->
+    Enum.reduce_while(entries, {:ok, 0}, fn entry, {:ok, n} ->
       case commit([entry], journal_id, state) do
         {:ok, applied, dropped} ->
           {:ok, _} = finish([entry], applied, dropped, state)
@@ -137,16 +137,57 @@ defmodule KickTracker.Collector.Writer do
           {:halt, fail(reason)}
 
         {:error, :permanent, reason} ->
-          message = Exception.format_banner(:error, reason) |> String.slice(0, 2_000)
-          Logger.error("collector write #{id} can't be applied, set aside: #{message}")
-
-          if is_exception(reason),
-            do: ErrorTracker.report(reason, [], %{op: inspect(op, limit: 20)})
-
-          :ok = Journal.bury(id, message, state.journal)
-          {:cont, {:ok, n}}
+          case retry_or_bury(entry, reason, journal_id, state) do
+            {:error, reason} -> {:halt, fail(reason)}
+            applied -> {:cont, {:ok, n + applied}}
+          end
       end
     end)
+  end
+
+  # A write for a channel deleted meanwhile (its processes' last chat, a
+  # poll that was under way) is dropped, not set aside: there is nothing
+  # left to write it to. What it holds for other channels is still written.
+  defp retry_or_bury({id, epoch, made_at, op} = entry, reason, journal_id, state) do
+    case safe_prune(op) do
+      nil ->
+        Logger.info("collector write #{id} was for a deleted channel, dropped")
+        :ok = Journal.delete_through(id, state.journal)
+        0
+
+      ^op ->
+        bury(entry, reason, state)
+
+      pruned ->
+        case commit([{id, epoch, made_at, pruned}], journal_id, state) do
+          {:ok, applied, dropped} ->
+            {:ok, _} = finish([entry], applied, dropped, state)
+            1
+
+          {:error, :transient, reason} ->
+            {:error, reason}
+
+          {:error, :permanent, reason} ->
+            bury(entry, reason, state)
+        end
+    end
+  end
+
+  defp safe_prune(op) do
+    Ops.without_deleted_channels(op)
+  rescue
+    _ -> op
+  end
+
+  defp bury({id, _, _, op}, reason, state) do
+    message = Exception.format_banner(:error, reason) |> String.slice(0, 2_000)
+    Logger.error("collector write #{id} can't be applied, set aside: #{message}")
+
+    if is_exception(reason),
+      do: ErrorTracker.report(reason, [], %{op: inspect(op, limit: 20)})
+
+    :ok = Journal.bury(id, message, state.journal)
+    0
   end
 
   defp commit(entries, journal_id, state) do
