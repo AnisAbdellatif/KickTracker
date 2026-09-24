@@ -47,6 +47,12 @@ defmodule KickTracker.Events.Consumer do
   # RabbitMQ, with the consume-only user. Failed messages are requeued by
   # default; the ones that can never succeed are rejected explicitly.
   defp producer do
+    # The AMQP URI parser turns mechanism names into atoms with
+    # `list_to_existing_atom`, and `amqplain` only exists once this module
+    # is loaded. A release loads everything at boot; `mix run` loads lazily,
+    # and the consumer then refuses a perfectly good URL.
+    Code.ensure_loaded!(:amqp_auth_mechanisms)
+
     {BroadwayRabbitMQ.Producer,
      queue: Application.get_env(:kick_tracker, :amqp_queue, "kick_tracker.events"),
      connection: Application.fetch_env!(:kick_tracker, :amqp_url),

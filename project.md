@@ -1537,6 +1537,18 @@ Tests are written alongside every step (§17.3), not as a step of their own.
     (`mix kick_tracker.bulk`, dev only; 14 days of the default scenario,
     2.4M chat messages, in about a minute).
 
+**Phase 2 built** (2026-09-24). A live run with every piece as its own
+process (fake Kick → receiver → RabbitMQ → collector → TimescaleDB): a
+stream's start and metadata events opened it and logged its first values,
+samples every 60s carried the category, chat minutes were attributed to
+it, and follows, a gift and Kicks became rows. With the collector stopped,
+a whole stream (start, events, end) was sent: the events waited in
+RabbitMQ and were all handled after the restart, the stream recorded with
+Kick's exact end, nothing dead-lettered. The run found two bugs the tests
+couldn't: the consumer refused its AMQP URL under `mix run` (a lazily
+loaded module), and a fresh collector waited up to 15 minutes before
+subscribing to webhooks.
+
 **Phase 3: admin core**
 
 14. Auth, add / pause channels, health page.

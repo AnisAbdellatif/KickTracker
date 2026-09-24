@@ -32,6 +32,9 @@ defmodule KickTracker.Tracking.Manager do
   @impl true
   def handle_continue(:sync, state) do
     do_sync()
+    # At boot too, so a fresh collector gets its webhooks at once rather
+    # than at the next scheduled sync.
+    state.on_change.()
     Process.send_after(self(), :resync, @resync_ms)
     {:noreply, state}
   end
