@@ -4,4 +4,5 @@
 creation_rules:
   - path_regex: deploy/secrets/.*\.env$
     age: >-
-      age1replacewiththeserverspublickeyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      age1z5ksk2wllnxp37pvkqdwf5m0knyvwadfmgx7x74w3dnhswjywgqq6ahcdu,
+      age1wudzcw33c8d33v32wn9zgcx2ejn6nc5q5a7u8ax9skrmxafw6p9qnhqhkf
