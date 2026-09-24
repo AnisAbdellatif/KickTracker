@@ -11,7 +11,12 @@ defmodule Sim.Recorder.Pusher do
 
   alias Sim.Recorder.Store
 
-  @type opts :: [run: Path.t(), name: String.t(), channels: [String.t()], deadline_ms: integer()]
+  @type opts :: [
+          run: Path.t(),
+          name: String.t(),
+          channels: [String.t()],
+          deadline_ms: integer()
+        ]
 
   @spec record(String.t(), opts()) :: {:ok, non_neg_integer()} | {:error, term()}
   def record(url, opts) do
@@ -50,14 +55,21 @@ defmodule Sim.Recorder.Pusher do
               Enum.reduce(upgrade, acc, fn
                 {:status, ^ref, status}, acc -> Map.put(acc, :status, status)
                 {:headers, ^ref, headers}, acc -> Map.put(acc, :headers, headers)
+                {:data, ^ref, data}, acc -> Map.update(acc, :data, [data], &[data | &1])
                 _, acc -> acc
               end)
+
+            # Bytes that came in the same read as the 101 response are emitted
+            # as data *before* :done. They're already websocket frames (Pusher
+            # sends connection_established immediately), so they're kept.
+            early_data =
+              acc |> Map.get(:data, []) |> Enum.reverse() |> Enum.map(&{:data, ref, &1})
 
             case rest do
               [{:done, ^ref} | leftover] ->
                 with {:ok, conn, websocket} <-
                        Mint.WebSocket.new(conn, ref, acc.status, acc.headers) do
-                  {:ok, conn, websocket, leftover}
+                  {:ok, conn, websocket, early_data ++ leftover}
                 end
 
               [] ->
