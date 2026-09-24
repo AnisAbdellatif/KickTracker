@@ -54,4 +54,37 @@ defmodule KickTracker.RoleTest do
 
   defp child_name({module, _opts}), do: module
   defp child_name(module) when is_atom(module), do: module
+
+  test "a shadow collector polls and chats, but takes no webhooks and runs only its own jobs" do
+    previous = Application.get_env(:kick_tracker, :collector, [])
+    on_exit(fn -> Application.put_env(:kick_tracker, :collector, previous) end)
+
+    ids = fn ->
+      {:ok, {_, specs}} = KickTracker.Collector.Collection.init([])
+      Enum.map(specs, & &1.id)
+    end
+
+    assert KickTracker.Events.Consumer in ids.()
+
+    Application.put_env(:kick_tracker, :collector, Keyword.put(previous, :mode, :shadow))
+    refute KickTracker.Events.Consumer in ids.()
+
+    oban =
+      [:collector]
+      |> KickTracker.Application.children()
+      |> Enum.find_value(fn
+        {Oban, config} -> config
+        _ -> nil
+      end)
+
+    crontab =
+      get_in(oban, [:plugins])
+      |> Enum.find_value(fn
+        {Oban.Plugins.Cron, o} -> o[:crontab]
+        _ -> nil
+      end)
+
+    workers = Enum.map(crontab, &elem(&1, 1)) |> Enum.uniq()
+    assert workers == [KickTracker.Workers.ShadowSync]
+  end
 end

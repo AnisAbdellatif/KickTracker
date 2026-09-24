@@ -649,15 +649,22 @@ depends on. The web role can restart freely.
   lease is a Postgres advisory lock held on the Leader's own connection,
   plus a `collector_lease` row with an **epoch** raised at every change of
   holder; `collector_terms` records each holder's term and why it ended.
-- **A standby takes over** at once when the leader released the lease on a
-  clean stop (a deploy: about a second of handoff), or when the leader's
-  heartbeat is older than 15s **and** the lock has been seen free for 5s
-  (a crash: about 20s). A collector restarting takes its own lease back at
-  once. Rules in `Collector.Lease`, pure.
-- **The leader** heartbeats every 3s. Superseded, or finding the lock
+- **A standby takes over** (it checks every second; rules in
+  `Collector.Lease`, pure, on the database's clock):
+  - at once when the leader released the lease on a clean stop (a deploy);
+  - at once when the lock is free and the database did **not** restart
+    since the leader's last heartbeat: the leader's session ended, it
+    crashed or was killed (about a second);
+  - when the leader holds the lock but has been silent for 6s (frozen, or
+    cut off with a half-open connection that TCP could take hours to
+    notice): the standby ends the leader's session, then takes over (about
+    7s);
+  - after a database restart, only if the leader hasn't taken its lock back
+    within 10s.
+  A collector restarting takes its own lease back at once.
+- **The leader** heartbeats every second. Superseded, or finding the lock
   taken by another node, it stops collecting at once. The database merely
-  unreachable, it keeps collecting into its journal: no other node can
-  take over meanwhile.
+  unreachable, it keeps collecting into its journal.
 - **Fencing**: every write carries the epoch it was made under; a write
   made by an older holder after a newer one started is dropped by the
   Writer, so a moment of overlap can't double chat counts.
@@ -673,9 +680,8 @@ depends on. The web role can restart freely.
   one leads) and writes a `collector_nodes` row every 10s, which the health
   page and the alerts read from the web role (§18.2).
 
-Scope: this protects collection on one VPS. If the VPS itself goes, the
-database goes with it; collectors on a second machine would need a
-replicated database first (stage 3, §15.2).
+Scope: this protects collection on one VPS. For the VPS itself going,
+there is the shadow collector on another machine (§10.5).
 
 ### 10.2 Writes go through a local journal
 
@@ -798,6 +804,42 @@ old one and retries every minute.
 
 **Adding or removing a channel** = insert or deactivate the row, start or stop
 its `ChannelSup`, sync its webhook subscriptions. No redeploy.
+
+### 10.5 The shadow collector
+
+An independent collector on a second machine (the stage 2 one, §15.2),
+with **its own database**, collecting the same channels **all the time**:
+viewers, subscriber and follower totals, chat. It shares nothing with the
+primary side but a private network link, so it keeps collecting through
+anything that stops the main VPS, and there is no takeover: it was
+already running.
+
+- **Mode**: the same image, `COLLECTOR_MODE=shadow`, two collectors with
+  their own lease like the primary side's. No webhook consumer and no
+  subscription management (webhooks are the receivers', and a backup
+  receiver on the same machine spools them, §15.2); no site; its own jobs
+  only.
+- **Channel list and removals** come from the primary's database every
+  minute (`Workers.ShadowSync`, a read-only user). When it can't be read,
+  the shadow keeps its last list, keeps collecting, and notifies after 5
+  minutes (the primary's alerts may be down with it). Removal requests are
+  carried out on the shadow's copy too.
+- **Backfill**: every 5 minutes the primary side reads the shadow's
+  database (`Workers.Backfill`, a read-only user) and, per channel and
+  source over the last 7 days, copies the shadow's rows for the ranges
+  the shadow covered and it didn't (`Collector.BackfillPlan`, pure). Rows
+  are applied as `Collector.Ops`, so what the primary has always wins and a
+  second pass changes nothing; chat is copied only for whole minutes the
+  primary has nothing for. Each filled range is recorded in `coverage`
+  with `collector = 'shadow'`; rollups are rebuilt over it.
+- **Health**: the backfill records the shadow's leader heartbeat as the
+  `collector_nodes` row `shadow`; an alert fires when it hasn't been seen
+  collecting for 15 minutes. It has its own Kick app (token and rate
+  limits of its own) and its own `HEARTBEAT_URL`.
+- **Cost**: Kick sees two collectors: one more `/livestreams` request per
+  50 channels a minute, one more chat connection per channel.
+- It keeps 30 days (the primary backfills from the last 7) and isn't
+  backed up.
 
 **Growing past one collecting node:** partition the channels between
 collectors (a lease per partition), each with its own journal. Not needed
@@ -1342,7 +1384,8 @@ written by the collector, with the deletion itself.
 |---|---|---|---|
 | `receiver` ×2 | `ingress/receiver` | Rarely, one at a time | Nothing, while the other answers |
 | `rabbitmq` | official | Rarely | Receivers spool to disk; nothing lost |
-| `collector-a`, `collector-b` | `app`, `ROLE=collector` | When tracking changes, standby first | One down: the other collects (about a second after a clean stop, ~20s after a crash). Both down: events wait in the queue; polls and chat are gaps, recorded in `coverage` and in `collector_terms` |
+| `collector-a`, `collector-b` | `app`, `ROLE=collector` | When tracking changes, standby first | One down: the other collects (within a second after a clean stop or a crash, ~7s if the leader freezes). Both down: events wait in the queue; polls and chat come from the shadow's backfill (§10.5) |
+| shadow (second VPS) | `app`, `COLLECTOR_MODE=shadow`, own database | With the collectors | Nothing, while the primary side collects; the main VPS down, it is what still collects |
 | `web` | `app`, `ROLE=web` | Often | Site down; collection unaffected |
 | `db` | TimescaleDB | Rarely | Collection continues into the leader's journal and is written when it is back; the consumer stops acking, events wait in the queue; the site is down |
 | `caddy` | official | Rarely | Ingress unreachable (see stage 2) |
@@ -1365,7 +1408,9 @@ Same receiver image on another provider or region, with its own spool,
 publishing to RabbitMQ over a private network (WireGuard or Tailscale). The
 webhook hostname is routed by **Cloudflare Load Balancing** (health-checked
 failover between the two machines). Covers the main VPS or Caddy going down:
-events are received and spooled on the backup until RabbitMQ is back.
+events are received and spooled on the backup until RabbitMQ is back. The
+same machine runs the **shadow collector** (§10.5), so polls and chat are
+collected through the outage too and backfilled after it.
 
 **Stage 3 (if ever needed): a redundant queue.**
 A 3-node RabbitMQ cluster (quorum queues replicate across nodes), or managed
@@ -1792,6 +1837,19 @@ a collector without web secrets, reported healthy, and stopped cleanly in
 a second. The run also showed the old failure for real: before the
 change, a code reload crash-looped the collector's Manager until the whole
 node stopped.
+
+**Fast takeover and the shadow collector built** (2026-09-24, §10.1,
+§10.5). A standby now tells a crashed leader (its session ended, the
+database didn't restart) from a database restart, and ends the session of
+a leader that holds the lock but has gone silent. Tried on the same local
+run: a `kill -9` of the leader was taken over in 0.6s (16s before); with
+both primary collectors stopped for three minutes, a shadow node with its
+own database kept collecting, and the next backfill filled the outage for
+all 24 channels (viewers and chat). The run also found two bugs the tests
+then covered: a leader process restarting left the previous collection
+tree running and couldn't start its own, and lock checks on `pg_locks`
+weren't scoped to our database, so a shadow on the same server ended the
+primary leader's session every few seconds.
 
 **Later** (not planned yet): history before tracking from v2's VOD list
 (marked as imported), streamer accounts via Kick login with private stats and

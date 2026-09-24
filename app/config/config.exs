@@ -31,7 +31,9 @@ config :kick_tracker, Oban,
        {"*/5 * * * *", KickTracker.Workers.ProcessEvents},
        {"*/5 * * * *", KickTracker.Workers.Rollups},
        {"17 3 * * *", KickTracker.Workers.Rollups, args: %{"hours" => 48}},
-       {"42 4 * * *", KickTracker.Workers.Transfer, args: %{"kind" => "prune"}}
+       {"42 4 * * *", KickTracker.Workers.Transfer, args: %{"kind" => "prune"}},
+       # Fills our gaps from the shadow collector, when one is configured.
+       {"*/5 * * * *", KickTracker.Workers.Backfill}
      ]}
   ]
 

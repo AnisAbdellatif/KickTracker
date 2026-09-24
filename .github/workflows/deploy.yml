@@ -4,7 +4,9 @@
 #
 # Needs the repository secrets DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY and
 # DEPLOY_KNOWN_HOSTS (the server's host key line), and the stack in
-# /srv/kick_tracker/deploy on the server (deploy/README.md).
+# /srv/kick_tracker/deploy on the server (deploy/README.md). `shadow`
+# deploys the shadow collector (compose.shadow.yml) to DEPLOY_SHADOW_HOST
+# (whose host key must be in DEPLOY_KNOWN_HOSTS too).
 name: Deploy
 
 on:
@@ -14,7 +16,7 @@ on:
         description: What to deploy
         required: true
         type: choice
-        options: [web, collector, receivers, migrate-only]
+        options: [web, collector, receivers, migrate-only, shadow]
       tag:
         description: Image tag (a commit sha from main, or latest)
         required: true
@@ -39,7 +41,7 @@ jobs:
         env:
           ROLE: ${{ inputs.role }}
           TAG: ${{ inputs.tag }}
-          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          TARGET: ${{ secrets.DEPLOY_USER }}@${{ inputs.role == 'shadow' && secrets.DEPLOY_SHADOW_HOST || secrets.DEPLOY_HOST }}
         run: |
           prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
           ssh "$TARGET" ROLE="$ROLE" APP_IMAGE="$prefix-app:$TAG" RECEIVER_IMAGE="$prefix-receiver:$TAG" 'bash -s' <<'REMOTE'
@@ -47,15 +49,19 @@ jobs:
           cd /srv/kick_tracker && git pull --ff-only
           cd deploy
           touch .env
+          compose_file=compose.single.yml
+          [ "$ROLE" = shadow ] && compose_file=compose.shadow.yml
           # Images are pinned in deploy/.env, so a plain `docker compose up -d`
           # never swaps one by accident (compose.single.yml).
           pin() { grep -v "^$1=" .env > .env.new || true; echo "$1=$2" >> .env.new; mv .env.new .env; }
           # Compose needs both pins for any command; a first deploy sets
           # whichever is missing to this tag.
-          grep -q '^APP_IMAGE=' .env || pin APP_IMAGE "$APP_IMAGE"
-          grep -q '^COLLECTOR_IMAGE=' .env || pin COLLECTOR_IMAGE "$APP_IMAGE"
+          if [ "$ROLE" != shadow ]; then
+            grep -q '^APP_IMAGE=' .env || pin APP_IMAGE "$APP_IMAGE"
+            grep -q '^COLLECTOR_IMAGE=' .env || pin COLLECTOR_IMAGE "$APP_IMAGE"
+          fi
           export RECEIVER_IMAGE
-          dc() { docker compose -f compose.single.yml "$@"; }
+          dc() { docker compose -f "$compose_file" "$@"; }
           healthy() {
             for _ in $(seq 1 60); do
               [ "$(docker inspect -f '{{.State.Health.Status}}' "$(dc ps -q "$1")")" = healthy ] && return 0
@@ -91,6 +97,19 @@ jobs:
               # The standby first; then the leader, whose clean stop hands
               # collection to the updated standby within a second.
               pin COLLECTOR_IMAGE "$APP_IMAGE"
+              dc pull collector-a collector-b
+              first=collector-b; second=collector-a
+              [ "$(leader)" = collector-b ] && { first=collector-a; second=collector-b; }
+              dc up -d --no-deps "$first"
+              healthy "$first"
+              dc up -d --no-deps "$second"
+              healthy "$second"
+              ;;
+            shadow)
+              # The same order on the shadow machine: its standby first.
+              pin SHADOW_IMAGE "$APP_IMAGE"
+              dc pull migrate
+              dc run --rm migrate
               dc pull collector-a collector-b
               first=collector-b; second=collector-a
               [ "$(leader)" = collector-b ] && { first=collector-a; second=collector-b; }

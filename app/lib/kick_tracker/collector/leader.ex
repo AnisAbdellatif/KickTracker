@@ -7,8 +7,10 @@ defmodule KickTracker.Collector.Leader do
   It holds the lease on a connection of its own (not the Repo's pool), as
   a Postgres advisory lock plus the `collector_lease` row:
 
-    * **standing by**, it checks every second whether it may take over;
-    * **leading**, it heartbeats every 3s and checks it still holds the
+    * **standing by**, it checks every second whether it may take over:
+      within a second or two of the leader crashing, and within about 7s
+      of it freezing or being cut off (it ends the silent leader's session);
+    * **leading**, it heartbeats every second and checks it still holds the
       lock. Superseded (the epoch moved on) or having lost the lock to
       another node, it stops collecting at once. The database merely
       unreachable, it keeps collecting: the journal holds the writes, and
@@ -56,9 +58,11 @@ defmodule KickTracker.Collector.Leader do
   def init(opts) do
     Process.flag(:trap_exit, true)
     lease = Keyword.get(opts, :lease, Collector.lease_name())
-    {:ok, conn} = Postgrex.start_link(conn_opts())
+    conn_opts = Keyword.get(opts, :conn_opts, conn_opts())
+    {:ok, conn} = Postgrex.start_link(conn_opts)
 
     state = %{
+      conn_opts: conn_opts,
       me: Keyword.get(opts, :id, Collector.id()),
       lease: lease,
       key: lock_key(lease),
@@ -71,18 +75,19 @@ defmodule KickTracker.Collector.Leader do
       collection_started: nil,
       restart_ms: 1_000,
       standby_ms: Keyword.get(opts, :standby_ms, 1_000),
-      leader_ms: Keyword.get(opts, :leader_ms, 3_000),
+      leader_ms: Keyword.get(opts, :leader_ms, 1_000),
+      limits: Keyword.get(opts, :limits, %{}),
       auto: Keyword.get(opts, :auto, true),
       publish: Keyword.get(opts, :publish, true),
-      hooks: %{
-        start: Keyword.get(opts, :start, &start_collection/0),
-        stop: Keyword.get(opts, :stop, &stop_collection/1),
-        elected: Keyword.get(opts, :elected, &elected/1),
-        queues: Keyword.get(opts, :queues, &queues/1),
-        healthy?: Keyword.get(opts, :healthy?, &collecting?/1)
-      }
+      # Tests replace these; the defaults are plain calls (`hook/3`), so a
+      # code reload never leaves a stale function in the state.
+      hooks: Map.new(~w(start stop elected queues healthy?)a, &{&1, Keyword.get(opts, &1)})
     }
 
+    # A collection tree left by an earlier incarnation of this process (it
+    # crashed without stopping it) must not run on unsupervised: stopped
+    # here, and started again only if this node leads.
+    if state.hooks.start == nil, do: stop_orphans()
     if state.publish, do: Collector.put_leadership(false, nil)
     Status.merge(:leader, %{role: :standby, since: state.since, id: state.me})
     if state.auto, do: send(self(), :tick)
@@ -121,7 +126,7 @@ defmodule KickTracker.Collector.Leader do
 
   def handle_info({:EXIT, conn, reason}, %{conn: conn} = state) do
     Logger.warning("lease connection exited (#{inspect(reason, limit: 5)}); reconnecting")
-    {:ok, conn} = Postgrex.start_link(conn_opts())
+    {:ok, conn} = Postgrex.start_link(state.conn_opts)
     {:noreply, %{state | conn: conn}}
   end
 
@@ -154,15 +159,30 @@ defmodule KickTracker.Collector.Leader do
   defp check(%{role: :standby} = state) do
     now = DateTime.utc_now()
     Status.put(:leader_loop_at, now)
-    state.hooks.queues.(:pause)
+    hook(state, :queues, [:pause])
 
-    with {:ok, lease} <- read_lease(state),
+    with {:ok, lease, db} <- read_lease(state),
          {:ok, free?} <- lock_free?(state) do
-      state = %{state | free_since: if(free?, do: state.free_since || now)}
+      free_since = if free?, do: state.free_since || db.now
+      state = %{state | free_since: free_since}
 
-      if free? and Lease.may_acquire?(lease, state.me, now, state.free_since),
-        do: try_acquire(state, lease),
-        else: state
+      obs = %{
+        now: db.now,
+        lock_free?: free?,
+        free_since: free_since,
+        db_started_at: db.started_at
+      }
+
+      case Lease.decide(lease, state.me, obs, state.limits) do
+        :acquire ->
+          try_acquire(state, lease, obs)
+
+        :terminate ->
+          end_silent_session(state, lease)
+
+        :wait ->
+          state
+      end
     else
       {:error, _} -> %{state | free_since: nil}
     end
@@ -214,15 +234,32 @@ defmodule KickTracker.Collector.Leader do
     if state.role == :leader, do: watchdog(state, now), else: state
   end
 
+  # The holder holds the lock but has stopped heartbeating: frozen, or cut
+  # off with a half-open connection. Its session is ended so the lock
+  # frees; the holder, if it comes back, finds itself superseded.
+  defp end_silent_session(state, lease) do
+    Logger.warning(
+      "collector #{state.me}: #{lease.holder} holds the lease but is silent; ending its session"
+    )
+
+    q(
+      state,
+      "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) AND classid = $1::int::oid AND objid = $2::int::oid AND objsubid = 2 AND granted",
+      [@lock_class, state.key]
+    )
+
+    state
+  end
+
   defp verified(state, now) do
     Status.merge(:leader, %{verified: true, verified_at: now})
-    state.hooks.queues.(:run)
+    hook(state, :queues, [:run])
     state
   end
 
   defp watchdog(state, now) do
     if (state.collection && DateTime.diff(now, state.collection_started) > @watchdog_s) and
-         not state.hooks.healthy?.(now) do
+         not hook(state, :healthy?, [now]) do
       Logger.error(
         "collector #{state.me}: no viewers cycle for #{@watchdog_s}s, restarting collection"
       )
@@ -236,14 +273,19 @@ defmodule KickTracker.Collector.Leader do
 
   # --- taking and giving up the lease -----------------------------------------------
 
-  defp try_acquire(state, lease) do
+  defp try_acquire(state, lease, obs) do
     case q(state, "SELECT pg_try_advisory_lock($1::int, $2::int)", [@lock_class, state.key]) do
       {:ok, %{rows: [[true]]}} ->
+        silent_s = lease.heartbeat_at && DateTime.diff(obs.now, lease.heartbeat_at)
+        limits = Map.merge(Lease.defaults(), state.limits)
+
         reason =
           cond do
+            lease.holder == nil -> nil
             lease.holder == state.me -> "restarted"
             lease.released_at -> "released"
-            true -> "taken over"
+            silent_s && silent_s > limits.unresponsive_s -> "unresponsive"
+            true -> "stopped"
           end
 
         result =
@@ -294,15 +336,15 @@ defmodule KickTracker.Collector.Leader do
     Logger.warning("collector #{state.me}: collecting (epoch #{epoch})")
     if state.publish, do: Collector.put_leadership(true, epoch)
     Status.merge(:leader, %{role: :leader, epoch: epoch, since: now, verified: true})
-    state.hooks.elected.(epoch)
-    state.hooks.queues.(:run)
+    hook(state, :elected, [epoch])
+    hook(state, :queues, [:run])
     begin_collection(%{state | role: :leader, epoch: epoch, since: now, free_since: nil})
   end
 
   defp step_down(state, why) do
     Logger.warning("collector #{state.me}: no longer collecting (#{why})")
     state = stop(state)
-    state.hooks.queues.(:pause)
+    hook(state, :queues, [:pause])
     q(state, "SELECT pg_advisory_unlock($1::int, $2::int)", [@lock_class, state.key])
     if state.publish, do: Collector.put_leadership(false, nil)
     now = DateTime.utc_now()
@@ -311,7 +353,7 @@ defmodule KickTracker.Collector.Leader do
   end
 
   defp begin_collection(state) do
-    case state.hooks.start.() do
+    case hook(state, :start, []) do
       {:ok, pid} ->
         Process.monitor(pid)
         %{state | collection: pid, collection_started: DateTime.utc_now()}
@@ -326,7 +368,7 @@ defmodule KickTracker.Collector.Leader do
   defp stop(%{collection: nil} = state), do: state
 
   defp stop(state) do
-    state.hooks.stop.(state.collection)
+    hook(state, :stop, [state.collection])
     %{state | collection: nil}
   end
 
@@ -353,23 +395,27 @@ defmodule KickTracker.Collector.Leader do
            q(state, "INSERT INTO collector_lease (name) VALUES ($1) ON CONFLICT DO NOTHING", [
              state.lease
            ]),
-         {:ok, %{rows: [[epoch, holder, heartbeat_at, released_at]]}} <-
+         {:ok, %{rows: [[epoch, holder, heartbeat_at, released_at, now, started_at]]}} <-
            q(
              state,
-             "SELECT epoch, holder, heartbeat_at, released_at FROM collector_lease WHERE name = $1",
+             "SELECT epoch, holder, heartbeat_at, released_at, now(), pg_postmaster_start_time() FROM collector_lease WHERE name = $1",
              [state.lease]
            ) do
-      {:ok, %{epoch: epoch, holder: holder, heartbeat_at: heartbeat_at, released_at: released_at}}
+      {:ok, %{epoch: epoch, holder: holder, heartbeat_at: heartbeat_at, released_at: released_at},
+       %{now: now, started_at: started_at}}
     else
       {:ok, _} -> {:error, :no_lease}
       error -> error
     end
   end
 
+  # Advisory locks belong to a database, but pg_locks lists the whole
+  # server's: every query on it is scoped to ours, or a deployment sharing
+  # the server (a shadow, a staging copy) would see, and end, our lock.
   defp lock_free?(state) do
     case q(
            state,
-           "SELECT NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND classid = $1::int::oid AND objid = $2::int::oid AND objsubid = 2 AND granted)",
+           "SELECT NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) AND classid = $1::int::oid AND objid = $2::int::oid AND objsubid = 2 AND granted)",
            [@lock_class, state.key]
          ) do
       {:ok, %{rows: [[free?]]}} -> {:ok, free?}
@@ -399,7 +445,31 @@ defmodule KickTracker.Collector.Leader do
     )
   end
 
-  # --- default hooks -----------------------------------------------------------------
+  # --- hooks -----------------------------------------------------------------------
+
+  defp hook(state, name, args) do
+    case state.hooks[name] do
+      nil -> apply(default_hook(name), args)
+      fun -> apply(fun, args)
+    end
+  end
+
+  defp default_hook(:start), do: &start_collection/0
+  defp default_hook(:stop), do: &stop_collection/1
+  defp default_hook(:elected), do: &elected/1
+  defp default_hook(:queues), do: &queues/1
+  defp default_hook(:healthy?), do: &collecting?/1
+
+  defp stop_orphans do
+    if Process.whereis(Collector.Slot) do
+      for {_, pid, _, _} <- DynamicSupervisor.which_children(Collector.Slot), is_pid(pid) do
+        Logger.warning("stopping a collection left by an earlier leader process")
+        DynamicSupervisor.terminate_child(Collector.Slot, pid)
+      end
+    end
+
+    :ok
+  end
 
   defp start_collection,
     do: DynamicSupervisor.start_child(Collector.Slot, {Collection, []})

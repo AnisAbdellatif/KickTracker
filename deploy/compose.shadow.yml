@@ -1,0 +1,60 @@
+# The shadow collector (project.md §10.5): on a second machine (the stage 2
+# one, beside the backup receiver), with its own database, collecting the
+# same channels as the primary side all the time. The primary side fills
+# its own gaps from this database (Workers.Backfill, SHADOW_DATABASE_URL);
+# this side copies the channel list and removals from the primary's
+# (MAIN_DATABASE_URL). Both over the private network (WireGuard or
+# Tailscale), with read-only users (shadow/readers.sql).
+#
+# No webhooks, no queue, no site: if the main VPS goes, this keeps
+# polling and chatting, and the primary side takes what it missed when
+# it is back. The image is pinned in deploy/.env (SHADOW_IMAGE).
+name: kicktracker-shadow
+
+x-collector: &collector
+  image: ${SHADOW_IMAGE:?pin SHADOW_IMAGE in deploy/.env (deploy/README.md)}
+  env_file: [secrets/shadow.env]
+  restart: always
+  stop_grace_period: 60s
+  depends_on:
+    db: {condition: service_healthy}
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg18
+    restart: unless-stopped
+    env_file: [secrets/shadow-db.env]
+    shm_size: 512m
+    volumes: [db:/var/lib/postgresql]
+    # The primary side's backfill reads here, over the private network only.
+    ports: ["${PRIVATE_IP:?set PRIVATE_IP in deploy/.env}:5433:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+
+  # Two, like the primary side: one collects, one stands by (§10.1), so
+  # updating the shadow never leaves it blind either.
+  collector-a:
+    <<: *collector
+    environment: {ROLE: collector, COLLECTOR_MODE: shadow, COLLECTOR_ID: shadow-a}
+    volumes: [journal-a:/journal]
+
+  collector-b:
+    <<: *collector
+    environment: {ROLE: collector, COLLECTOR_MODE: shadow, COLLECTOR_ID: shadow-b}
+    volumes: [journal-b:/journal]
+
+  #   docker compose -f compose.shadow.yml run --rm migrate
+  migrate:
+    <<: *collector
+    profiles: [tools]
+    restart: "no"
+    environment: {ROLE: collector, COLLECTOR_MODE: shadow}
+    command: ["/app/bin/migrate"]
+
+volumes:
+  db:
+  journal-a:
+  journal-b:

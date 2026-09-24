@@ -146,4 +146,21 @@ defmodule KickTracker.Alerts.RulesTest do
 
     assert keys(s) == ["journal_behind:a", "journal_buried:b"]
   end
+
+  test "the shadow: seen recently is fine; unseen for 15 minutes is an alert, apart from the collectors" do
+    ok = [
+      collector("a", state: "leader"),
+      collector("shadow", state: "shadow", heartbeat_at: ago(400))
+    ]
+
+    assert keys(snapshot([], collectors: ok)) == []
+
+    gone = [
+      collector("a", state: "leader"),
+      collector("shadow", state: "shadow", heartbeat_at: ago(1200))
+    ]
+
+    # A missing shadow is not a missing standby.
+    assert keys(snapshot([], collectors: gone)) == ["shadow_down"]
+  end
 end

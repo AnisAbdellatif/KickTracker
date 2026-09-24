@@ -4,22 +4,30 @@ defmodule KickTracker.Collector.Lease do
   carries the state and talks to the database.
 
   One collector holds the lease at a time, backed by a Postgres advisory
-  lock on its own connection. A standby takes it:
+  lock on its own connection, and heartbeats every second. What a standby
+  does (`decide/3`), from what it observes — all times are the
+  database's, so the machines' clocks don't matter:
 
-    * at once, when the holder released it on shutdown (a deploy);
-    * at once, if it is itself the last holder (its own restart);
-    * otherwise only when the holder's heartbeat is older than
-      `@stale_s` **and** the lock has been seen free for `@confirm_s`:
-      a holder whose database connection blipped gets it back first.
+    * the lease released on a clean stop (a deploy), unheld, or last held
+      by this node itself: **take it**;
+    * the lock free and the database **not** restarted since the holder's
+      last heartbeat: the holder's session ended (it crashed or was
+      killed), so **take it at once**;
+    * the lock free because the database restarted: give the holder
+      `grace_s` to reconnect and take its lock back, and take it only if
+      it doesn't (and the lock has been free for `confirm_s`);
+    * the lock held but the holder silent for `unresponsive_s` (frozen,
+      or cut off with its connection half-open, which TCP may take hours
+      to notice): **end the holder's session**, then take it;
+    * otherwise wait.
 
   Every change of holder raises the epoch. Writes carry the epoch they
   were made under, and a write made by an older holder after a newer one
-  took over is dropped (`stale?/3`): two collectors never both count the
-  same chat.
+  took over is dropped (`stale?/3`): a leader cut off but still
+  collecting can't double anything when it comes back.
   """
 
-  @stale_s 15
-  @confirm_s 5
+  @defaults %{unresponsive_s: 6, grace_s: 10, confirm_s: 3}
 
   @type lease :: %{
           epoch: non_neg_integer(),
@@ -27,25 +35,61 @@ defmodule KickTracker.Collector.Lease do
           heartbeat_at: DateTime.t() | nil,
           released_at: DateTime.t() | nil
         }
+  @type observation :: %{
+          now: DateTime.t(),
+          lock_free?: boolean(),
+          free_since: DateTime.t() | nil,
+          db_started_at: DateTime.t()
+        }
 
-  @doc "How old a holder's heartbeat must be before a standby may take over."
-  def stale_s, do: @stale_s
+  @doc "The thresholds, in seconds."
+  def defaults, do: @defaults
 
-  @doc """
-  Whether `me` may try to take the lease now. `free_since` is when the
-  lock was first seen free (nil while it is held).
-  """
-  @spec may_acquire?(lease | nil, String.t(), DateTime.t(), DateTime.t() | nil) :: boolean()
-  def may_acquire?(nil, _me, _now, _free_since), do: true
-  def may_acquire?(%{holder: nil}, _me, _now, _free_since), do: true
-  def may_acquire?(%{holder: me}, me, _now, _free_since), do: true
+  @doc "What a standby named `me` should do: `:acquire`, `:terminate` (the holder's session) or `:wait`."
+  @spec decide(lease() | nil, String.t(), observation(), map()) :: :acquire | :terminate | :wait
+  def decide(lease, me, obs, limits \\ @defaults) do
+    limits = Map.merge(@defaults, limits)
+    silent_s = lease && lease.heartbeat_at && DateTime.diff(obs.now, lease.heartbeat_at)
+    unresponsive? = silent_s == nil or silent_s > limits.unresponsive_s
 
-  def may_acquire?(lease, _me, now, free_since) do
-    released? = lease.released_at != nil
-    stale? = lease.heartbeat_at == nil or DateTime.diff(now, lease.heartbeat_at) > @stale_s
-    confirmed? = free_since != nil and DateTime.diff(now, free_since) >= @confirm_s
-    released? or (stale? and confirmed?)
+    cond do
+      nil_or_free_to_take?(lease, me) -> free_lease(obs, unresponsive?)
+      obs.lock_free? -> lock_free(lease, obs, silent_s, limits)
+      unresponsive? -> :terminate
+      true -> :wait
+    end
   end
+
+  # Nobody's, released, or our own: the lock decides. A lock still held by
+  # a session that stopped heartbeating (our own earlier one, say) is ended.
+  defp free_lease(%{lock_free?: true}, _unresponsive?), do: :acquire
+  defp free_lease(_obs, true), do: :terminate
+  defp free_lease(_obs, false), do: :wait
+
+  # The holder's lock is gone: its session ended (take over), unless the
+  # database restarted, in which case it gets time to take it back.
+  defp lock_free(lease, obs, silent_s, limits) do
+    confirmed? =
+      obs.free_since != nil and DateTime.diff(obs.now, obs.free_since) >= limits.confirm_s
+
+    cond do
+      ended_without_restart?(lease, obs) -> :acquire
+      confirmed? and (silent_s == nil or silent_s > limits.grace_s) -> :acquire
+      true -> :wait
+    end
+  end
+
+  defp nil_or_free_to_take?(nil, _me), do: true
+  defp nil_or_free_to_take?(%{holder: nil}, _me), do: true
+  defp nil_or_free_to_take?(%{holder: me}, me), do: true
+  defp nil_or_free_to_take?(%{released_at: released}, _me), do: released != nil
+
+  # The holder's lock went away while the database kept running: its
+  # session ended, it isn't coming back to it.
+  defp ended_without_restart?(%{heartbeat_at: nil}, _obs), do: true
+
+  defp ended_without_restart?(%{heartbeat_at: hb}, %{db_started_at: started}),
+    do: DateTime.before?(started, hb)
 
   @doc """
   Whether a write made under `epoch` at `made_at` must be dropped: a newer

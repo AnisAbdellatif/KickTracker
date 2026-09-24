@@ -56,7 +56,25 @@ defmodule KickTracker.Application do
 
   defp oban(roles) do
     config = Application.fetch_env!(:kick_tracker, Oban)
-    if :collector in roles, do: config, else: Keyword.merge(config, queues: false, plugins: false)
+
+    cond do
+      :collector not in roles -> Keyword.merge(config, queues: false, plugins: false)
+      KickTracker.Collector.mode() == :shadow -> Keyword.put(config, :plugins, shadow_plugins())
+      true -> config
+    end
+  end
+
+  # A shadow (§10.5) runs only its own jobs: copying the channel list and
+  # removals from the primary side, and pruning what it no longer needs.
+  defp shadow_plugins do
+    [
+      {Oban.Plugins.Pruner, max_age: 7 * 24 * 3600},
+      {Oban.Plugins.Cron,
+       crontab: [
+         {"* * * * *", KickTracker.Workers.ShadowSync},
+         {"33 3 * * *", KickTracker.Workers.ShadowSync, args: %{"kind" => "prune"}}
+       ]}
+    ]
   end
 
   # Collection (project.md §10.1): the journal, the leader election, and

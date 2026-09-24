@@ -15,6 +15,17 @@ config :kick_tracker, KickTracker.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
+# The other side of a primary / shadow pair (test/support/other_side.ex).
+config :kick_tracker, KickTracker.OtherRepo,
+  username: "postgres",
+  password: "postgres",
+  hostname: "localhost",
+  # deploy/compose.dev.yml publishes TimescaleDB here.
+  port: 55432,
+  database: "kick_tracker_other_test",
+  pool_size: System.schedulers_online() * 2,
+  priv: "priv/repo"
+
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
 config :kick_tracker, KickTrackerWeb.Endpoint,

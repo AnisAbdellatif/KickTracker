@@ -73,7 +73,13 @@ config :kick_tracker, :kick,
   # Optional: fetched from the API when unset.
   public_key: System.get_env("KICK_PUBLIC_KEY")
 
-config :kick_tracker, :amqp_url, setting.("AMQP_URL")
+# A shadow collector (§10.5) takes no webhooks: no queue to read.
+config :kick_tracker,
+       :amqp_url,
+       if(System.get_env("COLLECTOR_MODE") == "shadow",
+         do: System.get_env("AMQP_URL"),
+         else: setting.("AMQP_URL")
+       )
 
 # The collector (project.md §10.1): its name among the collectors, the
 # lease they share, its journal file, and its status port (loopback; the
@@ -98,6 +104,20 @@ config :kick_tracker, :collector,
        path ->
          path
      end),
+  # "primary" collects for this deployment; "shadow" is an independent
+  # collector on another machine with its own database (§10.5), which
+  # copies the channel list from MAIN_DATABASE_URL and whose data the
+  # primary side backfills from, over SHADOW_DATABASE_URL.
+  mode:
+    (case System.get_env("COLLECTOR_MODE", "primary") do
+       "primary" -> :primary
+       "shadow" -> :shadow
+       other -> raise "COLLECTOR_MODE must be primary or shadow, not #{inspect(other)}"
+     end),
+  main_database_url: System.get_env("MAIN_DATABASE_URL"),
+  shadow_database_url: System.get_env("SHADOW_DATABASE_URL"),
+  backfill_days: String.to_integer(System.get_env("BACKFILL_DAYS", "7")),
+  shadow_keep_days: String.to_integer(System.get_env("SHADOW_KEEP_DAYS", "30")),
   status_port:
     (case System.get_env("COLLECTOR_STATUS_PORT") do
        nil -> if config_env() == :test, do: nil, else: 4101

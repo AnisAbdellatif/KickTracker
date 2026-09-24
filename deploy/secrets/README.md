@@ -10,6 +10,7 @@ git-ignored and live only on the server.
 | `stack.env` | Caddy | `SITE_HOST`, `INGRESS_HOST`, `ACME_EMAIL`, `ADMIN_ALLOW` |
 | `app.env` | web, migrate | see `app.env.example` |
 | `collector.env` | both collectors | see `collector.env.example` (no web secrets) |
+| `shadow.env`, `shadow-db.env` | the shadow machine (`compose.shadow.yml`) | see their examples |
 | `receiver.env` | both receivers | see `receiver.env.example` |
 | `db.env` | the database and the backups | see `db.env.example` |
 | `rabbitmq.env` | `rabbitmq/make-prod-definitions.sh` | the five RabbitMQ passwords |

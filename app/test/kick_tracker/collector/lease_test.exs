@@ -9,39 +9,55 @@ defmodule KickTracker.Collector.LeaseTest do
   @now ~U[2026-09-01 12:00:00Z]
   defp ago(s), do: DateTime.add(@now, -s)
 
-  describe "may_acquire?/4" do
-    test "a lease nobody holds, or held by this node, is taken at once" do
-      assert Lease.may_acquire?(nil, "a", @now, nil)
+  describe "decide/3" do
+    # The database has been up for an hour.
+    defp obs(attrs),
+      do:
+        Map.merge(
+          %{now: @now, lock_free?: false, free_since: nil, db_started_at: ago(3600)},
+          Map.new(attrs)
+        )
 
-      assert Lease.may_acquire?(
-               %{holder: nil, heartbeat_at: nil, released_at: nil, epoch: 0},
-               "a",
-               @now,
-               nil
-             )
+    defp lease(attrs),
+      do:
+        Map.merge(
+          %{epoch: 3, holder: "b", heartbeat_at: ago(1), released_at: nil},
+          Map.new(attrs)
+        )
 
-      assert Lease.may_acquire?(
-               %{holder: "a", heartbeat_at: @now, released_at: nil, epoch: 3},
-               "a",
-               @now,
-               nil
-             )
+    test "a lease nobody holds, released, or last held by this node is taken when the lock is free" do
+      assert Lease.decide(nil, "a", obs(lock_free?: true)) == :acquire
+      assert Lease.decide(lease(holder: nil), "a", obs(lock_free?: true)) == :acquire
+      assert Lease.decide(lease(released_at: @now), "a", obs(lock_free?: true)) == :acquire
+      assert Lease.decide(lease(holder: "a"), "a", obs(lock_free?: true)) == :acquire
+      # Released but the lock not let go yet (a millisecond): wait.
+      assert Lease.decide(lease(released_at: @now), "a", obs([])) == :wait
     end
 
-    test "a released lease is taken at once (a deploy's handoff)" do
-      lease = %{holder: "b", heartbeat_at: @now, released_at: @now, epoch: 3}
-      assert Lease.may_acquire?(lease, "a", @now, @now)
+    test "a live leader keeps it" do
+      assert Lease.decide(lease([]), "a", obs([])) == :wait
     end
 
-    test "a live holder keeps it; a silent one loses it once the lock is confirmed free" do
-      live = %{holder: "b", heartbeat_at: ago(5), released_at: nil, epoch: 3}
-      refute Lease.may_acquire?(live, "a", @now, ago(60))
+    test "a crashed leader (its session ended, the database didn't restart) is replaced at once" do
+      assert Lease.decide(lease([]), "a", obs(lock_free?: true, free_since: @now)) == :acquire
+    end
 
-      silent = %{live | heartbeat_at: ago(Lease.stale_s() + 1)}
-      # Just seen free: the holder may only have blipped.
-      refute Lease.may_acquire?(silent, "a", @now, @now)
-      refute Lease.may_acquire?(silent, "a", @now, nil)
-      assert Lease.may_acquire?(silent, "a", @now, ago(5))
+    test "after a database restart the leader gets time to take its lock back" do
+      restarted = obs(lock_free?: true, free_since: @now, db_started_at: ago(0))
+      assert Lease.decide(lease(heartbeat_at: ago(2)), "a", restarted) == :wait
+
+      # Still silent past the grace, and the lock confirmed free: take it.
+      gone = %{restarted | free_since: ago(5)}
+      assert Lease.decide(lease(heartbeat_at: ago(11)), "a", gone) == :acquire
+      assert Lease.decide(lease(heartbeat_at: ago(11)), "a", restarted) == :wait
+    end
+
+    test "a leader holding the lock but silent (frozen, cut off) has its session ended" do
+      assert Lease.decide(lease(heartbeat_at: ago(7)), "a", obs([])) == :terminate
+      assert Lease.decide(lease(heartbeat_at: ago(3)), "a", obs([])) == :wait
+      # Thresholds can be set.
+      assert Lease.decide(lease(heartbeat_at: ago(3)), "a", obs([]), %{unresponsive_s: 2}) ==
+               :terminate
     end
   end
 

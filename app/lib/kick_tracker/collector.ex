@@ -17,6 +17,10 @@ defmodule KickTracker.Collector do
   @spec id() :: String.t()
   def id, do: config(:id) || hostname()
 
+  @doc "`:primary`, or `:shadow` for an independent collector on another machine (§10.5)."
+  @spec mode() :: :primary | :shadow
+  def mode, do: config(:mode, :primary)
+
   @doc "The lease all collectors of this deployment contend for."
   @spec lease_name() :: String.t()
   def lease_name, do: config(:lease, "collector")

@@ -19,6 +19,7 @@ defmodule KickTracker.Alerts.Rules do
   @coverage 0.95
   @drift_s 30
   @collector_gone_s 90
+  @shadow_gone_s 15 * 60
   @journal_behind_s 5 * 60
 
   @doc "The problems in a snapshot at `now`."
@@ -81,9 +82,27 @@ defmodule KickTracker.Alerts.Rules do
 
   # The collectors themselves (§10.1), from their heartbeat rows. Nothing
   # is said where no collector ever reported (a site-only deployment).
-  defp collector_problems([], _now), do: []
+  defp collector_problems(all, now) do
+    {shadows, collectors} = Enum.split_with(all, &(&1.state == "shadow"))
+    primary_problems(collectors, now) ++ shadow_problems(shadows, now)
+  end
 
-  defp collector_problems(collectors, now) do
+  # The shadow (§10.5), seen through the backfill: its last leader
+  # heartbeat, as last read by us. Stale means it stopped collecting or we
+  # can't reach it; either way, losing this machine would lose data.
+  defp shadow_problems(shadows, now) do
+    for s <- shadows, older_than?(s.heartbeat_at, now, @shadow_gone_s) do
+      %{
+        key: "shadow_down",
+        message:
+          "The shadow collector hasn't been seen collecting for #{ago(s.heartbeat_at, now)}: nothing covers an outage of this machine"
+      }
+    end
+  end
+
+  defp primary_problems([], _now), do: []
+
+  defp primary_problems(collectors, now) do
     alive = Enum.filter(collectors, &(not older_than?(&1.heartbeat_at, now, @collector_gone_s)))
     leading = Enum.filter(alive, &(&1.state == "leader"))
 

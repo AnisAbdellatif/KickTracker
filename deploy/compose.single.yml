@@ -86,6 +86,9 @@ services:
     env_file: [secrets/db.env]
     shm_size: 1g
     volumes: [db:/var/lib/postgresql]
+    # The shadow collector reads the channel list here (§10.5): publish on
+    # the private network's address only (loopback until one is set).
+    ports: ["${PRIVATE_IP:-127.0.0.1}:5432:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres}"]
       interval: 5s

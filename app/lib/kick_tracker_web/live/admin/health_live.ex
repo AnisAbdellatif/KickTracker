@@ -307,9 +307,10 @@ defmodule KickTrackerWeb.Admin.HealthLive do
     end
   end
 
-  # A collector unheard of for 90s is down, whatever its row says.
+  # A collector unheard of for 90s is down, whatever its row says (the
+  # shadow, read every 5 minutes, after 15).
   defp collector_role(c, now) do
-    if DateTime.diff(now, c.heartbeat_at) > 90,
+    if DateTime.diff(now, c.heartbeat_at) > if(c.state == "shadow", do: 900, else: 90),
       do: gettext("down"),
       else: role_label(c.state)
   end
@@ -317,14 +318,22 @@ defmodule KickTrackerWeb.Admin.HealthLive do
   defp role_label("leader"), do: gettext("collecting")
   defp role_label("standby"), do: gettext("standing by")
   defp role_label("stopped"), do: gettext("stopped")
+  defp role_label("shadow"), do: gettext("shadow, on another machine")
   defp role_label(other), do: other
 
   defp collector_badge(c, now) do
     cond do
-      DateTime.diff(now, c.heartbeat_at) > 90 -> "badge-error"
-      c.state == "leader" -> "badge-success"
-      c.state == "standby" -> "badge-info"
-      true -> "badge-ghost"
+      DateTime.diff(now, c.heartbeat_at) > if(c.state == "shadow", do: 900, else: 90) ->
+        "badge-error"
+
+      c.state == "leader" ->
+        "badge-success"
+
+      c.state == "standby" ->
+        "badge-info"
+
+      true ->
+        "badge-ghost"
     end
   end
 end

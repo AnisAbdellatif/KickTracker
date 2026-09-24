@@ -3,7 +3,7 @@ defmodule KickTracker.Collector.Collection do
   Everything that collects, started only on the leading collector
   (project.md §10.1): the channel processes (via the Manager), the polled
   sources, and the webhook consumer (last, so the channel processes it
-  hands events to are running).
+  hands events to are running; not on a shadow, §10.5).
 
   If this tree gives up (too many crashes), `Collector.Leader` restarts it
   after a backoff: collection problems never take the node down.
@@ -28,14 +28,33 @@ defmodule KickTracker.Collector.Collection do
 
   @impl true
   def init(opts) do
-    # A node that also serves the site already runs one.
+    # A shadow (§10.5) polls and chats but takes no webhooks and manages no
+    # subscriptions: those are the primary side's.
+    shadow? = KickTracker.Collector.mode() == :shadow
+
+    # A node that also serves the site already runs a token.
+    token =
+      if GenServer.whereis(KickTracker.Kick.Token), do: [], else: [KickTracker.Kick.Token]
+
+    manager =
+      if shadow?,
+        do: {KickTracker.Tracking.Manager, on_change: fn -> :ok end},
+        else: KickTracker.Tracking.Manager
+
+    sources =
+      for source <- Keyword.get(opts, :sources, [Viewers, Subscribers, Followers]),
+          do: {SourceRunner, source}
+
+    consumer =
+      if Keyword.get(opts, :consumer, not shadow?), do: [KickTracker.Events.Consumer], else: []
+
     children =
       [
         {Registry, keys: :unique, name: KickTracker.Tracking.registry()},
         {Task.Supervisor, name: KickTracker.Collector.Tasks},
         KickTracker.Kick.PublicKey
       ] ++
-        if(GenServer.whereis(KickTracker.Kick.Token), do: [], else: [KickTracker.Kick.Token]) ++
+        token ++
         [
           Supervisor.child_spec(
             {DynamicSupervisor,
@@ -45,13 +64,8 @@ defmodule KickTracker.Collector.Collection do
              max_seconds: 60},
             shutdown: 20_000
           ),
-          KickTracker.Tracking.Manager
-        ] ++
-        for(
-          source <- Keyword.get(opts, :sources, [Viewers, Subscribers, Followers]),
-          do: {SourceRunner, source}
-        ) ++
-        if(Keyword.get(opts, :consumer, true), do: [KickTracker.Events.Consumer], else: [])
+          manager
+        ] ++ sources ++ consumer
 
     Supervisor.init(children, strategy: :one_for_one, max_restarts: 30, max_seconds: 60)
   end

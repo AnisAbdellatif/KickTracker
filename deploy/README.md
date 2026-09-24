@@ -8,6 +8,8 @@ production.
 |---|---|
 | `compose.single.yml` | Stage 1: the whole stack on one VPS |
 | `compose.backup-receiver.yml` | Stage 2: a backup receiver on a second VPS |
+| `compose.shadow.yml` | Stage 2: the shadow collector on the second VPS (§10.5) |
+| `shadow/readers.sql` | Read-only users for the primary / shadow pair |
 | `Caddyfile` | HTTPS, the admin allowlist, the receivers' failover |
 | `db/` | TimescaleDB with WAL-G (continuous backups) |
 | `backup/` | Base backups and the scripted restore test |
@@ -73,6 +75,40 @@ Receivers, one at a time; the other keeps answering Kick:
 
     docker compose -f compose.single.yml up -d receiver-1
     docker compose -f compose.single.yml up -d receiver-2
+
+## The shadow collector (§10.5)
+
+An independent collector on a second machine (the stage 2 one), with its
+own database, collecting the same channels all the time. When the main VPS
+is down, it keeps polling and chatting; when the main VPS is back, the
+primary side fills what it missed from the shadow's database, every 5
+minutes, for the last `BACKFILL_DAYS` (7).
+
+1. Link the two machines privately (WireGuard or Tailscale) and set
+   `PRIVATE_IP` in each `deploy/.env` to that machine's private address:
+   each database is then published on it (main on 5432, shadow on 5433),
+   and on nothing public.
+2. Register a second app on kick.com for the shadow (its own token and rate
+   limits).
+3. On the shadow machine: `secrets/shadow.env` and `secrets/shadow-db.env`
+   from their examples, `SHADOW_IMAGE` pinned in `deploy/.env`, then
+
+       docker compose -f compose.shadow.yml up -d db
+       docker compose -f compose.shadow.yml run --rm migrate
+       docker compose -f compose.shadow.yml up -d
+
+4. Create the read-only users (`shadow/readers.sql`): `shadow_reader` on
+   the main database, `backfill_reader` on the shadow's. Set
+   `MAIN_DATABASE_URL` in `shadow.env` and `SHADOW_DATABASE_URL` in
+   `collector.env`, and redeploy the collectors.
+5. Set the shadow's own `HEARTBEAT_URL`, and alerts (it tells you when it
+   can't reach the main VPS; the main side's alerts may be down with it).
+
+Deploy it with the Deploy workflow's `shadow` target (standby first, like
+the main collectors). The health page shows it as "shadow, on another
+machine", and an alert fires when it hasn't been seen collecting for 15
+minutes. It keeps `SHADOW_KEEP_DAYS` (30) of data and isn't backed up: its
+data only matters until the main side has filled its gaps.
 
 ## Backups (§18.1)
 

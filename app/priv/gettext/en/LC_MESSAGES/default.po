@@ -2406,12 +2406,12 @@ msgstr ""
 msgid "Writes waiting"
 msgstr ""
 
-#: lib/kick_tracker_web/live/admin/health_live.ex:317
+#: lib/kick_tracker_web/live/admin/health_live.ex:318
 #, elixir-autogen, elixir-format
 msgid "collecting"
 msgstr ""
 
-#: lib/kick_tracker_web/live/admin/health_live.ex:313
+#: lib/kick_tracker_web/live/admin/health_live.ex:314
 #, elixir-autogen, elixir-format
 msgid "down"
 msgstr ""
@@ -2421,12 +2421,12 @@ msgstr ""
 msgid "from"
 msgstr ""
 
-#: lib/kick_tracker_web/live/admin/health_live.ex:318
+#: lib/kick_tracker_web/live/admin/health_live.ex:319
 #, elixir-autogen, elixir-format
 msgid "standing by"
 msgstr ""
 
-#: lib/kick_tracker_web/live/admin/health_live.ex:319
+#: lib/kick_tracker_web/live/admin/health_live.ex:320
 #, elixir-autogen, elixir-format
 msgid "stopped"
 msgstr ""
@@ -2434,4 +2434,9 @@ msgstr ""
 #: lib/kick_tracker_web/live/admin/health_live.ex:101
 #, elixir-autogen, elixir-format
 msgid "to"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/health_live.ex:321
+#, elixir-autogen, elixir-format
+msgid "shadow, on another machine"
 msgstr ""
