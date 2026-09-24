@@ -1060,8 +1060,13 @@ per-channel time ranges, period totals, **distinct counts** and
   without their own timestamp (`channel.followed`) use the
   `Kick-Event-Message-Timestamp` header.
 - **Channel timezone** (`channels.timezone`) for everything daily: rollups
-  are by UTC hour and turned into days in the channel's timezone when read. A
-  stream that crosses midnight counts for the day it started.
+  are by UTC hour and turned into days in the channel's timezone when read,
+  hour by hour: a stream that crosses midnight counts in both days, each
+  getting the hours that fell in it. In a timezone that isn't a whole
+  number of hours from UTC (+05:30, +05:45, −03:30) a local day or weekday
+  hour is made of whole UTC hours, so it is off by the odd minutes; daily
+  series and the heatmap then carry a `note` saying so. A 15-minute
+  rollup would fix it and wasn't worth its size for a few channels.
 
 ### 12.3 Chat at two levels of detail
 
@@ -1119,7 +1124,12 @@ coverage           (id, channel_id NULL, source: api | subscribers | chat |
                    -- our own gaps, so every stat can say how complete it
                    -- is. Periods are always closed (extended by each
                    -- outcome), so a dead collector claims nothing; time
-                   -- no period covers is a gap
+                   -- no period covers is a gap. `to_at` is nullable in
+                   -- the schema but always written (from_at = to_at at
+                   -- the first outcome); a null would cover nothing.
+                   -- `ingress`: recorded by SubscriptionSync every 15
+                   -- minutes, ok while all of a channel's webhook
+                   -- subscriptions are in place at Kick
 
 -- streams (normal tables)
 streams            (id, channel_id, started_at, ended_at NULL,
@@ -1186,15 +1196,28 @@ channel_events     (id, channel_id, occurred_at,
 - `stream_stats` (cache, rebuildable): airtime, avg and peak viewers, hours
   watched, followers at start and end and the gain, gross follows, unique
   chatters, new chatters (no earlier stream of the channel), messages, subs,
-  resubs, gifted subs, Kicks. Unknown is null, never 0.
-- `excluded_streams` (view): streams an admin excluded (`stream_overrides`),
-  left out of every figure and marked where listed.
+  resubs, gifted subs, Kicks. Unknown is null, never 0: follows, subs,
+  resubs, gifted subs and Kicks come by webhook and are null unless
+  `ingress` coverage covers at least 99% of the stream.
+- `merge_groups` (view): merges resolved transitively, each merged stream
+  with the root of its group. A root's `stream_stats` cover every part:
+  airtime is the parts' sum (the drop between them isn't airtime), and
+  each part's first sample is weighted from that part's own start, as in
+  `hourly_stats`.
+- `excluded_streams` (view): streams an admin excluded (`stream_overrides`)
+  and the streams merged into them, left out of every stream and viewer
+  figure and marked where listed. Follows, chat and support during them
+  still count toward the channel's totals (they happened).
 - `hourly_stats` by **UTC hour** (cache, rebuildable, a hypertable):
   samples, avg and peak viewers, hours watched, chat minutes and messages,
   last follower total, follows, subs, gifted subs, Kicks. Daily, weekday and
   30-day figures are built from it in the channel's timezone.
 - Both are recomputed by a job (last 3 hours every 5 minutes, last 2 days
-  nightly) and by `mix kick_tracker.rebuild` for any range.
+  nightly), by a replay of stored webhooks (which queues the rollups of
+  its range when done) and by `mix kick_tracker.rebuild` for any range
+  (by default from the earliest raw fact of any kind). Rebuilds of
+  `hourly_stats` take turns on an advisory lock and upsert their rows, so
+  overlapping ones never collide.
 - **Not continuous aggregates**, as first planned: hours watched weights
   each sample by the time since the previous one (capped at 75s), which
   needs a window function a continuous aggregate can't run, and TimescaleDB
@@ -1205,7 +1228,11 @@ channel_events     (id, channel_id, occurred_at,
 
 ### 12.7 Retention and privacy
 
-- Hypertables compressed after ~7 days, segmented by `channel_id`.
+- Hypertables compressed (columnstore), segmented by `channel_id`:
+  `viewer_samples`, `subscriber_samples`, `chat_minutes` and
+  `chat_minute_users` after 7 days, `follower_samples` (sparse, 90-day
+  chunks) after 90 days. `hourly_stats` isn't compressed: it is small, and
+  rebuilds rewrite its rows.
 - `chat_minute_users`: dropped after **90 days** (TimescaleDB retention
   policy). Everything else is kept.
 - Kick user ids (in the chat tables, `follows`, `support_events`,
@@ -1277,21 +1304,29 @@ append every 60s and the cards update.
 ### 13.4 Resolution by range
 
 The server chooses the bucket from the requested range, so no series exceeds
-~2 000 points:
+2 000 points (`Series.Resolution`):
 
-| Range | Viewers | Chat | Source |
+| Range | Bucket | Presets | Source |
 |---|---|---|---|
-| One stream (≤ ~12h) | raw 60s samples | per minute | `viewer_samples`, `chat_minutes` |
-| ≤ 7 days | 5-min buckets | 5-min buckets | `viewer_samples` (time_bucket) |
-| ≤ 90 days | hourly | hourly | `hourly_stats` |
-| Longer | daily (channel timezone) | daily | `hourly_stats` |
+| ≤ 12h (one stream) | raw 60s samples, per minute | | `viewer_samples`, `chat_minutes` |
+| ≤ 6 days | 5 minutes | 24h | `viewer_samples`, `chat_minutes` (time_bucket) |
+| ≤ 20 days | 15 minutes | 7d | same |
+| ≤ 80 days | 1 hour | 30d | `hourly_stats` |
+| ≤ 200 days | 6 hours | 90d | `hourly_stats` |
+| < 2 000 days | 1 day (channel timezone) | 1y | `hourly_stats` |
+| Longer | 1 week (channel timezone) | all | `hourly_stats` |
+
+A custom range is at most 20 years (1 044 weeks). Follower totals use the
+same buckets (last, min and max reading; buckets without a reading are
+left out), and every reading only up to 12 hours.
 
 Each bucket carries **avg and max** (and min where useful), drawn as a line
-with a peak band, so downsampling never hides a peak. Buckets without data
+with a peak band, so downsampling never hides a peak. Viewer buckets follow
+the rollups: an excluded stream's readings are left out, and a flagged
+reading counts in the average but is never a max. Buckets without data
 are sent as `null` (a break), never 0. Chat counts are 0 only where chat
-coverage says we were listening, `null` where we weren't. Daily buckets stay
-under 2 000 points for about five years of history; weekly buckets will be
-needed after that.
+coverage says we were listening, `null` where we weren't; subs, gifts and
+Kicks likewise with ingress coverage.
 
 ### 13.5 Data delivery
 
@@ -1327,7 +1362,11 @@ needed after that.
   ignored, never an error.
 - **Query cache** (`KickTracker.Cache`, ETS) in the `web` role for expensive aggregates
   (leaderboards, 30-day cards), keyed by query and period: minutes for
-  periods including today, long for closed periods.
+  periods including today, long for closed periods. A preset period ends
+  at now rounded up to the next minute (`KickTrackerWeb.Period`), so its
+  key repeats for a minute and the cache hits. "all" starts at the
+  channel's tracking start, or on pages across channels at the earliest
+  public channel's.
 - The JSON endpoints are the seed of a **public read API** later; they are
   versioned from the start (`/data/v1/...`).
 
@@ -1421,8 +1460,12 @@ auth check.
   replay `webhook_events` through the current handlers.
 - **Data corrections** (never editing raw facts, only adding on top):
   - merge two streams the sessionizer split (built), or split one it merged
-    (not built yet: it needs an id for each half);
-  - exclude a stream (test stream, rebroadcast) from statistics;
+    (not built yet: it needs an id for each half). A merge goes into the
+    root of the earlier stream's group, and is allowed when every stream
+    between them is already part of it, so a broadcast split in three
+    becomes one stream whichever way it is merged;
+  - exclude a stream (test stream, rebroadcast) from statistics, with the
+    streams merged into it;
   - **annotations** on a channel's timeline ("collector outage", "suspected
     viewbots", "charity stream"), optionally shown publicly on charts.
 - **Privacy:** find everything held about a Kick user id; delete it
