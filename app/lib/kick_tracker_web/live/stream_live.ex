@@ -21,7 +21,8 @@ defmodule KickTrackerWeb.StreamLive do
          channel = Channels.get!(stream.channel_id),
          true <-
            String.downcase(channel.slug) == String.downcase(slug) or
-             Reports.channel_by_slug(slug) == channel do
+             Reports.channel_by_slug(slug) == channel,
+         {:merged, nil} <- {:merged, stream.merged_into} do
       if connected?(socket) and is_nil(stream.ended_at),
         do: Phoenix.PubSub.subscribe(KickTracker.PubSub, ChannelServer.topic(channel.id))
 
@@ -33,7 +34,12 @@ defmodule KickTrackerWeb.StreamLive do
        )
        |> load()}
     else
-      _ -> raise KickTrackerWeb.NotFoundError, "no such stream"
+      # Merged into an earlier stream: show that one.
+      {:merged, merged_into} ->
+        {:ok, push_navigate(socket, to: ~p"/c/#{slug}/streams/#{merged_into}")}
+
+      _ ->
+        raise KickTrackerWeb.NotFoundError, "no such stream"
     end
   end
 

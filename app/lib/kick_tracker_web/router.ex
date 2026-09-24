@@ -76,7 +76,14 @@ defmodule KickTrackerWeb.Router do
     live_session :admin, on_mount: [{KickTrackerWeb.AdminAuth, :require_admin}] do
       live "/", HealthLive
       live "/channels", ChannelsLive
+      live "/groups", GroupsLive
+      live "/subscriptions", SubscriptionsLive
+      live "/dead-letters", DeadLettersLive
+      live "/data", DataLive
+      live "/privacy", PrivacyLive
+      live "/settings", SettingsLive
       live "/admins", AdminsLive
+      live "/audit", AuditLive
       live "/account", AccountLive
     end
   end

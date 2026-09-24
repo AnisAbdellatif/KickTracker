@@ -47,7 +47,10 @@ defmodule KickTracker.Cache do
     end
   end
 
-  defp running?, do: :ets.whereis(@table) != :undefined
+  # Tests turn it off (config :kick_tracker, :cache, false): the database is
+  # rolled back after each test, a cache wouldn't be.
+  defp running?,
+    do: Application.get_env(:kick_tracker, :cache, true) and :ets.whereis(@table) != :undefined
 
   @impl true
   def init(nil) do

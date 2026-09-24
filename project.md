@@ -1152,14 +1152,17 @@ auth check.
 - **Reprocess:** rebuild `stream_stats` or rollups for a channel and range;
   replay `webhook_events` through the current handlers.
 - **Data corrections** (never editing raw facts, only adding on top):
-  - merge two streams the sessionizer split, or split one it merged;
+  - merge two streams the sessionizer split (built), or split one it merged
+    (not built yet: it needs an id for each half);
   - exclude a stream (test stream, rebroadcast) from statistics;
   - **annotations** on a channel's timeline ("collector outage", "suspected
     viewbots", "charity stream"), optionally shown publicly on charts.
 - **Privacy:** find everything held about a Kick user id; delete it
   (per-user rows, username, raw event bodies redacted).
-- **Settings:** polling cadences, feature flags (e.g. show the support page
-  publicly), public groups.
+- **Settings:** feature flags (show the support page publicly, show top
+  chatters and supporters by name), the assumptions behind the revenue
+  estimate; public groups on their own page. Polling cadences stay in code,
+  with the rules that depend on them.
 - **Audit log:** every admin action, who and when.
 
 **How admin actions reach the collector:** the database is the source of
@@ -1580,6 +1583,19 @@ three channels added and collecting within a minute.
 17. Home, leaderboards, compare, category pages; caching.
 18. Rest of admin: dead letters, reprocess, corrections, annotations,
     privacy, audit log.
+
+**Phase 4 built** (2026-09-24). `/data/v1` JSON with resolution by range,
+ETags and cache headers; one ECharts hook (loaded only on chart pages) with
+six kinds, table view and CSV; home (live now from one aggregated broadcast
+per poll, leaderboards by group and period, notable moments), channel pages
+(overview, streams, chat, support, categories), the stream page (stacked
+panels, category bands, title ticks, markers, "no data" shading, rolling
+active chatters, live appends), compare with chatter overlap, category
+pages, search, methodology, privacy and removal pages. Admin: groups,
+subscriptions (resync), dead letters (inspect, replay, discard with a
+reason), data (exclude and merge streams, annotations, reprocess rollups or
+replay events), privacy requests, settings, audit log. Checked in a browser
+on 90 days of bulk-mode history (4 channels, 15M chat messages).
 
 **Phase 5: operations and legal (§18), then real collection**
 

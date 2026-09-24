@@ -48,3 +48,6 @@ config :phoenix,
 
 # Password hashing is deliberately slow; tests don't need it to be.
 config :kick_tracker, :pbkdf2_iterations, 1_000
+
+# The query cache would outlive each test's rolled-back database.
+config :kick_tracker, :cache, false

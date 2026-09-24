@@ -16,7 +16,10 @@ defmodule KickTracker.Rollups do
 
   # --- stream_stats ----------------------------------------------------------
 
-  @doc "Recomputes one stream's figures."
+  @doc """
+  Recomputes one stream's figures. A stream an admin merged others into
+  (`merged_streams`) is computed over all of them, to the last one's end.
+  """
   @spec stream_stats(integer()) :: :ok
   def stream_stats(stream_id) do
     %{rows: [[channel_id, started_at, ended_at]]} =
@@ -24,12 +27,24 @@ defmodule KickTracker.Rollups do
         stream_id
       ])
 
+    merged =
+      Repo.query!(
+        """
+        SELECT s.id, s.ended_at FROM merged_streams m JOIN streams s ON s.id = m.other_stream_id
+        WHERE m.stream_id = $1
+        """,
+        [stream_id]
+      ).rows
+
+    ids = [stream_id | Enum.map(merged, &hd/1)]
+    ends = [ended_at | Enum.map(merged, &List.last/1)]
+    ended_at = if Enum.any?(ends, &is_nil/1), do: nil, else: Enum.max(ends, DateTime)
     until = ended_at || DateTime.utc_now()
 
     samples =
       Repo.all(
         from v in "viewer_samples",
-          where: v.channel_id == ^channel_id and v.stream_id == ^stream_id,
+          where: v.channel_id == ^channel_id and v.stream_id in ^ids,
           select: {type(v.observed_at, :utc_datetime_usec), v.viewers}
       )
 
@@ -47,7 +62,7 @@ defmodule KickTracker.Rollups do
 
     viewers = Metrics.viewers(samples)
     gain = Metrics.follower_gain(started_at, ended_at, followers)
-    counts = counts(channel_id, stream_id, started_at, until)
+    counts = counts(channel_id, ids, started_at, until)
 
     row =
       Map.merge(counts, %{
@@ -72,7 +87,7 @@ defmodule KickTracker.Rollups do
     :ok
   end
 
-  defp counts(channel_id, stream_id, from, until) do
+  defp counts(channel_id, stream_ids, from, until) do
     %{rows: [[follows, subs, resubs, gifted, kicks, chatters, messages, new_chatters]]} =
       Repo.query!(
         """
@@ -87,14 +102,15 @@ defmodule KickTracker.Rollups do
             WHERE channel_id = $1 AND kind = 'gift' AND occurred_at >= $3 AND occurred_at <= $4),
           (SELECT coalesce(sum(quantity), 0) FROM support_events
             WHERE channel_id = $1 AND kind = 'kicks' AND occurred_at >= $3 AND occurred_at <= $4),
-          (SELECT count(*) FROM chat_stream_users WHERE stream_id = $2),
-          (SELECT coalesce(sum(messages), 0) FROM chat_stream_users WHERE stream_id = $2),
+          (SELECT count(DISTINCT user_id) FROM chat_stream_users WHERE stream_id = ANY($2)),
+          (SELECT coalesce(sum(messages), 0) FROM chat_stream_users WHERE stream_id = ANY($2)),
           -- chatters with no earlier stream of this channel
-          (SELECT count(*) FROM chat_stream_users u WHERE u.stream_id = $2 AND NOT EXISTS (
+          (SELECT count(DISTINCT u.user_id) FROM chat_stream_users u WHERE u.stream_id = ANY($2) AND NOT EXISTS (
              SELECT 1 FROM chat_stream_users u2 JOIN streams s2 ON s2.id = u2.stream_id
-             WHERE u2.user_id = u.user_id AND s2.channel_id = $1 AND s2.started_at < $3))
+             WHERE u2.user_id = u.user_id AND s2.channel_id = $1 AND s2.started_at < $3
+               AND NOT s2.id = ANY($2)))
         """,
-        [channel_id, stream_id, from, until]
+        [channel_id, stream_ids, from, until]
       )
 
     %{

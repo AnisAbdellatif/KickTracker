@@ -142,7 +142,7 @@ defmodule KickTracker.Reports do
     [[streams, airtime]] =
       Repo.query!(
         """
-        SELECT count(*) FILTER (WHERE started_at >= $2),
+        SELECT count(*) FILTER (WHERE started_at >= $2 AND id NOT IN (SELECT other_stream_id FROM merged_streams)),
                coalesce(sum(extract(epoch FROM least(coalesce(ended_at, now()), $3) - greatest(started_at, $2))), 0)
         FROM streams
         WHERE channel_id = $1 AND started_at < $3 AND coalesce(ended_at, now()) > $2
@@ -215,12 +215,18 @@ defmodule KickTracker.Reports do
 
     Repo.query!(
       """
-      SELECT s.id, s.started_at, s.ended_at, st.airtime_s, st.avg_viewers, st.peak_viewers,
+      SELECT s.id, s.started_at,
+             CASE WHEN s.ended_at IS NULL OR mg.open THEN NULL ELSE greatest(s.ended_at, mg.last_end) END,
+             st.airtime_s, st.avg_viewers, st.peak_viewers,
              st.hours_watched, st.follower_gain, st.unique_chatters, st.messages, st.follows,
              st.subs, st.resubs, st.gifted_subs, st.kicks, cat.id, cat.name,
              (s.id IN (SELECT stream_id FROM excluded_streams))
       FROM streams s
       LEFT JOIN stream_stats st ON st.stream_id = s.id
+      LEFT JOIN LATERAL (
+        SELECT max(os.ended_at) AS last_end, bool_or(os.ended_at IS NULL) AS open
+        FROM merged_streams m JOIN streams os ON os.id = m.other_stream_id WHERE m.stream_id = s.id
+      ) mg ON true
       LEFT JOIN LATERAL (
         SELECT category_id FROM viewer_samples
         WHERE channel_id = s.channel_id AND stream_id = s.id
@@ -228,6 +234,7 @@ defmodule KickTracker.Reports do
       ) mc ON true
       LEFT JOIN categories cat ON cat.id = mc.category_id
       WHERE s.channel_id = $1 AND s.started_at >= $2 AND s.started_at < $3
+        AND s.id NOT IN (SELECT other_stream_id FROM merged_streams)
         AND ($5::bigint IS NULL OR mc.category_id = $5)
       ORDER BY s.started_at DESC
       LIMIT $4
@@ -277,7 +284,11 @@ defmodule KickTracker.Reports do
     end)
   end
 
-  @doc "One stream with its figures, or nil."
+  @doc """
+  One stream with its figures, or nil. A stream merged into another says
+  so (`merged_into`); one others were merged into ends with the last of
+  them (`stream_ids` lists them all).
+  """
   @spec stream(integer()) :: map() | nil
   def stream(id) do
     case Repo.query!(
@@ -307,17 +318,30 @@ defmodule KickTracker.Reports do
               }
           )
 
-        [[excluded]] =
-          Repo.query!("SELECT $1 IN (SELECT stream_id FROM excluded_streams)", [id]).rows
+        [[excluded, merged_into]] =
+          Repo.query!(
+            "SELECT $1 IN (SELECT stream_id FROM excluded_streams), (SELECT stream_id FROM merged_streams WHERE other_stream_id = $1)",
+            [id]
+          ).rows
+
+        merged =
+          Repo.query!(
+            "SELECT s.id, s.ended_at FROM merged_streams m JOIN streams s ON s.id = m.other_stream_id WHERE m.stream_id = $1",
+            [id]
+          ).rows
+
+        ends = [ended | Enum.map(merged, &List.last/1)]
 
         %{
           id: id,
+          stream_ids: [id | Enum.map(merged, &hd/1)],
           channel_id: channel_id,
           started_at: started,
-          ended_at: ended,
+          ended_at: if(Enum.any?(ends, &is_nil/1), do: nil, else: Enum.max(ends, DateTime)),
           end_source: source,
           stats: stats,
-          excluded?: excluded
+          excluded?: excluded,
+          merged_into: merged_into
         }
 
       [] ->
@@ -340,10 +364,10 @@ defmodule KickTracker.Reports do
         SELECT sc.field, sc.occurred_at, sc.new_value, cat.name
         FROM stream_changes sc
         LEFT JOIN categories cat ON sc.field = 'category' AND cat.id::text = sc.new_value
-        WHERE sc.stream_id = $1 AND sc.field IN ('title', 'category')
+        WHERE sc.stream_id = ANY($1) AND sc.field IN ('title', 'category')
         ORDER BY sc.occurred_at
         """,
-        [stream.id]
+        [Map.get(stream, :stream_ids, [stream.id])]
       ).rows
 
     categories = for [f, at, v, name] <- changes, f == "category", do: {at, name || v}
@@ -417,9 +441,9 @@ defmodule KickTracker.Reports do
         """
         SELECT u.user_id, k.username, u.messages FROM chat_stream_users u
         LEFT JOIN kick_users k ON k.id = u.user_id
-        WHERE u.stream_id = $1 ORDER BY u.messages DESC, u.user_id LIMIT $2
+        WHERE u.stream_id = ANY($1) ORDER BY u.messages DESC, u.user_id LIMIT $2
         """,
-        [stream.id, limit]
+        [Map.get(stream, :stream_ids, [stream.id]), limit]
       ).rows
       |> Enum.map(fn [id, name, n] -> %{user_id: id, name: name, count: n} end)
 
@@ -456,6 +480,7 @@ defmodule KickTracker.Reports do
       SELECT s.id, s.started_at, st.unique_chatters, st.new_chatters
       FROM streams s JOIN stream_stats st ON st.stream_id = s.id
       WHERE s.channel_id = $1 AND s.started_at >= $2 AND s.started_at < $3
+        AND s.id NOT IN (SELECT other_stream_id FROM merged_streams)
       ORDER BY s.started_at
       """,
       [id, from, to]
@@ -713,6 +738,7 @@ defmodule KickTracker.Reports do
              SELECT s.id, s.started_at, st.peak_viewers, st.hours_watched, st.airtime_s
              FROM stream_stats st JOIN streams s ON s.id = st.stream_id
              WHERE st.channel_id = $1 AND s.id NOT IN (SELECT stream_id FROM excluded_streams)
+               AND s.id NOT IN (SELECT other_stream_id FROM merged_streams)
                AND st.#{order} IS NOT NULL
              ORDER BY st.#{order} DESC LIMIT 1
              """,
@@ -747,6 +773,7 @@ defmodule KickTracker.Reports do
         JOIN streams s ON s.id = st.stream_id JOIN channels c ON c.id = s.channel_id
         WHERE s.started_at >= $1 AND s.started_at < $2 AND st.peak_viewers IS NOT NULL
           AND s.id NOT IN (SELECT stream_id FROM excluded_streams)
+          AND s.id NOT IN (SELECT other_stream_id FROM merged_streams)
           AND st.peak_viewers > (
             SELECT coalesce(max(p.peak_viewers), 0) FROM stream_stats p JOIN streams ps ON ps.id = p.stream_id
             WHERE ps.channel_id = s.channel_id AND ps.started_at < s.started_at

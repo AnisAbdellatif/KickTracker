@@ -21,5 +21,6 @@ defmodule KickTracker.Events.WebhookEvent do
     field :stored_at, :utc_datetime_usec, read_after_writes: true
     field :processed_at, :utc_datetime_usec
     field :broadcaster_user_id, :integer
+    field :redacted_at, :utc_datetime_usec
   end
 end

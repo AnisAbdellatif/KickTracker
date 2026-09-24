@@ -83,6 +83,25 @@ defmodule KickTrackerWeb.Layouts do
           <.admin_link to={~p"/admin/channels"} active={@active == :channels}>
             {gettext("Channels")}
           </.admin_link>
+          <.admin_link to={~p"/admin/groups"} active={@active == :groups}>
+            {gettext("Groups")}
+          </.admin_link>
+          <.admin_link to={~p"/admin/subscriptions"} active={@active == :subscriptions}>
+            {gettext("Subscriptions")}
+          </.admin_link>
+          <.admin_link to={~p"/admin/dead-letters"} active={@active == :dead_letters}>
+            {gettext("Dead letters")}
+          </.admin_link>
+          <.admin_link to={~p"/admin/data"} active={@active == :data}>{gettext("Data")}</.admin_link>
+          <.admin_link to={~p"/admin/privacy"} active={@active == :privacy}>
+            {gettext("Privacy")}
+          </.admin_link>
+          <.admin_link to={~p"/admin/settings"} active={@active == :settings}>
+            {gettext("Settings")}
+          </.admin_link>
+          <.admin_link to={~p"/admin/audit"} active={@active == :audit}>
+            {gettext("Audit log")}
+          </.admin_link>
           <.admin_link to={~p"/admin/admins"} active={@active == :admins}>
             {gettext("Admins")}
           </.admin_link>

@@ -60,6 +60,14 @@ defmodule KickTrackerWeb.PublicSiteTest do
     assert redirected_to(get(conn, "/search?q=dailystr")) == "/c/dailystreamer"
   end
 
+  test "the support page is public only while the setting says so", %{conn: conn} do
+    assert {:ok, _, _} = live(conn, "/c/dailystreamer/support")
+    {:ok, false} = KickTracker.Settings.put("support_page_public", false)
+    assert_error_sent 404, fn -> get(conn, "/c/dailystreamer/support") end
+    {:ok, _, html} = live(conn, "/c/dailystreamer")
+    refute html =~ "/c/dailystreamer/support"
+  end
+
   test "unknown channels, streams and categories are 404s", %{conn: conn} do
     for path <- [
           "/c/nosuchstreamer",

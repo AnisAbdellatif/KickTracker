@@ -92,6 +92,19 @@ config :kick_tracker,
 
 config :kick_tracker, :rabbitmq_vhost, System.get_env("RABBITMQ_VHOST", "/")
 
+# The dead-letter queue, for the admin (inspect, replay, discard): the `ops`
+# user, read on the dead-letter queue and write on the exchange. Optional.
+dead_letters_default =
+  case config_env() do
+    :dev -> "amqp://ops:ops-dev@127.0.0.1:55672"
+    :test -> "amqp://ops:ops-dev@127.0.0.1:55672/test"
+    _ -> nil
+  end
+
+config :kick_tracker,
+       :dead_letters_amqp_url,
+       System.get_env("DEAD_LETTERS_AMQP_URL") || dead_letters_default
+
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :kick_tracker, KickTrackerWeb.Endpoint,

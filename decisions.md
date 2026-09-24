@@ -115,9 +115,9 @@ Cachex was planned for the query cache; a 60-line ETS table with a TTL and a swe
 
 ## Stream Corrections
 
-**Current:** `stream_overrides` (exclude, merge, split; revocable, never deleted) layered over the raw streams; `excluded_streams` is a view of active exclusions that every public figure filters on (KPIs, records, categories, notable moments), and excluded streams stay listed, marked. (updated 2026-09-24 07:00)
+**Current:** `stream_overrides` (exclude, merge; revocable, never deleted) layered over the raw streams. `excluded_streams` is a view of active exclusions that every public figure filters on (KPIs, records, categories, notable moments); excluded streams stay listed, marked. `merged_streams` is a view of active merges: the later stream disappears from lists and counts, the earlier one runs to the later one's end, and its `stream_stats` are computed over both (a merged stream's page redirects to it). Split is allowed by the table but not built. (updated 2026-09-24 07:20)
 
-Raw facts are append-only (AGENTS.md §7), so a correction can only be a row on top. A view keeps the filter in one place for SQL. Hourly rollups leave out an excluded stream's viewer samples, so channel totals and leaderboards agree with the stream list; follows, chat and support during it still count toward the channel (they happened), and changing an override rebuilds the rollups of the stream's hours.
+Raw facts are append-only (AGENTS.md §7), so a correction can only be a row on top. A view keeps the filter in one place for SQL. Split needs an address for each half (a stream is its row and id), which merging doesn't; it waits for a real case. Hourly rollups leave out an excluded stream's viewer samples, so channel totals and leaderboards agree with the stream list; follows, chat and support during it still count toward the channel (they happened), and changing an override rebuilds the rollups of the stream's hours.
 
 ## Admin
 
@@ -136,6 +136,18 @@ The alternative for lookups was to insert a pending row and let the collector re
 **Current:** The health page reads only the database (plus RabbitMQ's management API, when `RABBITMQ_MANAGEMENT_URL` is set, through a `monitor` user with the `monitoring` tag and empty permissions), so it works on a web node. A source's state comes from its latest `coverage` outcome: ok, failing, stale (older than a little over two cadences) or never. Coverage % is the pure `Metrics.Coverage.fraction/4`: each ok period vouches for its first to last outcome plus one cadence. `webhook_events` gained a nullable `broadcaster_user_id`, filled from the body when stored, for "last event per channel". (updated 2026-09-24 06:20)
 
 The collector's processes know more (socket state), but asking them from a web node needs clustering, and the database already records every outcome. Without the column, the last event per channel would mean decoding every recent body, and `convert_from` fails on a non-UTF-8 body. Rows stored before the column stay null rather than being backfilled (raw rows aren't updated). The monitoring user needs a permission entry in the vhost (empty patterns) to see its queues through the API.
+
+## Admin Operations
+
+**Current:** Admin actions that change collected data run on the collector as Oban jobs the web node queues: `Workers.Reprocess` (recompute rollups for a range and given streams; replay stored `webhook_events` through the current handlers, skipping redacted ones) and `Workers.Privacy`. Dead letters are handled from the web node over AMQP as a dedicated `ops` user (read the dead-letter queue, write the exchange): listing takes messages unacknowledged and puts them all back; a replay is acknowledged only after RabbitMQ confirms the republish; a discard needs a reason, kept in the audit log with the message's id and type. Groups are admin tables with a public flag; settings are feature flags and the revenue assumptions, with defaults in code, so an empty table works. (updated 2026-09-24 07:20)
+
+The web role writes only admin tables (AGENTS.md §8), so anything touching raw or derived tables is a job, which also survives a web redeploy mid-action. Dead letters live in RabbitMQ, not the database, so the web node needs its own least-privilege broker user rather than borrowing the consumer's. Polling cadences were planned as settings; they stay in code because the 75s hours-watched cap and the coverage gaps are derived from them.
+
+## Privacy Deletion
+
+**Current:** A deletion request (admin, confirmed by retyping the Kick user id) removes the person's username and per-person chat rows, sets their id to null in `follows` (now nullable) and `support_events` so the counts stay, scrubs them from support payloads, and redacts `webhook_events` bodies that name them, marking those rows `redacted_at` (they no longer verify against Kick's signature and are never replayed). Aggregates already computed stay. (updated 2026-09-24 07:20)
+
+This is the one exception to append-only raw facts, because the law requires it; it is audited. Nulling ids instead of deleting rows keeps follows, subs and gifts counted, which identify no one once the id is gone. The body search is by the id's digits, so it may look at bodies that only contain them inside a longer number; the JSON-aware scrub changes only real matches.
 
 ## Development Approach
 

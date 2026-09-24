@@ -27,6 +27,12 @@
       "tags": [
         "monitoring"
       ]
+    },
+    {
+      "name": "ops",
+      "password_hash": "R+LNfEJTq4wVY2PzDQaU9cdYxGWOcFIWruCVImjp2gAEl+rp",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
     }
   ],
   "vhosts": [
@@ -93,6 +99,20 @@
       "configure": "^$",
       "write": "^$",
       "read": "^$"
+    },
+    {
+      "user": "ops",
+      "vhost": "/",
+      "configure": "^$",
+      "write": "^kick\\.events$",
+      "read": "^kick_tracker\\.events\\.dead$"
+    },
+    {
+      "user": "ops",
+      "vhost": "test",
+      "configure": "^$",
+      "write": "^kick\\.events$",
+      "read": "^kick_tracker\\.events\\.dead$"
     }
   ],
   "exchanges": [
