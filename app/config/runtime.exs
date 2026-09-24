@@ -51,7 +51,8 @@ kick_defaults =
         "ws://127.0.0.1:4050/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false",
       "KICK_CLIENT_ID" => "dev-client",
       "KICK_CLIENT_SECRET" => "dev-secret",
-      "AMQP_URL" => "amqp://guest:guest@127.0.0.1:55672"
+      # The consume-only user from deploy/rabbitmq (local development only).
+      "AMQP_URL" => "amqp://app:app-dev@127.0.0.1:55672"
     }
   else
     %{}

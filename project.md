@@ -532,6 +532,23 @@ A forwarder in the same app drains the spool into RabbitMQ when it is
 reachable again. It needs only Kick's **public** key and publish-only
 RabbitMQ credentials: no app secret, no database access.
 
+**Built** (2026-09-24, `ingress/receiver`), with two details the plan
+didn't have:
+
+- Returns of unroutable messages are registered with the Erlang RabbitMQ
+  client directly. Through the `amqp` library's `Basic.return/2` they are
+  relayed by another process and arrive *after* the confirm, so an
+  unroutable message looked delivered; directly, the return is always in
+  the mailbox first (200 of 200 in a test).
+- A failed signature refetches Kick's key once, at most once a minute, in
+  case Kick rotated it, without letting bad requests hammer Kick's API.
+
+A live run (fake Kick → receiver → RabbitMQ, with RabbitMQ stopped
+mid-way) delivered every event: the ones sent during the outage were
+spooled, answered 200, and forwarded when the broker came back; every
+envelope re-verified against the fake Kick's key. Deliveries arrived out
+of order, as the contract (§8.2) warns.
+
 Later ingress options (same envelope, same exchange or an equivalent queue):
 a Cloudflare Worker, managed RabbitMQ (CloudAMQP: no app change at all), or
 another queue with its own Broadway producer.
