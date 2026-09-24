@@ -107,6 +107,66 @@ defmodule Sim.Recorder.PusherTest do
     assert %{"frame" => %{"event" => "deadline"}} = List.last(recorded)
   end
 
+  # Over a real network the 101 response and Pusher's first frame often come
+  # in one read. This server makes that certain by sending both in a single
+  # write, then records what the client sends back.
+  defp one_packet_server(test_pid) do
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+    {:ok, port} = :inet.port(listen)
+
+    Task.start_link(fn ->
+      {:ok, socket} = :gen_tcp.accept(listen)
+      {:ok, request} = :gen_tcp.recv(socket, 0, 5_000)
+      [_, key] = Regex.run(~r/sec-websocket-key: (\S+)/i, request)
+
+      accept =
+        :crypto.hash(:sha, key <> "258EAFA5-E914-47DA-95CA-C5AB0DC85B11") |> Base.encode64()
+
+      frame = ~s({"event":"pusher:connection_established","data":"{}"})
+
+      :ok =
+        :gen_tcp.send(socket, [
+          "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n",
+          "Sec-WebSocket-Accept: #{accept}\r\n\r\n",
+          <<0x81, byte_size(frame)>>,
+          frame
+        ])
+
+      {:ok, from_client} = :gen_tcp.recv(socket, 0, 5_000)
+      send(test_pid, {:client_bytes, from_client})
+      Process.sleep(2_000)
+    end)
+
+    port
+  end
+
+  @tag :tmp_dir
+  test "a first frame arriving together with the 101 response is not lost", %{tmp_dir: dir} do
+    port = one_packet_server(self())
+
+    assert {:ok, _} =
+             Pusher.record("ws://127.0.0.1:#{port}/app/key",
+               run: dir,
+               name: "chan",
+               channels: ["chatrooms.5.v2"],
+               deadline_ms: System.monotonic_time(:millisecond) + 800
+             )
+
+    # The client answered connection_established with a (masked) subscribe frame.
+    assert_received {:client_bytes, <<0x81, _::binary>>}
+
+    frames =
+      dir
+      |> Path.join("pusher/chan.jsonl")
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.filter(&is_binary(&1["frame"]))
+      |> Enum.map(&{&1["direction"], Jason.decode!(&1["frame"])["event"]})
+
+    assert frames == [{"in", "pusher:connection_established"}, {"out", "pusher:subscribe"}]
+  end
+
   test "an unreachable server is an error, not a hang" do
     assert {:error, _} =
              Pusher.record("ws://127.0.0.1:1/app/key",
