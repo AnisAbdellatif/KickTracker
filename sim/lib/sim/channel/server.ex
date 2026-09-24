@@ -83,7 +83,11 @@ defmodule Sim.Channel.Server do
   # sent: Kick's order matters (status before metadata), so callers see it.
   defp step(state) do
     now = Server.now()
-    {emissions, timeline} = Timeline.advance(state.channel, state.timeline, now)
+    # Re-read the channel every time: the control API changes it (a stream
+    # started or cut by hand, a new title) by replacing the scenario.
+    channel = Sim.Scenario.channel(Server.scenario(), state.channel.slug) || state.channel
+    state = %{state | channel: channel}
+    {emissions, timeline} = Timeline.advance(channel, state.timeline, now)
 
     for {event, body} <- emissions do
       Webhooks.deliver(state.channel.user_id, event, body, now)

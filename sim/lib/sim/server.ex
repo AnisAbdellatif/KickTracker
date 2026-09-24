@@ -84,6 +84,13 @@ defmodule Sim.Server do
     token
   end
 
+  @doc "Expires every token issued so far, so a client has to fetch a new one."
+  @spec expire_tokens() :: :ok
+  def expire_tokens do
+    :ets.delete_all_objects(@tokens)
+    :ok
+  end
+
   @doc "Whether this token was issued here and hasn't expired."
   @spec valid_token?(String.t() | nil) :: boolean()
   def valid_token?(nil), do: false
