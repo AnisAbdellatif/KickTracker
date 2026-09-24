@@ -153,7 +153,8 @@ defmodule KickTracker.Tracking.FollowersSimTest do
     assert [%{followers: n}] = rows("follower_samples", ["observed_at"])
     assert n == Sim.Curve.followers(sim, Sim.Server.now()) or n > 0
     assert Channels.get!(c.id).chatroom_id == sim.chatroom_id
-    assert [%{source: "followers", ok: true}] = rows("coverage", ["id"])
+    # (Learning the chatroom starts the chat, which has coverage of its own.)
+    assert [%{ok: true}] = rows("coverage", ["id"]) |> Enum.filter(&(&1.source == "followers"))
   end
 
   test "v2 failing is a gap, not a zero, and isn't retried at every cycle" do

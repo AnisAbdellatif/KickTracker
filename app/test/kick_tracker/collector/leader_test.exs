@@ -62,6 +62,11 @@ defmodule KickTracker.Collector.LeaderTest do
       )
 
     Process.unlink(pid)
+    # Stopped even when the test fails, or the name stays taken for the next.
+    on_exit(fn ->
+      if Process.alive?(pid), do: catch_exit(GenServer.stop(pid, :shutdown))
+    end)
+
     pid
   end
 
@@ -197,13 +202,30 @@ defmodule KickTracker.Collector.LeaderTest do
     assert Leader.role(b) == :leader
     assert [[1, "a", "unresponsive"], [2, "b", nil]] = terms(conn, lease)
 
-    # Back: it finds itself superseded and stops at once.
+    # Back: it finds itself superseded and stops as soon as it reaches the
+    # database again (its connection was ended; until it reconnects, it
+    # can't tell that from the database being unreachable, and keeps on).
     :sys.resume(a)
-    :ok = Leader.tick(a)
-    assert Leader.role(a) == :standby
+    assert tick_until(a, :standby)
     assert_receive {:stopped, "a"}
     GenServer.stop(a, :shutdown)
     GenServer.stop(b, :shutdown)
+  end
+
+  defp tick_until(server, role, tries \\ 50) do
+    :ok = Leader.tick(server)
+
+    cond do
+      Leader.role(server) == role ->
+        true
+
+      tries == 0 ->
+        false
+
+      true ->
+        Process.sleep(100)
+        tick_until(server, role, tries - 1)
+    end
   end
 
   defp wait_lock_free(conn, lease) do
