@@ -1290,13 +1290,22 @@ only works against the simulator, that is a bug.
   stream on channel X", "raid X → Y with 1 200", "gift 50 subs", "drop the
   socket"), for manual testing and demos.
 
+**Built so far** (2026-09-24): the clock, scenarios and channel profiles,
+schedules and viewer curves, the payload builders, the HTTP side (token,
+public key, channels, livestreams, webhook subscriptions, v2) and signed
+webhook delivery with drop and duplicate faults. The recorder drives it
+unchanged, and its payload shapes are checked against `fixtures/` by a
+test, so a shape Kick changes shows up when we re-record. Still to come:
+the Pusher websocket, channel processes firing events as streams start and
+end, the remaining event types, the control API, and bulk mode.
+
 **Two modes:**
 
 1. **Live mode:** the simulator runs in real time (or a faster clock for
    the simulator only) and the whole pipeline runs against it: ingress →
    RabbitMQ → collector → database → site. Used to develop and test the
    pipeline end to end.
-2. **Bulk mode:** generates **months of history** for dozens or hundreds of
+2. **Bulk mode** (after phase 2, see below): generates **months of history** for dozens or hundreds of
    channels in minutes, written straight into the raw fact tables with the
    same shapes the pipeline would produce. Used to develop the website,
    charts, rollups and performance at realistic volume (§6), without waiting
@@ -1414,7 +1423,12 @@ Tests are written alongside every step (§17.3), not as a step of their own.
 4. `sim/`: token endpoint, public API, v2, Pusher, signed webhook sender,
    built from the fixtures.
 5. Scenarios with channel profiles and fault injection; control API and CLI.
-6. Bulk mode generating months of history.
+6. Control API and CLI.
+
+   (Bulk mode moves to phase 2: it writes the raw fact tables, which don't
+   exist until the schema does. Everything it needs is already pure and
+   time-addressable, so it is a writer over `Schedule.windows_between/3`
+   and `Curve`, not new simulation.)
 
 **Phase 2: the pipeline, against the simulator**
 
@@ -1431,6 +1445,7 @@ Tests are written alongside every step (§17.3), not as a step of their own.
 11. `FollowerPoll` (v2), `follows`, support events.
 12. `ChatSocket`, the three chat tables, raids and hosts.
 13. `Metrics`; `stream_stats`; continuous aggregates.
+13b. Bulk mode: months of history written straight into the raw tables.
 
 **Phase 3: admin core**
 
