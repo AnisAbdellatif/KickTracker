@@ -14,7 +14,7 @@ defmodule Mix.Tasks.KickTracker.Rebuild do
 
   use Mix.Task
 
-  alias KickTracker.{Repo, Rollups}
+  alias KickTracker.Rollups
 
   @impl true
   def run(args) do
@@ -44,10 +44,9 @@ defmodule Mix.Tasks.KickTracker.Rebuild do
     {from, to}
   end
 
-  defp earliest do
-    %{rows: [[at]]} = Repo.query!("SELECT min(started_at) FROM streams")
-    at
-  end
+  # From the earliest raw fact of any kind, not the first stream: chat,
+  # follows, support and follower readings before it are in hourly_stats too.
+  defp earliest, do: Rollups.earliest_fact()
 
   defp parse!(s) do
     case DateTime.from_iso8601(s) do

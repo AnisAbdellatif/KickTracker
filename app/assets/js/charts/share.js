@@ -1,6 +1,6 @@
 // Shares (project.md §13.7): a donut, e.g. hours watched per category.
 // Fixed colour order; past seven slices the rest fold into "Other".
-import {baseOption, tooltip, fmt} from "./theme"
+import {baseOption, tooltip, fmt, escapeHtml} from "./theme"
 
 const MAX = 7
 
@@ -12,7 +12,7 @@ export function option(data, opts, t) {
     items = items.slice(0, MAX - 1).concat([{name: opts.otherLabel || "Other", value: rest}])
   }
   const total = items.reduce((s, x) => s + (x.value || 0), 0)
-  o.tooltip = tooltip(t, {trigger: "item", formatter: (p) => `${p.marker} ${p.name}<br><b>${fmt(p.value)}</b> · ${p.percent}%`})
+  o.tooltip = tooltip(t, {trigger: "item", formatter: (p) => `${p.marker} ${escapeHtml(p.name)}<br><b>${fmt(p.value)}</b> · ${p.percent}%`})
   o.legend = {type: "scroll", orient: "vertical", right: 0, top: "middle", icon: "roundRect", itemWidth: 10, itemHeight: 10,
     textStyle: {color: t.text2, fontSize: 11},
     formatter: (name) => {

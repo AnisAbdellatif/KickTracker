@@ -54,10 +54,18 @@ defmodule KickTracker.Collector.Sources.Subscribers do
       if(samples == [], do: [], else: [{:subscriber_samples, samples}]) ++
         for({c, slug} <- renames, do: {:slug, c.id, slug, at})
 
-    {ops, for({c, slug} <- renames, do: {:channel, %{c | slug: slug}}), state}
+    {ops, for({c, slug} <- renames, do: {:channel, c.id, %{slug: slug}}), state}
   end
 
   def record(_unit, {:error, _}, _at, state), do: {[], [], state}
+
+  # Only the channels whose totals were in the answer: one missing from it
+  # (banned, or Kick simply left it out) got no reading, a gap.
+  @impl true
+  def covered(%{channels: channels}, {:ok, found}) do
+    by_user = Map.new(found, &{&1["broadcaster_user_id"], &1})
+    for c <- channels, data = by_user[c.kick_user_id], sample(c, data, nil) != nil, do: c.id
+  end
 
   defp sample(c, data, at) do
     case {data["active_subscribers_count"], data["active_gifted_subscribers_count"],

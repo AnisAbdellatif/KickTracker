@@ -51,12 +51,29 @@ defmodule KickTracker.Collector.SourceRunner do
       timer: nil
     }
 
-    first_ms = Keyword.get(opts, :first_ms, 1_000)
+    first_ms = Keyword.get_lazy(opts, :first_ms, fn -> resume_ms(source, state.sstate) end)
     {:ok, if(first_ms, do: schedule(state, first_ms), else: state)}
+  end
+
+  # A runner restarted (a crash, the collection tree restarting) keeps the
+  # cadence of the one before: its first cycle comes when the next one was
+  # due, not at once, so restarts in a row can't turn a 60s poll into a
+  # burst of requests. When each cycle started is kept in the journal.
+  defp resume_ms(source, sstate) do
+    interval = source.interval_ms(sstate)
+
+    case Journal.get({:source_cycle, source.name()}) do
+      last when is_integer(last) ->
+        (interval - (System.os_time(:millisecond) - last)) |> max(1_000) |> min(interval)
+
+      _ ->
+        1_000
+    end
   end
 
   @impl true
   def handle_info(:cycle, state) do
+    Journal.put({:source_cycle, state.source.name()}, System.os_time(:millisecond))
     started = System.monotonic_time(:millisecond)
     state = cycle(%{state | timer: nil})
     elapsed = System.monotonic_time(:millisecond) - started
@@ -108,22 +125,7 @@ defmodule KickTracker.Collector.SourceRunner do
       |> Enum.zip(units)
 
     {ops, effects, sstate, failed} =
-      Enum.reduce(outcomes, {[], [], sstate, 0}, fn {result, unit}, {ops, effects, s, failed} ->
-        {outcome, at} =
-          case result do
-            {:ok, {outcome, at}} -> {outcome, at}
-            {:exit, reason} -> {{:error, {:exit, reason}}, stamp()}
-          end
-
-        {more_ops, more_effects, s} =
-          guard(source, :record, {[], [], s}, fn -> source.record(unit, outcome, at, s) end)
-
-        ok? = match?({:ok, _}, outcome)
-        if not ok?, do: Logger.warning("#{source.name()}: #{describe(outcome)}")
-
-        {ops ++ more_ops ++ coverage(source, unit, ok?, at), effects ++ more_effects, s,
-         if(ok?, do: failed, else: failed + 1)}
-      end)
+      Enum.reduce(outcomes, {[], [], sstate, 0}, &record_outcome(source, &1, &2))
 
     {end_ops, end_effects, sstate} =
       if function_exported?(source, :finish, 2),
@@ -147,6 +149,30 @@ defmodule KickTracker.Collector.SourceRunner do
     %{state | sstate: sstate}
   end
 
+  # One unit's outcome: what it writes, what it sets off, and whether it failed.
+  defp record_outcome(source, {result, unit}, {ops, effects, s, failed}) do
+    {outcome, at} =
+      case result do
+        {:ok, {outcome, at}} -> {outcome, at}
+        {:exit, reason} -> {{:error, {:exit, reason}}, stamp()}
+      end
+
+    {recorded?, {more_ops, more_effects, s}} =
+      case guard(source, :record, :failed, fn -> source.record(unit, outcome, at, s) end) do
+        :failed -> {false, {[], [], s}}
+        result -> {true, result}
+      end
+
+    ok? = match?({:ok, _}, outcome)
+    if not ok?, do: Logger.warning("#{source.name()}: #{describe(outcome)}")
+
+    # An answer whose meaning couldn't be recorded wrote nothing: a gap.
+    coverage = if ok? and not recorded?, do: [], else: coverage(source, unit, outcome, at)
+
+    {ops ++ more_ops ++ coverage, effects ++ more_effects, s,
+     if(ok?, do: failed, else: failed + 1)}
+  end
+
   defp fetch(source, unit) do
     case source.fetch(unit) do
       {:ok, _} = ok -> ok
@@ -157,11 +183,26 @@ defmodule KickTracker.Collector.SourceRunner do
     error -> {:error, error}
   end
 
-  defp coverage(source, unit, ok?, at) do
-    case source.coverage() do
-      {name, gap_s} -> [{:coverage, Enum.map(unit.channels, & &1.id), name, ok?, at, gap_s}]
-      nil -> []
+  defp coverage(source, unit, outcome, at) do
+    case {source.coverage(), outcome} do
+      {nil, _} ->
+        []
+
+      {{name, gap_s}, {:ok, _}} ->
+        case covered(source, unit, outcome) do
+          [] -> []
+          ids -> [{:coverage, ids, name, true, at, gap_s}]
+        end
+
+      {{name, gap_s}, _failed} ->
+        [{:coverage, Enum.map(unit.channels, & &1.id), name, false, at, gap_s}]
     end
+  end
+
+  defp covered(source, unit, outcome) do
+    if function_exported?(source, :covered, 2),
+      do: guard(source, :covered, [], fn -> source.covered(unit, outcome) end),
+      else: Enum.map(unit.channels, & &1.id)
   end
 
   defp journal(source, ops) do
@@ -179,9 +220,9 @@ defmodule KickTracker.Collector.SourceRunner do
   defp effect({:broadcast, topic, message}),
     do: Phoenix.PubSub.broadcast(KickTracker.PubSub, topic, message)
 
-  defp effect({:channel, channel}) do
-    Tracked.put(channel)
-    Channels.announce(channel)
+  defp effect({:channel, channel_id, fields}) do
+    Tracked.update(channel_id, fields)
+    Channels.announce(channel_id, fields)
   end
 
   # The source's own code must not take the runner down.

@@ -20,6 +20,7 @@ defmodule KickTracker.Workers.SubscriptionSync do
 
   alias KickTracker.Channels
   alias KickTracker.Kick.API
+  alias KickTracker.Stats.Coverage
 
   # What the tracker reads. Bans, redemptions and chat (read over Pusher
   # instead) aren't subscribed to.
@@ -39,25 +40,48 @@ defmodule KickTracker.Workers.SubscriptionSync do
   @impl Oban.Worker
   def perform(_job) do
     with {:ok, existing} <- API.subscriptions() do
-      {to_create, to_delete} = plan(Channels.list_active(), existing)
+      channels = Channels.list_active()
+      {to_create, to_delete} = plan(channels, existing)
 
-      created =
+      results =
         for {user_id, events} <- to_create do
           case API.subscribe(user_id, events) do
             {:ok, _} ->
-              length(events)
+              {user_id, length(events)}
 
             error ->
               Logger.error("could not subscribe #{user_id}: #{inspect(error)}")
-              0
+              {user_id, :failed}
           end
         end
+
+      record_coverage(channels, results)
+      created = for {_, n} <- results, is_integer(n), do: n
 
       with :ok <- API.unsubscribe(to_delete) do
         Logger.info("subscriptions: #{Enum.sum(created)} created, #{length(to_delete)} removed")
         :ok
       end
     end
+  end
+
+  # Ingress coverage (project.md §12.5): a channel whose subscriptions are
+  # all in place at Kick is receiving its events until the next check
+  # (Kick retries a delivery for about a day, so a receiver restart loses
+  # nothing). One whose subscribing failed isn't. A failed check records
+  # nothing: that time is a gap. Webhook counts (follows, subs, gifts,
+  # Kicks) are 0 only where this says we were receiving.
+  @check_gap_s 20 * 60
+
+  defp record_coverage(channels, results) do
+    failed = MapSet.new(for {user_id, :failed} <- results, do: user_id)
+    {bad, good} = Enum.split_with(channels, &MapSet.member?(failed, &1.kick_user_id))
+    now = DateTime.utc_now()
+
+    if good != [],
+      do: Coverage.mark(Enum.map(good, & &1.id), "ingress", true, now, @check_gap_s)
+
+    if bad != [], do: Coverage.mark(Enum.map(bad, & &1.id), "ingress", false, now, @check_gap_s)
   end
 
   @doc """

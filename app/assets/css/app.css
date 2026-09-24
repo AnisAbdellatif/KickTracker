@@ -163,7 +163,8 @@ table, .tabular-nums { font-variant-numeric: tabular-nums; }
   animation: chart-shimmer 1.2s linear infinite;
 }
 .chart-error::after {
-  content: "Couldn't load this chart.";
+  /* The text comes from the page, translated (data-error). */
+  content: attr(data-error);
   position: absolute;
   inset: 0;
   display: grid;

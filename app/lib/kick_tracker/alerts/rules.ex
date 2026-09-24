@@ -144,6 +144,12 @@ defmodule KickTracker.Alerts.Rules do
             key: "journal_buried:#{c.id}",
             message:
               "#{c.id}: #{c.journal_buried} write(s) could not be applied and were set aside"
+          },
+        (c[:quarantined] || []) != [] &&
+          %{
+            key: "quarantined:#{c.id}",
+            message:
+              "#{c.id}: #{length(c.quarantined)} channel(s) kept crashing and wait to be restarted (ids #{Enum.map_join(c.quarantined, ", ", & &1.channel_id)})"
           }
       ]
       |> Enum.filter(& &1)

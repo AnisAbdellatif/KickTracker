@@ -8,7 +8,7 @@ defmodule KickTrackerWeb.Admin.SettingsLive do
 
   use KickTrackerWeb, :live_view
 
-  alias KickTracker.{Audit, Settings}
+  alias KickTracker.Settings
 
   @impl true
   def mount(_params, _session, socket) do
@@ -16,31 +16,26 @@ defmodule KickTrackerWeb.Admin.SettingsLive do
   end
 
   @impl true
-  def handle_event("save", %{"settings" => params}, socket) do
-    results =
-      for {key, default} <- Settings.defaults() do
-        value =
-          if is_boolean(default), do: Map.get(params, key, "false"), else: Map.get(params, key)
+  def handle_event("save", %{"settings" => %{} = params}, socket) do
+    # A checkbox left unticked sends nothing; every other setting must come.
+    values =
+      Map.new(Settings.defaults(), fn {key, default} ->
+        {key,
+         if(is_boolean(default), do: Map.get(params, key, "false"), else: Map.get(params, key))}
+      end)
 
-        {key, Settings.put(key, value)}
-      end
-
-    case Enum.find(results, &match?({_, {:error, _}}, &1)) do
-      nil ->
-        Audit.log(
-          socket.assigns.current_admin,
-          "settings.update",
-          nil,
-          Map.new(results, fn {k, {:ok, v}} -> {k, v} end)
-        )
-
+    # All or nothing, with one audit entry (see Settings.put_all/2).
+    case Settings.put_all(values, socket.assigns.current_admin) do
+      {:ok, _} ->
         {:noreply,
          socket |> assign(settings: Settings.all()) |> put_flash(:info, gettext("Saved."))}
 
-      {key, {:error, msg}} ->
-        {:noreply, put_flash(socket, :error, "#{key}: #{msg}")}
+      {:error, key, msg} ->
+        {:noreply, put_flash(socket, :error, "#{label(key)}: #{msg}")}
     end
   end
+
+  def handle_event("save", _params, socket), do: {:noreply, socket}
 
   defp label("support_page_public"),
     do: gettext("Show the support page (subs, gifts, Kicks, estimated revenue) publicly")

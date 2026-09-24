@@ -201,6 +201,84 @@ defmodule Sim.Fixtures.AnonymizerTest do
     assert state.unknown == %{}
   end
 
+  test "a UUID inside a longer string is replaced, the same as the UUID on its own" do
+    real = "0b5c7e1a-2f3d-4c5b-9a8e-1f2e3d4c5b6a"
+
+    {out, state} =
+      anon(%{
+        "media" => [
+          %{
+            "file_name" => real,
+            "order_column" => 59_143_283,
+            "responsive_images" => %{
+              "fullsize" => %{
+                "urls" => [
+                  "#{real}___fullsize_1200_675.webp",
+                  "#{String.upcase(real)}___fullsize_491_276.webp"
+                ]
+              }
+            }
+          }
+        ],
+        "note" => "see #{real} and 00000000-0000-4000-8000-000000000007"
+      })
+
+    [m] = out["media"]
+    fake = m["file_name"]
+    assert fake =~ ~r/^00000000-0000-4000-8000-\d{12}$/
+
+    assert m["responsive_images"]["fullsize"]["urls"] == [
+             "#{fake}___fullsize_1200_675.webp",
+             "#{fake}___fullsize_491_276.webp"
+           ]
+
+    # A record's sequence number is as good as an id.
+    assert m["order_column"] == 900_000_001
+    # Fakes already there are left alone.
+    assert out["note"] == "see #{fake} and 00000000-0000-4000-8000-000000000007"
+    refute inspect(out) =~ ~r/0b5c7e1a/i
+    refute inspect(out) =~ "59143283"
+
+    assert state.unknown == %{
+             "media.[].responsive_images.fullsize.urls.[]" => 2,
+             "note" => 1
+           }
+  end
+
+  test "strings in lists go through the list key's rules; category tags are kept" do
+    {out, state} =
+      anon(%{
+        "links" => ["https://files.kick.com/a.png", "plain"],
+        "categories" => [%{"tags" => ["Sport", "Simulator"]}],
+        "nested" => [["x"]]
+      })
+
+    assert [url, "plain"] = out["links"]
+    assert url =~ "example.invalid"
+    assert out["categories"] == [%{"tags" => ["Sport", "Simulator"]}]
+    assert out["nested"] == [["x"]]
+    assert state.unknown == %{"links.[]" => 1, "nested.[].[]" => 1}
+  end
+
+  property "no real UUID survives, wherever it is in a string" do
+    uuid =
+      map(binary(length: 16), fn b ->
+        <<a::binary-8, b2::binary-4, c::binary-4, d::binary-4, e::binary-12>> =
+          Base.encode16(b, case: :lower)
+
+        Enum.join([a, b2, c, d, e], "-")
+      end)
+
+    check all(
+            u <- uuid,
+            prefix <- string(:alphanumeric, max_length: 5),
+            suffix <- string([?_, ?., ?g..?z], max_length: 8)
+          ) do
+      {out, _} = anon(%{"x" => [prefix <> " " <> u <> suffix], "y" => %{"z" => u <> suffix}})
+      refute inspect(out) =~ u
+    end
+  end
+
   test "a Pusher channel name anywhere has its ids mapped" do
     {out, state} =
       anon(%{"data" => %{"channel" => "chatrooms.123.v2"}, "other" => %{"channel" => "general"}})

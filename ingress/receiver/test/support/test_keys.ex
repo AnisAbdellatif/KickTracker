@@ -34,7 +34,10 @@ defmodule Receiver.TestKeys do
         "01JH6X0T5B6Z6W9JQ3E4V8N2Q#{System.unique_integer([:positive])}"
       )
 
-    ts = Keyword.get(opts, :timestamp, "2026-09-24T18:02:11Z")
+    ts =
+      Keyword.get_lazy(opts, :timestamp, fn ->
+        DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+      end)
 
     signature =
       :public_key.sign(Receiver.Signature.signed_text(id, ts, body), :sha256, private)

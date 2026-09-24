@@ -95,4 +95,28 @@ defmodule KickTracker.PrivacyTest do
     # Someone else named in the same event is untouched.
     assert Enum.any?(bodies, &(&1.body =~ "\"x\""))
   end
+
+  test "a deletion forgets whom earlier privacy searches named in the audit log" do
+    Repo.insert_all("kick_users", [
+      %{id: @person, username: "someone", seen_at: DateTime.utc_now()},
+      %{id: 7, username: "someone_else", seen_at: DateTime.utc_now()}
+    ])
+
+    # As an older version logged them: the term searched for.
+    for term <- ["Someone", "#{@person}", "someone_else"],
+        do: KickTracker.Audit.log(nil, "privacy.find", term)
+
+    KickTracker.Audit.log(nil, "channel.add", "somestreamer")
+
+    assert %{audit_entries: 2} = Privacy.delete(@person)
+
+    targets = KickTracker.Audit.recent() |> Enum.map(&{&1.action, &1.target}) |> Enum.sort()
+
+    assert targets == [
+             {"channel.add", "somestreamer"},
+             {"privacy.find", nil},
+             {"privacy.find", nil},
+             {"privacy.find", "someone_else"}
+           ]
+  end
 end

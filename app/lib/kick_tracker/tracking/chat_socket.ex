@@ -11,13 +11,18 @@ defmodule KickTracker.Tracking.ChatSocket do
   A connection that doesn't complete its upgrade within 15s is dropped
   and retried, like any other failure.
 
-  It reconnects on its own with backoff (1s doubling to 30s), and records
+  It reconnects on its own with backoff (1s doubling to 30s, with jitter so
+  sockets dropped together don't come back together); the backoff only
+  resets once a connection has stayed up for a minute, so a server that
+  accepts and then drops at once isn't retried every second. It records
   in `coverage` (source `chat`) when chat was being received and when not,
   so per-minute chat counts can say how complete they are. Chat is
   optional: while this is down, everything else keeps collecting.
 
   Until the channel's chatroom id is known (learnt from v2 by the first
-  follower reading), it waits.
+  follower reading), it waits. It starts from the channel's row as it is
+  then (`ChannelSup.current/1`), and follows changes to it: an id learnt,
+  or a chatroom id that changed (it reconnects to the new chatroom).
   """
 
   use GenServer
@@ -33,6 +38,7 @@ defmodule KickTracker.Tracking.ChatSocket do
   @coverage_gap_s 150
   @pong_timeout_s 30
   @connect_timeout_ms 15_000
+  @stable_ms 60_000
 
   @spec start_link(Channel.t()) :: GenServer.on_start()
   def start_link(%Channel{} = channel),
@@ -47,6 +53,11 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   @impl true
   def init(%Channel{} = channel) do
+    # Stopped (its channel restarting or removed, a deploy) between two
+    # messages, never in the middle of one: a coverage write under way
+    # finishes, and the connection is closed properly in `terminate/2`.
+    Process.flag(:trap_exit, true)
+    channel = KickTracker.Tracking.ChannelSup.current(channel)
     Phoenix.PubSub.subscribe(KickTracker.PubSub, "channel_row:#{channel.id}")
     send(self(), :connect)
     Process.send_after(self(), :coverage, @coverage_every_ms)
@@ -60,6 +71,7 @@ defmodule KickTracker.Tracking.ChatSocket do
        upgrade: %{},
        subscribed: MapSet.new(),
        backoff_ms: 1_000,
+       subscribed_at: nil,
        activity_timeout_s: 120,
        last_in: now_s(),
        ping_sent_at: nil,
@@ -95,19 +107,39 @@ defmodule KickTracker.Tracking.ChatSocket do
       Process.send_after(self(), {:connect_timeout, ref}, timeout)
       {:noreply, %{state | conn: conn, ref: ref, ws: nil, upgrade: %{}, last_in: now_s()}}
     else
-      {:error, reason} -> {:noreply, reconnect(state, reason)}
-      {:error, _conn, reason} -> {:noreply, reconnect(state, reason)}
+      {:error, reason} ->
+        {:noreply, reconnect(state, reason)}
+
+      # Connected, but the upgrade request couldn't be sent: the
+      # connection is ours to close.
+      {:error, conn, reason} ->
+        Mint.HTTP.close(conn)
+        {:noreply, reconnect(state, reason)}
     end
   end
 
-  def handle_info({:channel, %Channel{} = channel}, state) do
+  def handle_info({:channel_fields, fields}, state) do
     old = state.channel
+    channel = struct(old, fields)
     state = %{state | channel: channel}
 
     cond do
       # Just learnt where to connect.
       old.chatroom_id == nil and channel.chatroom_id != nil and state.conn == nil ->
         {:noreply, cancel_timer(state) |> tap(fn _ -> send(self(), :connect) end)}
+
+      # The chatroom changed: the subscription is to the wrong room. Drop
+      # it (recording the gap under the old room) and connect again now.
+      old.chatroom_id != nil and channel.chatroom_id != old.chatroom_id ->
+        state =
+          if state.conn,
+            do: reconnect(%{state | channel: old}, :chatroom_changed),
+            else: state
+
+        {:noreply,
+         %{state | channel: channel, backoff_ms: 1_000}
+         |> cancel_timer()
+         |> tap(fn _ -> send(self(), :connect) end)}
 
       # Just learnt the channel's own topic: add it.
       old.kick_channel_id == nil and channel.kick_channel_id != nil and state.ws != nil ->
@@ -149,6 +181,12 @@ defmodule KickTracker.Tracking.ChatSocket do
         {:noreply, state}
     end
   end
+
+  # Trapping exits: a linked process going down still takes this one down
+  # (its supervisor's exit is handled by GenServer itself). A socket port
+  # closing is news the connection's own messages already carry.
+  def handle_info({:EXIT, pid, reason}, state) when is_pid(pid), do: {:stop, reason, state}
+  def handle_info({:EXIT, port, _reason}, state) when is_port(port), do: {:noreply, state}
 
   def handle_info(message, %{conn: conn} = state) when conn != nil do
     case Mint.WebSocket.stream(conn, message) do
@@ -224,9 +262,14 @@ defmodule KickTracker.Tracking.ChatSocket do
         Enum.reduce(topics(state), state, &send_text(&2, Pusher.subscribe(&1)))
 
       {:subscribed, topic} ->
-        state = %{state | subscribed: MapSet.put(state.subscribed, topic), backoff_ms: 1_000}
-        if topic == chatroom_topic(state), do: mark(state, true)
-        state
+        state = %{state | subscribed: MapSet.put(state.subscribed, topic)}
+
+        if topic == chatroom_topic(state) do
+          mark(state, true)
+          %{state | subscribed_at: System.monotonic_time(:millisecond)}
+        else
+          state
+        end
 
       :ping ->
         send_text(state, Pusher.pong())
@@ -295,8 +338,12 @@ defmodule KickTracker.Tracking.ChatSocket do
     was_subscribed = MapSet.member?(state.subscribed, chatroom_topic(state))
     if was_subscribed, do: mark(state, false)
 
+    # Only a connection that stayed up a while starts the backoff over.
+    backoff_ms = if stable?(state), do: 1_000, else: state.backoff_ms
+    delay_ms = jitter(backoff_ms)
+
     Logger.info(
-      "chat feed for channel #{state.channel.id} disconnected (#{inspect(reason)}), retrying in #{state.backoff_ms}ms"
+      "chat feed for channel #{state.channel.id} disconnected (#{inspect(reason)}), retrying in #{delay_ms}ms"
     )
 
     %{
@@ -306,13 +353,23 @@ defmodule KickTracker.Tracking.ChatSocket do
         ws: nil,
         upgrade: %{},
         subscribed: MapSet.new(),
+        subscribed_at: nil,
         ping_sent_at: nil,
         activity_timer: nil,
-        backoff_ms: min(state.backoff_ms * 2, @max_backoff_ms)
+        backoff_ms: min(backoff_ms * 2, @max_backoff_ms)
     }
     |> cancel_timer()
-    |> schedule(:connect, state.backoff_ms)
+    |> schedule(:connect, delay_ms)
   end
+
+  defp stable?(%{subscribed_at: nil}), do: false
+
+  defp stable?(state),
+    do: System.monotonic_time(:millisecond) - state.subscribed_at >= @stable_ms
+
+  @doc false
+  # Between three quarters of the backoff and all of it.
+  def jitter(ms), do: ms - :rand.uniform(div(ms, 4) + 1) + 1
 
   defp schedule(state, message, ms), do: %{state | timer: Process.send_after(self(), message, ms)}
 

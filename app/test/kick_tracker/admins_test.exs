@@ -177,5 +177,48 @@ defmodule KickTracker.AdminsTest do
 
       assert Admins.get_by_session_token(token) == nil
     end
+
+    test "a password that isn't a string is refused, not a crash" do
+      {admin, password, _} = Fixtures.admin!()
+
+      assert {:error, cs} =
+               Admins.change_password(admin, %{"x" => password}, %{
+                 "password" => ["a brand new password"],
+                 "password_confirmation" => "a brand new password"
+               })
+
+      assert %{current_password: _, password: _} = errors_on(cs)
+    end
+
+    test "disabling ends every session with a disconnect, and revokes only their invitations" do
+      {admin, _, _} = Fixtures.admin!()
+      {other, _, _} = Fixtures.admin!()
+      tokens = [Admins.create_session_token(admin), Admins.create_session_token(admin)]
+
+      for t <- tokens,
+          do: Phoenix.PubSub.subscribe(KickTracker.PubSub, Admins.live_socket_id(t))
+
+      {:ok, theirs} = Admins.invite(admin, "theirs@example.com")
+      {:ok, others} = Admins.invite(other, "others@example.com")
+
+      assert {:ok, %{disabled_at: %DateTime{}}} = Admins.set_disabled(admin, true)
+
+      for t <- tokens do
+        topic = Admins.live_socket_id(t)
+        assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "disconnect"}
+        assert Admins.get_by_session_token(t) == nil
+      end
+
+      assert Admins.get_invite(theirs) == nil
+      assert Admins.get_invite(others)
+    end
+
+    test "a session's expiry is 14 days after it began" do
+      {admin, _, _} = Fixtures.admin!()
+      token = Admins.create_session_token(admin)
+      at = Admins.session_expires_at(token)
+      assert_in_delta DateTime.diff(at, DateTime.utc_now()), 14 * 24 * 3600, 60
+      assert Admins.session_expires_at("unknown") == nil
+    end
   end
 end

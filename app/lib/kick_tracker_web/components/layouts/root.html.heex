@@ -1,9 +1,22 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang={KickTrackerWeb.Layouts.html_lang()} dir={KickTrackerWeb.Layouts.html_dir()}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
+    <meta name="description" content={KickTrackerWeb.Layouts.description(assigns)} />
+    <meta property="og:site_name" content={KickTrackerWeb.Layouts.site_name()} />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:title"
+      content={assigns[:page_title] || KickTrackerWeb.Layouts.site_name()}
+    />
+    <meta property="og:description" content={KickTrackerWeb.Layouts.description(assigns)} />
+    <meta
+      :if={assigns[:conn]}
+      property="og:url"
+      content={Phoenix.Controller.current_url(@conn)}
+    />
     <.live_title
       default={KickTrackerWeb.Layouts.site_name()}
       suffix={" · " <> KickTrackerWeb.Layouts.site_name()}
@@ -14,28 +27,48 @@
     </script>
     <script nonce={assigns[:conn] && @conn.assigns[:csp_nonce]}>
       (() => {
+        // Storage can be unavailable (private windows, blocked site data):
+        // the theme then follows the system and nothing is remembered.
+        const stored = () => { try { return localStorage.getItem("phx:theme"); } catch (_e) { return null; } };
+        const store = (theme) => {
+          try {
+            if (theme) localStorage.setItem("phx:theme", theme);
+            else localStorage.removeItem("phx:theme");
+          } catch (_e) {}
+        };
         const systemTheme = () => matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        const root = document.documentElement;
+
+        // Which of the toggle's buttons is the current choice.
+        const sync = () => {
+          const current = root.getAttribute("data-theme-source") === "system" ? "system" : root.getAttribute("data-theme");
+          document.querySelectorAll("[data-phx-theme]").forEach((b) =>
+            b.setAttribute("aria-pressed", String(b.dataset.phxTheme === current)));
+        };
 
         const setTheme = (theme) => {
           if (theme === "system") {
-            localStorage.removeItem("phx:theme");
-            document.documentElement.setAttribute("data-theme", systemTheme());
-            document.documentElement.setAttribute("data-theme-source", "system");
+            store(null);
+            root.setAttribute("data-theme", systemTheme());
+            root.setAttribute("data-theme-source", "system");
           } else {
-            localStorage.setItem("phx:theme", theme);
-            document.documentElement.setAttribute("data-theme", theme);
-            document.documentElement.setAttribute("data-theme-source", "user");
+            store(theme);
+            root.setAttribute("data-theme", theme);
+            root.setAttribute("data-theme-source", "user");
           }
+          sync();
         };
-        if (!document.documentElement.hasAttribute("data-theme")) {
-          setTheme(localStorage.getItem("phx:theme") || "system");
+        if (!root.hasAttribute("data-theme")) {
+          setTheme(stored() || "system");
         }
         window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
+        window.addEventListener("DOMContentLoaded", sync);
+        window.addEventListener("phx:page-loading-stop", sync);
 
         matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
-          if (document.documentElement.getAttribute("data-theme-source") === "system") {
-            document.documentElement.setAttribute("data-theme", systemTheme());
+          if (root.getAttribute("data-theme-source") === "system") {
+            root.setAttribute("data-theme", systemTheme());
           }
         });
       })();

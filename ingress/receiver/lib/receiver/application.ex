@@ -1,7 +1,7 @@
 defmodule Receiver.Application do
   @moduledoc """
-  The receiver: key, spool, publisher, forwarder, then the HTTP server
-  last, so it only accepts deliveries once it can store them.
+  The receiver: key, spool, publisher, forwarder, the peer check, then the
+  HTTP server last, so it only accepts deliveries once it can store them.
   """
 
   use Application
@@ -23,6 +23,7 @@ defmodule Receiver.Application do
        exchange: env.(:exchange),
        confirm_timeout_ms: env.(:confirm_timeout_ms)},
       Receiver.Forwarder,
+      {Receiver.Peer, url: env.(:peer_health_url)},
       {Bandit, plug: Receiver.Router, port: env.(:port), ip: env.(:listen_ip)}
     ]
   end

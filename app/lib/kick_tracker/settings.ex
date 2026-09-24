@@ -18,6 +18,14 @@ defmodule KickTracker.Settings do
     "kick_value_usd" => 0.01
   }
 
+  # What a number setting may be: a share is a fraction; prices are
+  # capped well above anything real, to catch a slipped digit.
+  @ranges %{
+    "sub_price_usd" => {0, 1000},
+    "sub_share" => {0, 1},
+    "kick_value_usd" => {0, 100}
+  }
+
   @doc "Every setting with its default."
   def defaults, do: @defaults
 
@@ -37,28 +45,78 @@ defmodule KickTracker.Settings do
     end)
   end
 
-  @doc "Stores a setting, cast to its default's type."
+  @doc "The range a number setting must fall in, inclusive."
+  @spec range(String.t()) :: {number(), number()} | nil
+  def range(key), do: Map.get(@ranges, key)
+
+  @doc "Stores a setting, cast to its default's type and checked against its range."
   @spec put(String.t(), term()) :: {:ok, term()} | {:error, String.t()}
   def put(key, value) when is_map_key(@defaults, key) do
-    with {:ok, v} <- cast(@defaults[key], value) do
-      Repo.query!(
-        """
-        INSERT INTO settings (key, value, inserted_at, updated_at) VALUES ($1, $2, now(), now())
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
-        """,
-        [key, %{"v" => v}]
-      )
-
+    with {:ok, v} <- cast(key, @defaults[key], value) do
+      Repo.transaction(fn -> store(key, v) end)
       KickTracker.Cache.clear()
       {:ok, v}
     end
   end
 
-  defp cast(default, v) when is_boolean(default), do: {:ok, v in [true, "true", "on", "1"]}
+  @doc """
+  Stores several settings at once: every value is cast and checked first,
+  and either all are stored, with one audit entry for the change, or none
+  is (the first error is returned, with its key). Keys that aren't
+  settings are ignored.
+  """
+  @spec put_all(map(), KickTracker.Admins.Admin.t() | nil) ::
+          {:ok, map()} | {:error, String.t(), String.t()}
+  def put_all(values, admin) when is_map(values) do
+    cast =
+      for {key, value} <- values, is_map_key(@defaults, key) do
+        {key, cast(key, @defaults[key], value)}
+      end
 
-  defp cast(default, v) when is_float(default) do
-    case Float.parse(to_string(v)) do
-      {f, ""} when f >= 0 -> {:ok, f}
+    case Enum.find(cast, &match?({_, {:error, _}}, &1)) do
+      {key, {:error, msg}} ->
+        {:error, key, msg}
+
+      nil ->
+        values = Map.new(cast, fn {k, {:ok, v}} -> {k, v} end)
+
+        {:ok, _} =
+          Repo.transaction(fn ->
+            Enum.each(values, fn {k, v} -> store(k, v) end)
+            KickTracker.Audit.log(admin, "settings.update", nil, values)
+          end)
+
+        KickTracker.Cache.clear()
+        {:ok, values}
+    end
+  end
+
+  defp store(key, v) do
+    Repo.query!(
+      """
+      INSERT INTO settings (key, value, inserted_at, updated_at) VALUES ($1, $2, now(), now())
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+      """,
+      [key, %{"v" => v}]
+    )
+  end
+
+  defp cast(_key, default, v) when is_boolean(default),
+    do: {:ok, v in [true, "true", "on", "1"]}
+
+  defp cast(key, default, v) when is_float(default) do
+    {min, max} = @ranges[key]
+
+    parsed =
+      cond do
+        is_number(v) -> {v / 1, ""}
+        is_binary(v) -> v |> String.trim() |> Float.parse()
+        true -> :error
+      end
+
+    case parsed do
+      {f, ""} when f >= min and f <= max -> {:ok, f}
+      {f, ""} when is_float(f) -> {:error, "must be between #{min} and #{max}"}
       _ -> {:error, "must be a number"}
     end
   end

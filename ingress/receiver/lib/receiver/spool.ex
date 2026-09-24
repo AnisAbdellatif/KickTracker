@@ -38,6 +38,16 @@ defmodule Receiver.Spool do
   @spec count(GenServer.server()) :: non_neg_integer()
   def count(server \\ __MODULE__), do: GenServer.call(server, :count)
 
+  @doc """
+  How many envelopes are waiting and how much disk the spool takes (the
+  database and its write-ahead log), for the health check.
+  """
+  @spec stats(GenServer.server(), timeout()) :: %{
+          count: non_neg_integer(),
+          bytes: non_neg_integer()
+        }
+  def stats(server \\ __MODULE__, timeout \\ 5_000), do: GenServer.call(server, :stats, timeout)
+
   @impl true
   def init(opts) do
     path = Keyword.fetch!(opts, :path)
@@ -58,7 +68,7 @@ defmodule Receiver.Spool do
       )
       """)
 
-    {:ok, %{db: db}}
+    {:ok, %{db: db, path: path}}
   end
 
   @impl true
@@ -95,15 +105,29 @@ defmodule Receiver.Spool do
     {:reply, run(db, "DELETE FROM spool WHERE id = ?1", [id]), state}
   end
 
-  def handle_call(:count, _from, %{db: db} = state) do
-    {:ok, stmt} = Sqlite3.prepare(db, "SELECT count(*) FROM spool")
-    {:row, [count]} = Sqlite3.step(db, stmt)
-    :ok = Sqlite3.release(db, stmt)
-    {:reply, count, state}
+  def handle_call(:count, _from, %{db: db} = state), do: {:reply, count_rows(db), state}
+
+  def handle_call(:stats, _from, %{db: db, path: path} = state) do
+    bytes = Enum.sum(for p <- [path, path <> "-wal"], do: file_size(p))
+    {:reply, %{count: count_rows(db), bytes: bytes}, state}
   end
 
   @impl true
   def terminate(_reason, %{db: db}), do: Sqlite3.close(db)
+
+  defp count_rows(db) do
+    {:ok, stmt} = Sqlite3.prepare(db, "SELECT count(*) FROM spool")
+    {:row, [count]} = Sqlite3.step(db, stmt)
+    :ok = Sqlite3.release(db, stmt)
+    count
+  end
+
+  defp file_size(path) do
+    case File.stat(path) do
+      {:ok, %{size: size}} -> size
+      {:error, _} -> 0
+    end
+  end
 
   defp run(db, sql, params) do
     with {:ok, stmt} <- Sqlite3.prepare(db, sql),

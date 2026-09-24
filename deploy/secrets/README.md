@@ -7,19 +7,20 @@ git-ignored and live only on the server.
 
 | File | Used by | Holds |
 |---|---|---|
-| `stack.env` | The bundled Caddy, `ops/check-host.sh` | `SITE_HOST`, `INGRESS_HOST`, `ACME_EMAIL`, `ADMIN_ALLOW` (with the host's own Caddy, only the hosts are read) |
+| `stack.env` | The bundled Caddy, `ops/check-host.sh` (which parses it, never sources it) | `SITE_HOST`, `INGRESS_HOST`, `ACME_EMAIL`, `ADMIN_ALLOW` (with the host's own Caddy, only the hosts are read) |
 | `app.env` | web, migrate | see `app.env.example` |
 | `collector.env` | both collectors | see `collector.env.example` (no web secrets) |
 | `shadow.env`, `shadow-db.env` | the shadow machine (`compose.shadow.yml`) | see their examples |
 | `receiver.env` | both receivers | see `receiver.env.example` |
-| `db.env` | the database and the backups | see `db.env.example` |
+| `db.env` | the database and the backups (`backup/*.sh` also read `POSTGRES_*`, `WALG_*`, `AWS_*` and the backup heartbeat URLs here) | see `db.env.example` |
 | `rabbitmq.env` | `rabbitmq/make-prod-definitions.sh` | the five RabbitMQ passwords |
 
 ## First time
 
 1. Make an age key on the server and on each admin's machine:
    `age-keygen -o ~/.config/sops/age/keys.txt`, and put the public keys in
-   `../../.sops.yaml` (replacing the placeholder).
+   `../../.sops.yaml` (then `sops updatekeys` each `*.sops.env`, so the
+   new key can read them).
 2. Copy each `*.example` to its name without `.example`, fill it in, and
    encrypt it: `sops --encrypt app.env > app.sops.env`.
    A setting left empty (`HEARTBEAT_URL=`) counts as not set. `app.env`

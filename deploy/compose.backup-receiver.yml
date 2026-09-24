@@ -1,18 +1,27 @@
 # Stage 2 (project.md §15.2): a backup receiver on a second VPS, another
 # provider or region, with its own spool. It publishes to the main
-# RabbitMQ over the private network (WireGuard or Tailscale: AMQP_URL points
-# at the main VPS's private address). Cloudflare Load Balancing sends the
-# webhook hostname here when the main VPS stops answering /health.
+# RabbitMQ over the private network (WireGuard or Tailscale: AMQP_URL in
+# secrets/receiver.env points at the main VPS's private address, where
+# compose.single.yml publishes 5672 when PRIVATE_IP is set). Cloudflare
+# Load Balancing sends the webhook hostname here when the main VPS stops
+# answering /health. Setup: deploy/README.md, "The backup receiver".
 name: kicktracker-backup
 
 services:
+  # HTTPS with a Cloudflare Origin CA certificate (caddy/backup-receiver.caddy:
+  # this machine can't pass an ACME challenge for a host Cloudflare routes
+  # to the main VPS).
   caddy:
     image: caddy:2
     restart: unless-stopped
-    ports: ["80:80", "443:443"]
+    ports: ["443:443"]
     env_file: [secrets/stack.env]
-    command: caddy reverse-proxy --from {$$INGRESS_HOST} --to receiver:4060
-    volumes: [caddy_data:/data]
+    volumes:
+      - ./caddy/backup-receiver.caddy:/etc/caddy/Caddyfile:ro
+      - ./secrets/origin-cert.pem:/etc/caddy/origin-cert.pem:ro
+      - ./secrets/origin-key.pem:/etc/caddy/origin-key.pem:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
   receiver:
     image: ${RECEIVER_IMAGE:-ghcr.io/anisabdellatif/kicktracker-receiver:latest}
@@ -23,4 +32,5 @@ services:
 
 volumes:
   caddy_data:
+  caddy_config:
   spool:

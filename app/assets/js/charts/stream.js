@@ -1,7 +1,7 @@
 // The stream page (project.md §13.3): one time axis, stacked panels sharing
 // zoom and crosshair. Viewers at 60s with category bands, title ticks,
 // markers and "no data" shading; chat (messages and active chatters); support.
-import {baseOption, tooltip, timeAxis, valueAxis, gapAreas, zip, line, bar, alpha} from "./theme"
+import {baseOption, tooltip, timeAxis, valueAxis, gapAreas, zip, line, bar, alpha, fmt, escapeHtml} from "./theme"
 import {annotationAreas} from "./timeseries"
 
 
@@ -14,7 +14,10 @@ export function option(data, opts, t) {
     {left: 8, right: 8, top: "82%", height: "13%", containLabel: true},
   ]
   o.axisPointer = {link: [{xAxisIndex: "all"}]}
-  o.tooltip = tooltip(t)
+  // The crosshair's tooltip also names what happened near that minute (a
+  // title change, a raid, a gift burst) and the category: the ticks and
+  // markers themselves are too small to point at.
+  o.tooltip = tooltip(t, {formatter: (ps) => axisTooltip(ps, data, L)})
   const P = t.palette
   // Category bands: very light washes of the later palette slots, so they
   // never compete with the viewer line (slot 1).
@@ -50,8 +53,8 @@ export function option(data, opts, t) {
     line(L.viewers || "Viewers", zip(data.viewers.t, data.viewers.avg), P[0], {
       xAxisIndex: 0, yAxisIndex: 0, areaStyle: {color: alpha(P[0], 0.1)},
       markArea: {silent: true, data: segments.concat(gaps).concat(annotationAreas(data.annotations, t))},
-      markLine: {silent: false, symbol: "none", data: titles, tooltip: {formatter: (p) => p.name}},
-      markPoint: {data: markers, tooltip: {formatter: (p) => p.name}}}),
+      markLine: {silent: true, symbol: "none", data: titles},
+      markPoint: {silent: true, data: markers}}),
     bar(L.messages || "Messages / min", zip(data.chat.t, data.chat.messages), alpha(P[0], 0.35), {
       xAxisIndex: 1, yAxisIndex: 1, barMaxWidth: 4, itemStyle: {color: alpha(P[0], 0.35), borderRadius: [2, 2, 0, 0]},
       markArea: {silent: true, data: gapAreas(data.chat.gaps, t)}}),
@@ -73,10 +76,36 @@ function nearest(v, at) {
 }
 
 function markerName(m, L) {
-  if (m.kind === "flagged") return `${m.value}: ${L.flagged || "flagged reading, not counted as a peak"}`
-  if (m.kind === "gift") return `${m.value} ${L.gifted || "gifted subs"}`
-  if (m.kind === "kicks") return `${m.value} Kicks`
-  return `${m.kind}${m.other ? " · " + m.other : ""}${m.value ? " · " + m.value : ""}`
+  if (m.kind === "flagged") return `${fmt(m.value)}: ${L.flagged || "flagged reading, not counted as a peak"}`
+  if (m.kind === "gift") return `${fmt(m.value)} ${L.gifted || "gifted subs"}`
+  if (m.kind === "kicks") return `${fmt(m.value)} ${L.kicks || "Kicks"}`
+  const kind = (L.kinds || {})[m.kind] || L.event || m.kind
+  return `${kind}${m.other ? " · " + m.other : ""}${m.value ? " · " + fmt(m.value) : ""}`
+}
+
+// Within half a reading of the hovered minute.
+const NEAR_S = 45
+
+function axisTooltip(ps, data, L) {
+  const list = Array.isArray(ps) ? ps : [ps]
+  if (!list.length) return ""
+  const at = list[0].axisValue / 1000
+  const lines = [`<div>${escapeHtml(list[0].axisValueLabel)}</div>`]
+  const segment = (data.segments || []).find((s) => s.from <= at && at < s.to)
+  if (segment) lines.push(`<div>${escapeHtml(L.category || "")}${L.category ? ": " : ""}<b>${escapeHtml(segment.name)}</b></div>`)
+  for (const p of list) {
+    const v = Array.isArray(p.value) ? p.value[1] : p.value
+    if (v == null) continue
+    lines.push(`<div>${p.marker}${escapeHtml(p.seriesName)} <b>${fmt(v)}</b></div>`)
+  }
+  const near = (x) => Math.abs(x - at) <= NEAR_S
+  for (const x of (data.titles || []).slice(1)) {
+    if (near(x.at)) lines.push(`<div>${escapeHtml(L.title || "")}${L.title ? ": " : ""}${escapeHtml(x.title)}</div>`)
+  }
+  for (const m of data.markers || []) {
+    if (near(m.at)) lines.push(`<div><b>${escapeHtml(markerName(m, L))}</b></div>`)
+  }
+  return lines.join("")
 }
 
 export function table(data, opts) {

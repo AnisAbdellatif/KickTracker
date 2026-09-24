@@ -55,6 +55,34 @@ defmodule KickTrackerWeb.Admin.HealthLiveTest do
     assert html =~ "Recent handoffs"
   end
 
+  test "a channel quarantined on a collector is named, with how often it crashed", %{conn: conn} do
+    channel = Fixtures.channel!(slug: "somestreamer")
+    now = DateTime.utc_now()
+
+    status = %{
+      "journal" => %{"depth" => 0, "oldest_at" => nil, "buried" => 0},
+      "quarantined" => [
+        %{
+          "channel_id" => channel.id,
+          "failures" => 3,
+          "since" => DateTime.to_iso8601(DateTime.add(now, -120))
+        }
+      ]
+    }
+
+    KickTracker.Repo.query!(
+      "INSERT INTO collector_nodes (id, state, epoch, started_at, heartbeat_at, status) VALUES ('collector-a', 'leader', 1, $1, $1, $2)",
+      [now, status]
+    )
+
+    assert [%{quarantined: [%{channel_id: id, failures: 3}]}] = Health.collectors()
+    assert id == channel.id
+
+    {:ok, view, _html} = live(conn, ~p"/admin")
+    assert has_element?(view, "#quarantined-collector-a-#{channel.id}", "somestreamer")
+    assert has_element?(view, "#quarantined-collector-a-#{channel.id}", "3 times in a row")
+  end
+
   test "open alerts are listed first", %{conn: conn} do
     KickTracker.Repo.insert_all("alerts", [
       %{

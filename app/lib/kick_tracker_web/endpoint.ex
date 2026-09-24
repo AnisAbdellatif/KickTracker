@@ -43,7 +43,7 @@ defmodule KickTrackerWeb.Endpoint do
   plug Plug.RequestId
   # The visitor's address behind Caddy (and Cloudflare), for rate limits.
   plug KickTrackerWeb.Plugs.RemoteIp
-  plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+  plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint], log: {__MODULE__, :log_level, []}
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
@@ -54,4 +54,14 @@ defmodule KickTrackerWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
   plug KickTrackerWeb.Router
+
+  @doc """
+  The level of a request's "GET /path" log line. Phoenix logs the path
+  as is, and an invitation link from before links moved the token into
+  the query (`/admin/invite/<token>`) carries it in the path: those are
+  not logged. Query strings aren't logged, and params go through
+  `:filter_parameters`.
+  """
+  def log_level(%Plug.Conn{path_info: ["admin", "invite", _ | _]}), do: false
+  def log_level(_conn), do: :info
 end

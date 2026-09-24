@@ -5,7 +5,7 @@ import {baseOption, timeAxis, valueAxis, gapAreas, dayFormatter, zip, line, bar,
 
 export function option(data, opts, t) {
   const o = baseOption(t)
-  const xFmt = data.res === "1d" ? {axisLabel: {color: t.muted, hideOverlap: true, formatter: dayFormatter(data.tz)}} : {}
+  const xFmt = (data.res === "1d" || data.res === "1w") ? {axisLabel: {color: t.muted, hideOverlap: true, formatter: dayFormatter(data.tz)}} : {}
   o.xAxis = timeAxis(t, xFmt)
   // Counts start at zero; totals (followers) show their movement.
   o.yAxis = valueAxis(t, opts.zero === false ? {scale: true} : {min: 0})

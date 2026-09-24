@@ -4,5 +4,5 @@
   # Dialyzer infers the upgrade accumulator's status too narrowly and
   # concludes Mint.WebSocket.new/4 can only fail; the chat socket's tests
   # (pipeline_sim_test, against the fake Pusher) take the success path.
-  {"lib/kick_tracker/tracking/chat_socket.ex", :pattern_match, 191}
+  {"lib/kick_tracker/tracking/chat_socket.ex", :pattern_match}
 ]

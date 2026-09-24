@@ -8,21 +8,26 @@ defmodule KickTracker.Collector.Sources.Followers do
 
   A reading also stores the channel's chatroom id when it wasn't known,
   which chat needs. A failed reading is a gap (coverage source
-  `followers`), never a zero, and the channel is tried again 10 minutes
-  later, not at every cycle.
+  `followers`), never a zero. A channel whose readings keep failing (v2
+  behind Cloudflare, a 404 after a rename) backs off: tried again 10
+  minutes after the first failure, then 20, 40, ... up to 6 hours; one
+  success resets it. The
+  failures are kept in the journal, so a restart doesn't reset the
+  backoff. Requests (a stream's start and end) are always served.
   """
 
   @behaviour KickTracker.Collector.Source
 
   require Logger
 
-  alias KickTracker.Collector.{SourceRunner, Status}
+  alias KickTracker.Collector.{Journal, SourceRunner, Status}
   alias KickTracker.Kick.V2
   alias KickTracker.Repo
 
   @live_every_s 15 * 60
   @offline_every_s 24 * 3600
   @retry_after_s 10 * 60
+  @max_retry_after_s 6 * 3600
 
   @doc "Asks for a reading of a channel soon. A no-op where collection doesn't run."
   @spec request(integer(), atom() | String.t()) :: :ok
@@ -40,7 +45,8 @@ defmodule KickTracker.Collector.Sources.Followers do
       interval_ms: Keyword.get(opts, :interval_ms, 15_000),
       per_cycle: Keyword.get(opts, :per_cycle, 3),
       last: nil,
-      attempted: %{},
+      # channel id => {consecutive failures, last attempt}
+      failures: nil,
       requests: []
     }
   end
@@ -86,27 +92,49 @@ defmodule KickTracker.Collector.Sources.Followers do
         state
       ) do
     ops = [{:follower_sample, c.id, at, followers}]
+    state = forget_failures(state, c.id)
 
     {ops, effects} =
       if chatroom_id && chatroom_id != c.chatroom_id,
         do:
           {ops ++ [{:channel_ids, c.id, nil, chatroom_id}],
-           [{:channel, %{c | chatroom_id: chatroom_id}}]},
+           [{:channel, c.id, %{chatroom_id: chatroom_id}}]},
         else: {ops, []}
 
     {ops, effects, %{state | last: Map.put(state.last, c.id, at)}}
   end
 
-  def record(%{channels: [c]}, {:error, _}, at, state),
-    do: {[], [], %{state | attempted: Map.put(state.attempted, c.id, at)}}
+  def record(%{channels: [c]}, {:error, _}, at, state) do
+    {count, _} = Map.get(state.failures || %{}, c.id, {0, nil})
+    failures = Map.put(state.failures || %{}, c.id, {count + 1, at})
+    Journal.put(:follower_failures, failures)
+    {[], [], %{state | failures: failures}}
+  end
+
+  @doc "How long after the last of `count` failures in a row a channel is tried again."
+  @spec retry_after_s(pos_integer()) :: pos_integer()
+  def retry_after_s(count),
+    do: min(@retry_after_s * Integer.pow(2, min(count, 16) - 1), @max_retry_after_s)
 
   defp due?(c, state, live?, now) do
     every = if live?, do: @live_every_s, else: @offline_every_s
     last = state.last[c.id]
-    attempted = state.attempted[c.id]
 
     (last == nil or DateTime.diff(now, last) >= every - 60) and
-      (attempted == nil or DateTime.diff(now, attempted) >= @retry_after_s)
+      case Map.get(state.failures || %{}, c.id) do
+        nil -> true
+        {count, at} -> DateTime.diff(now, at) >= retry_after_s(count)
+      end
+  end
+
+  defp forget_failures(state, channel_id) do
+    if Map.has_key?(state.failures || %{}, channel_id) do
+      failures = Map.delete(state.failures, channel_id)
+      Journal.put(:follower_failures, failures)
+      %{state | failures: failures}
+    else
+      state
+    end
   end
 
   # When each channel was last read, from the database once; if it can't
@@ -127,7 +155,7 @@ defmodule KickTracker.Collector.Sources.Followers do
           %{}
       end
 
-    %{state | last: last}
+    %{state | last: last, failures: state.failures || Journal.get(:follower_failures) || %{}}
   end
 
   defp load_last(state), do: state

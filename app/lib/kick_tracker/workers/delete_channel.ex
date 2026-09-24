@@ -4,7 +4,12 @@ defmodule KickTracker.Workers.DeleteChannel do
   explicit confirmation, typed slug"; §18.3: a streamer asked to be
   removed). Run by the collector; the admin queues it after typing the
   slug. The channel stops being tracked first, so nothing new arrives
-  while it runs; its webhook subscriptions go at the next sync.
+  while it runs: its row is deactivated, its processes are stopped and
+  waited for (their last chat goes to the journal), it leaves the list the
+  sources poll, and the journal is written out, all before anything is
+  deleted. A write for it still on its way after that (a poll that was
+  under way) is dropped by the Writer. Its webhook subscriptions go at the
+  next sync.
 
   Like a privacy deletion, this is an exception to append-only raw facts
   that only a removal request justifies, and it is audited.
@@ -27,6 +32,7 @@ defmodule KickTracker.Workers.DeleteChannel do
     case Repo.query!("SELECT kick_user_id, slug FROM channels WHERE id = $1", [id]).rows do
       [[kick_user_id, slug]] ->
         Repo.query!("UPDATE channels SET active = false, public = false WHERE id = $1", [id])
+        stop_collecting(id)
         Phoenix.PubSub.broadcast(KickTracker.PubSub, KickTracker.Channels.topic(), {:removed, id})
 
         Repo.transaction(
@@ -62,6 +68,18 @@ defmodule KickTracker.Workers.DeleteChannel do
 
       [] ->
         :ok
+    end
+  end
+
+  # Runs where collection runs (job queues run only on the leader).
+  defp stop_collecting(id) do
+    KickTracker.Tracking.Manager.stop_channel(id)
+
+    if GenServer.whereis(KickTracker.Collector.Writer) do
+      case KickTracker.Collector.Writer.drain(KickTracker.Collector.Writer, 60_000) do
+        :ok -> :ok
+        {:error, reason} -> raise "the journal could not be written out: #{inspect(reason)}"
+      end
     end
   end
 

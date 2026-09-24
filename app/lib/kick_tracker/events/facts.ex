@@ -6,8 +6,11 @@ defmodule KickTracker.Events.Facts do
   Returns the fact and the Kick users it names (id and username, for
   `kick_users`, the only place usernames are kept). Message text in any
   event is never read. An event whose body lacks what a fact needs gives
-  `:none`: it stays in `webhook_events` and can be replayed once the
-  parser knows better.
+  `:none`: the event is still stored in `webhook_events` and marked
+  processed, so nothing automatic looks at it again (the `ProcessEvents`
+  retry job only sees unprocessed events). Only an admin replay
+  (`Workers.Reprocess`, kind `"replay"`) runs it through the parser again,
+  once the parser knows better.
 
   Only `channel.followed` has been recorded from the real Kick; the sub,
   gift and Kicks shapes follow Kick's documentation, as the simulator's do

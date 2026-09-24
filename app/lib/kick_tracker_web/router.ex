@@ -63,6 +63,7 @@ defmodule KickTrackerWeb.Router do
     get "/streams/:id", StreamController, :show
     get "/streams/:id/chatters", StreamController, :chatters
     get "/compare", CompareController, :show
+    get "/sparklines/:slug", SparklineController, :show
   end
 
   ## Admin (project.md §13.8)
@@ -80,6 +81,9 @@ defmodule KickTrackerWeb.Router do
     delete "/logout", SessionController, :delete
 
     live_session :admin_invite, on_mount: [{KickTrackerWeb.AdminAuth, :public}] do
+      # The token goes in the query, which request logs leave out; the
+      # path form is kept for links handed out before (see Endpoint.log_level/1).
+      live "/invite", InviteLive
       live "/invite/:token", InviteLive
     end
   end
@@ -110,6 +114,9 @@ defmodule KickTrackerWeb.Router do
 
     live_dashboard "/dashboard",
       metrics: KickTrackerWeb.Telemetry,
+      # Read-only: no killing processes from a browser tab (its default,
+      # stated so a change is deliberate).
+      allow_destructive_actions: false,
       on_mount: [{KickTrackerWeb.AdminAuth, :require_admin}],
       csp_nonce_assign_key: :csp_nonce
 

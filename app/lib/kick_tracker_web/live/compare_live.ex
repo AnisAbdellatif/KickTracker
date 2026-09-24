@@ -7,7 +7,7 @@ defmodule KickTrackerWeb.CompareLive do
   use KickTrackerWeb, :live_view
 
   alias KickTracker.{Cache, Groups, Reports}
-  alias KickTrackerWeb.Period
+  alias KickTrackerWeb.{PageParams, Period}
 
   @metrics ~w(viewers chat followers)
 
@@ -16,6 +16,10 @@ defmodule KickTrackerWeb.CompareLive do
     {:ok,
      assign(socket,
        page_title: gettext("Compare"),
+       page_description:
+         gettext(
+           "Two to four channels side by side: viewers, chat, followers and shared chatters."
+         ),
        all: Reports.channels(),
        groups: Groups.list(public: true)
      )}
@@ -23,6 +27,8 @@ defmodule KickTrackerWeb.CompareLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
+    params = PageParams.clean(params)
+
     slugs = (params["c"] || "") |> String.split(",", trim: true) |> Enum.take(4)
 
     channels =
@@ -77,6 +83,17 @@ defmodule KickTrackerWeb.CompareLive do
      push_patch(socket,
        to: compare_path(Map.put(socket.assigns.params, "c", Enum.join(slugs, ",")))
      )}
+  end
+
+  def handle_event("custom_range", form, socket) do
+    case PageParams.custom_range(form["from"], form["to"]) do
+      {:ok, range} ->
+        params = socket.assigns.params |> Map.delete("period") |> Map.merge(range)
+        {:noreply, push_patch(socket, to: compare_path(params))}
+
+      {:error, message} ->
+        {:noreply, put_flash(socket, :error, message)}
+    end
   end
 
   def handle_event("remove", %{"slug" => slug}, socket) do
@@ -195,25 +212,27 @@ defmodule KickTrackerWeb.CompareLive do
             <p class="text-xs opacity-60">
               {gettext("People who chatted in both channels during the period.")}
             </p>
-            <table id="overlap" class="table table-sm mt-2 w-auto">
-              <thead>
-                <tr>
-                  <th></th><th :for={b <- @channels} class="text-end">{b.slug}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr :for={a <- @channels}>
-                  <th>{a.slug}</th>
-                  <td :for={b <- @channels} class="text-end">
-                    <%= if a.id == b.id do %>
-                      <span class="opacity-60"><.num value={Map.get(@overlap.counts, a.id, 0)} /></span>
-                    <% else %>
-                      <.num value={shared(@overlap, a.id, b.id)} />
-                    <% end %>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="mt-2 overflow-x-auto">
+              <table id="overlap" class="table table-sm w-auto">
+                <thead>
+                  <tr>
+                    <th></th><th :for={b <- @channels} class="text-end">{b.slug}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={a <- @channels}>
+                    <th>{a.slug}</th>
+                    <td :for={b <- @channels} class="text-end">
+                      <%= if a.id == b.id do %>
+                        <span class="opacity-60"><.num value={Map.get(@overlap.counts, a.id, 0)} /></span>
+                      <% else %>
+                        <.num value={shared(@overlap, a.id, b.id)} />
+                      <% end %>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </section>
         <% end %>
       </div>

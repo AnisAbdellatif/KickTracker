@@ -11,7 +11,7 @@ defmodule KickTracker.Reports do
   import Ecto.Query
 
   alias KickTracker.Channels.Channel
-  alias KickTracker.{Metrics, Repo}
+  alias KickTracker.{Metrics, Repo, Series}
 
   # At most this many gift and Kicks markers on a stream's chart.
   @max_markers 30
@@ -133,7 +133,7 @@ defmodule KickTracker.Reports do
 
   @doc "A channel's figures over one period."
   @spec period(Channel.t(), DateTime.t(), DateTime.t()) :: map()
-  def period(%Channel{id: id}, from, to) do
+  def period(%Channel{id: id} = channel, from, to) do
     [[hw, samples, avg, peak, follows, subs, gifts, kicks, messages]] =
       Repo.query!(
         """
@@ -168,6 +168,14 @@ defmodule KickTracker.Reports do
         [id, from, to]
       ).rows
 
+    gain = Map.get(follower_gains([id], from, to), id)
+
+    # Follows, subs, gifts and Kicks come by webhook: how much of the
+    # period the ingress covered says how complete their sums are, and
+    # with no coverage at all they are unknown, not 0.
+    ingress = Series.coverage(channel, "ingress", from, to)
+    webhook = fn v -> if ingress > 0, do: to_i(v) end
+
     %{
       hours_watched: hw,
       avg_viewers: num(avg),
@@ -175,36 +183,70 @@ defmodule KickTracker.Reports do
       samples: to_i(samples) || 0,
       streams: streams,
       airtime_s: round(num(airtime)),
-      follows: to_i(follows),
-      follower_gain: follower_gain(id, from, to),
-      subs: to_i(subs),
-      gifted_subs: to_i(gifts),
-      kicks: to_i(kicks),
+      follows: webhook.(follows),
+      follower_gain: gain.gain,
+      follower_gain_since: gain.since,
+      subs: webhook.(subs),
+      gifted_subs: webhook.(gifts),
+      kicks: webhook.(kicks),
+      ingress_coverage: ingress,
       messages: to_i(messages),
       unique_chatters: chatters
     }
   end
 
-  # Readings within a day of each end of the period; nil without both.
-  defp follower_gain(channel_id, from, to) do
-    reading = fn at ->
-      Repo.one(
-        from f in "follower_samples",
-          where: f.channel_id == ^channel_id,
-          where: f.observed_at <= ^at and f.observed_at > ^DateTime.add(at, -1, :day),
-          order_by: [desc: f.observed_at],
-          limit: 1,
-          select: f.followers
-      )
-    end
-
+  @doc """
+  Follower gain over `[from, to)` for several channels, in one query:
+  `%{channel_id => %{gain: integer | nil, since: DateTime.t() | nil}}`.
+  The end is the last reading at or before `to` (or now), within a day.
+  The baseline is the last reading at or before `from`, within a day; when
+  there is none (the period starts before the first reading, as "all"
+  does), it is the first reading in the period, and `since` says when that
+  was, so the gain is labeled "since the first reading". nil without both.
+  """
+  @spec follower_gains([integer()], DateTime.t(), DateTime.t()) :: %{integer() => map()}
+  def follower_gains(channel_ids, from, to) do
     to = Enum.min([to, DateTime.utc_now()], DateTime)
 
-    with a when is_integer(a) <- reading.(from), b when is_integer(b) <- reading.(to) do
-      b - a
-    else
-      _ -> nil
-    end
+    Repo.query!(
+      """
+      SELECT c.id, a.followers, a.observed_at, a.pref, b.followers, b.observed_at
+      FROM unnest($1::bigint[]) AS c(id)
+      LEFT JOIN LATERAL (
+        SELECT followers, observed_at, pref FROM (
+          (SELECT followers, observed_at, 0 AS pref FROM follower_samples
+           WHERE channel_id = c.id AND observed_at <= $2 AND observed_at > $2::timestamptz - interval '1 day'
+           ORDER BY observed_at DESC LIMIT 1)
+          UNION ALL
+          (SELECT followers, observed_at, 1 AS pref FROM follower_samples
+           WHERE channel_id = c.id AND observed_at > $2 AND observed_at < $3
+           ORDER BY observed_at LIMIT 1)
+        ) x ORDER BY pref LIMIT 1
+      ) a ON true
+      LEFT JOIN LATERAL (
+        SELECT followers, observed_at FROM follower_samples
+        WHERE channel_id = c.id AND observed_at <= $3 AND observed_at > $3::timestamptz - interval '1 day'
+        ORDER BY observed_at DESC LIMIT 1
+      ) b ON true
+      """,
+      [channel_ids, from, to]
+    ).rows
+    |> Map.new(fn [id, a, a_at, pref, b, b_at] ->
+      gain =
+        cond do
+          is_nil(a) or is_nil(b) -> nil
+          pref == 1 and DateTime.compare(b_at, a_at) != :gt -> nil
+          true -> b - a
+        end
+
+      {id, %{gain: gain, since: if(gain && pref == 1, do: a_at)}}
+    end)
+  end
+
+  @doc "When tracking of the earliest public channel began (nil without channels)."
+  @spec earliest_tracked_since() :: DateTime.t() | nil
+  def earliest_tracked_since do
+    Repo.one(from c in Channel, where: c.public, select: min(c.tracked_since))
   end
 
   ## Streams
@@ -231,7 +273,7 @@ defmodule KickTracker.Reports do
       LEFT JOIN stream_stats st ON st.stream_id = s.id
       LEFT JOIN LATERAL (
         SELECT max(os.ended_at) AS last_end, bool_or(os.ended_at IS NULL) AS open
-        FROM merged_streams m JOIN streams os ON os.id = m.other_stream_id WHERE m.stream_id = s.id
+        FROM merge_groups g JOIN streams os ON os.id = g.stream_id WHERE g.root_id = s.id
       ) mg ON true
       LEFT JOIN LATERAL (
         SELECT category_id FROM viewer_samples
@@ -324,15 +366,16 @@ defmodule KickTracker.Reports do
               }
           )
 
+        # Merges resolve to the root of the group (`merge_groups`), at any depth.
         [[excluded, merged_into]] =
           Repo.query!(
-            "SELECT $1 IN (SELECT stream_id FROM excluded_streams), (SELECT stream_id FROM merged_streams WHERE other_stream_id = $1)",
+            "SELECT $1 IN (SELECT stream_id FROM excluded_streams), (SELECT root_id FROM merge_groups WHERE stream_id = $1 LIMIT 1)",
             [id]
           ).rows
 
         merged =
           Repo.query!(
-            "SELECT s.id, s.ended_at FROM merged_streams m JOIN streams s ON s.id = m.other_stream_id WHERE m.stream_id = $1",
+            "SELECT s.id, s.ended_at FROM merge_groups g JOIN streams s ON s.id = g.stream_id WHERE g.root_id = $1 ORDER BY s.started_at",
             [id]
           ).rows
 
@@ -501,6 +544,7 @@ defmodule KickTracker.Reports do
       FROM streams s JOIN stream_stats st ON st.stream_id = s.id
       WHERE s.channel_id = $1 AND s.started_at >= $2 AND s.started_at < $3
         AND s.id NOT IN (SELECT other_stream_id FROM merged_streams)
+        AND s.id NOT IN (SELECT stream_id FROM excluded_streams)
       ORDER BY s.started_at
       """,
       [id, from, to]
@@ -593,16 +637,19 @@ defmodule KickTracker.Reports do
       Repo.query!(
         """
         WITH weighted AS (
-          SELECT v.category_id, v.viewers,
+          SELECT v.category_id, v.viewers, v.observed_at,
                  LEAST(EXTRACT(EPOCH FROM v.observed_at - coalesce(
                    lag(v.observed_at) OVER (PARTITION BY v.stream_id ORDER BY v.observed_at), s.started_at)), $4) AS w
           FROM viewer_samples v JOIN streams s ON s.id = v.stream_id
-          WHERE v.channel_id = $1 AND v.observed_at >= $2 AND v.observed_at < $3
+          -- one cap before the range, so the first sample in it is weighted
+          -- from its real previous one, as in hourly_stats
+          WHERE v.channel_id = $1 AND v.observed_at >= $2::timestamptz - make_interval(secs => $4::int)
+            AND v.observed_at < $3
             AND v.stream_id NOT IN (SELECT stream_id FROM excluded_streams)
         )
         SELECT category_id, (sum(viewers * greatest(w, 0)) / 3600)::float, sum(greatest(w, 0))::float,
                avg(viewers)::float
-        FROM weighted GROUP BY 1 ORDER BY 2 DESC
+        FROM weighted WHERE observed_at >= $2 GROUP BY 1 ORDER BY 2 DESC
         """,
         [channel.id, from, to, Metrics.cap_s()]
       ).rows
@@ -649,24 +696,63 @@ defmodule KickTracker.Reports do
     Repo.all(from c in "categories", where: c.id in ^ids, select: {c.id, c.name}) |> Map.new()
   end
 
-  @doc "All categories seen, with a URL slug."
+  @doc """
+  All categories seen, with a URL slug. Two names with the same slug
+  ("Just Chatting" and "just-chatting") are told apart: the category seen
+  first (lowest id) keeps the plain slug, the others get their id appended.
+  """
   @spec all_categories() :: [map()]
   def all_categories do
-    Repo.all(from c in "categories", order_by: c.name, select: %{id: c.id, name: c.name})
-    |> Enum.map(&Map.put(&1, :slug, slugify(&1.name)))
+    categories =
+      Repo.all(from c in "categories", order_by: c.id, select: %{id: c.id, name: c.name})
+      |> Enum.map(&Map.put(&1, :slug, slugify(&1.name)))
+
+    {categories, _} =
+      Enum.map_reduce(categories, MapSet.new(), fn c, taken ->
+        if MapSet.member?(taken, c.slug),
+          do: {%{c | slug: "#{c.slug}-#{c.id}"}, taken},
+          else: {c, MapSet.put(taken, c.slug)}
+      end)
+
+    Enum.sort_by(categories, &{&1.name, &1.id})
   end
 
+  @doc "A category by its URL slug, ignoring case; nil when none has it."
   @spec category_by_slug(String.t()) :: map() | nil
-  def category_by_slug(slug), do: Enum.find(all_categories(), &(&1.slug == slug))
+  def category_by_slug(slug) do
+    slug = String.downcase(slug)
+    Enum.find(all_categories(), &(&1.slug == slug))
+  end
 
-  @doc "A URL slug for a name."
+  @doc """
+  A URL slug for a name: lowercase letters and digits of any script,
+  accents dropped, anything else a dash. A name with no letter or digit
+  at all gets a short, stable one derived from it.
+
+      iex> KickTracker.Reports.slugify("Pokémon Go")
+      "pokemon-go"
+      iex> KickTracker.Reports.slugify("Игры")
+      "игры"
+      iex> KickTracker.Reports.slugify("🎮")
+      "c-5928d14b"
+  """
   @spec slugify(String.t()) :: String.t()
   def slugify(name) do
-    name
-    |> String.downcase()
-    |> String.normalize(:nfd)
-    |> String.replace(~r/[^a-z0-9]+/u, "-")
-    |> String.trim("-")
+    slug =
+      name
+      |> String.normalize(:nfd)
+      # Accents off Latin letters only: in other scripts the marks are
+      # part of the letter (ゲ is not ケ).
+      |> String.replace(~r/(\p{Latin})\p{Mn}+/u, "\\1")
+      |> String.normalize(:nfc)
+      |> String.downcase()
+      |> String.replace(~r/[^\p{L}\p{N}]+/u, "-")
+      |> String.trim("-")
+
+    if slug == "",
+      do:
+        "c-" <> (:crypto.hash(:sha256, name) |> binary_part(0, 4) |> Base.encode16(case: :lower)),
+      else: slug
   end
 
   @doc "Tracked channels in a category over a period, by hours watched."
@@ -674,17 +760,30 @@ defmodule KickTracker.Reports do
   def category_channels(category_id, from, to) do
     Repo.query!(
       """
-      WITH weighted AS (
-        SELECT v.channel_id, v.viewers,
+      WITH chans AS (
+        SELECT DISTINCT channel_id FROM viewer_samples
+        WHERE category_id = $1 AND observed_at >= $2 AND observed_at < $3
+      ),
+      -- Every sample of those channels, whatever its category, so each is
+      -- weighted from its real previous one (also from one cap before the
+      -- range), as in hourly_stats.
+      weighted AS (
+        SELECT v.channel_id, v.category_id, v.viewers, v.observed_at,
+               EXISTS (SELECT 1 FROM viewer_flags f
+                       WHERE f.channel_id = v.channel_id AND f.observed_at = v.observed_at) AS flagged,
                LEAST(EXTRACT(EPOCH FROM v.observed_at - coalesce(
                  lag(v.observed_at) OVER (PARTITION BY v.stream_id ORDER BY v.observed_at), s.started_at)), $4) AS w
         FROM viewer_samples v JOIN streams s ON s.id = v.stream_id
-        WHERE v.category_id = $1 AND v.observed_at >= $2 AND v.observed_at < $3
+        WHERE v.channel_id IN (SELECT channel_id FROM chans)
+          AND v.observed_at >= $2::timestamptz - make_interval(secs => $4::int) AND v.observed_at < $3
           AND v.stream_id NOT IN (SELECT stream_id FROM excluded_streams)
       )
       SELECT c.id, c.slug, (sum(w.viewers * greatest(w.w, 0)) / 3600)::float, sum(greatest(w.w, 0))::float,
-             avg(w.viewers)::float, max(w.viewers)
+             avg(w.viewers)::float,
+             -- a flagged reading (a glitch) is never a peak (§19.2)
+             max(w.viewers) FILTER (WHERE NOT w.flagged)
       FROM weighted w JOIN channels c ON c.id = w.channel_id AND c.public
+      WHERE w.category_id = $1 AND w.observed_at >= $2
       GROUP BY 1, 2 ORDER BY 3 DESC
       """,
       [category_id, from, to, Metrics.cap_s()]
@@ -739,9 +838,16 @@ defmodule KickTracker.Reports do
       end)
 
     rows =
-      if metric == "follower_gain",
-        do: Enum.map(rows, &Map.put(&1, :follower_gain, follower_gain(&1.channel_id, from, to))),
-        else: rows
+      if metric == "follower_gain" do
+        gains = follower_gains(Enum.map(rows, & &1.channel_id), from, to)
+
+        Enum.map(rows, fn r ->
+          gain = Map.get(gains, r.channel_id, %{gain: nil, since: nil})
+          Map.merge(r, %{follower_gain: gain.gain, follower_gain_since: gain.since})
+        end)
+      else
+        rows
+      end
 
     key = String.to_existing_atom(metric)
 
@@ -787,20 +893,30 @@ defmodule KickTracker.Reports do
   """
   @spec notable(DateTime.t(), DateTime.t(), pos_integer()) :: [map()]
   def notable(from, to, limit \\ 8) do
+    # One pass over each channel's streams in order: the best peak before
+    # each (excluded streams don't count) is a running max, not a query
+    # per stream.
     records =
       Repo.query!(
         """
-        SELECT c.slug, s.id, s.started_at, st.peak_viewers FROM stream_stats st
-        JOIN streams s ON s.id = st.stream_id JOIN channels c ON c.id = s.channel_id AND c.public
-        WHERE s.started_at >= $1 AND s.started_at < $2 AND st.peak_viewers IS NOT NULL
-          AND s.id NOT IN (SELECT stream_id FROM excluded_streams)
-          AND s.id NOT IN (SELECT other_stream_id FROM merged_streams)
-          AND st.peak_viewers > (
-            SELECT coalesce(max(p.peak_viewers), 0) FROM stream_stats p JOIN streams ps ON ps.id = p.stream_id
-            WHERE ps.channel_id = s.channel_id AND ps.started_at < s.started_at
-              AND ps.id NOT IN (SELECT stream_id FROM excluded_streams))
-          AND EXISTS (SELECT 1 FROM streams older WHERE older.channel_id = s.channel_id AND older.started_at < s.started_at)
-        ORDER BY st.peak_viewers DESC LIMIT $3
+        WITH ordered AS (
+          SELECT c.slug, s.id, s.started_at, st.peak_viewers,
+                 e.stream_id IS NOT NULL AS excluded,
+                 max(st.peak_viewers) FILTER (WHERE e.stream_id IS NULL) OVER earlier AS best_before,
+                 count(*) OVER earlier AS older
+          FROM streams s
+          JOIN channels c ON c.id = s.channel_id AND c.public
+          LEFT JOIN stream_stats st ON st.stream_id = s.id
+          LEFT JOIN excluded_streams e ON e.stream_id = s.id
+          WHERE s.started_at < $2
+          WINDOW earlier AS (PARTITION BY s.channel_id ORDER BY s.started_at
+                             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+        )
+        SELECT slug, id, started_at, peak_viewers FROM ordered
+        WHERE started_at >= $1 AND peak_viewers IS NOT NULL AND NOT excluded AND older > 0
+          AND id NOT IN (SELECT other_stream_id FROM merged_streams)
+          AND peak_viewers > coalesce(best_before, 0)
+        ORDER BY peak_viewers DESC LIMIT $3
         """,
         [from, to, limit]
       ).rows
@@ -854,6 +970,7 @@ defmodule KickTracker.Reports do
           SELECT DISTINCT s.channel_id, u.user_id FROM chat_stream_users u
           JOIN streams s ON s.id = u.stream_id
           WHERE s.channel_id = ANY($1) AND s.started_at >= $2 AND s.started_at < $3
+            AND s.id NOT IN (SELECT stream_id FROM excluded_streams)
         )
         SELECT a.channel_id, b.channel_id, count(*) FROM people a
         JOIN people b ON a.user_id = b.user_id AND a.channel_id <= b.channel_id

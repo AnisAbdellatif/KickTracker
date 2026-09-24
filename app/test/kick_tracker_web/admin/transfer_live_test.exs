@@ -75,6 +75,7 @@ defmodule KickTrackerWeb.Admin.TransferLiveTest do
     html = view |> form("#upload-form") |> render_submit()
     assert html =~ "import-preview"
     assert html =~ "somestreamer"
+    assert [%{action: "transfer.upload"} | _] = Audit.recent()
 
     view |> element("#confirm-import") |> render_click()
     [import | _] = Transfers.list()
@@ -97,6 +98,26 @@ defmodule KickTrackerWeb.Admin.TransferLiveTest do
     html = view |> form("#upload-form") |> render_submit()
     assert html =~ "Can&#39;t import this file"
     assert [%{status: "failed"}] = Transfers.list()
+    assert [%{action: "transfer.upload", details: %{"error" => _}} | _] = Audit.recent()
+  end
+
+  test "an upload discarded before confirming is audited", %{conn: conn} do
+    c = channel!(slug: "somestreamer")
+    {:ok, t} = Transfers.request_export(nil, %{"scope" => "channels", "channel_ids" => [c.id]})
+    :ok = perform_job(Worker, %{"transfer_id" => t.id})
+    zip = File.read!(Transfers.path(Transfers.get!(t.id)))
+
+    {:ok, view, _} = live(conn, ~p"/admin/transfer")
+
+    upload =
+      file_input(view, "#upload-form", :archive, [
+        %{name: "export.zip", content: zip, type: "application/zip"}
+      ])
+
+    render_upload(upload, "export.zip")
+    view |> form("#upload-form") |> render_submit()
+    view |> element("button[phx-click=discard]") |> render_click()
+    assert [%{action: "transfer.discard"} | _] = Audit.recent()
   end
 
   test "old files are pruned" do

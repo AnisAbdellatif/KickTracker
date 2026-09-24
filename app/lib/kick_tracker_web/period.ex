@@ -4,8 +4,16 @@ defmodule KickTrackerWeb.Period do
   every view is reproducible from its URL (project.md §13.2):
 
     * `period=24h|7d|30d|90d|1y|all` (default `30d`), ending now;
-    * or `from` and `to`, as unix seconds or ISO 8601 (a custom range).
+    * or `from` and `to`, as unix seconds or ISO 8601 (a custom range, at
+      most 20 years long).
+
+  A preset's `to` is now rounded up to the next whole minute, and its
+  `from` is that minus the span, so every request within the same minute
+  gets the same period: cache keys built from it (`KickTracker.Cache`)
+  hit, and the range still reaches past the latest reading (`[from, to)`).
   """
+
+  alias KickTracker.{Cache, Reports}
 
   @presets %{
     "24h" => 86_400,
@@ -15,6 +23,7 @@ defmodule KickTrackerWeb.Period do
     "1y" => 365 * 86_400
   }
   @max_span 20 * 365 * 86_400
+  @align_s 60
 
   defstruct [:from, :to, :key]
 
@@ -23,14 +32,18 @@ defmodule KickTrackerWeb.Period do
   @doc "The period presets offered by the period picker, in order."
   def presets, do: ~w(24h 7d 30d 90d 1y all)
 
+  @doc "The longest custom range, in seconds."
+  def max_span_s, do: @max_span
+
   @doc """
   Parses the query params. `since` is where "all" starts (the channel's
-  tracking start, or the first stream). Unparseable input falls back to
-  the default rather than failing.
+  tracking start, or the first stream); without it, "all" starts when the
+  earliest public channel's tracking began. Unparseable input falls back
+  to the default rather than failing.
   """
   @spec parse(map(), keyword()) :: t()
   def parse(params, opts \\ []) do
-    now = Keyword.get(opts, :now, DateTime.utc_now()) |> DateTime.truncate(:second)
+    now = opts |> Keyword.get(:now, DateTime.utc_now()) |> align()
     default = Keyword.get(opts, :default, "30d")
 
     with {:ok, from} <- time(params["from"]),
@@ -39,21 +52,44 @@ defmodule KickTrackerWeb.Period do
          true <- DateTime.diff(to, from) <= @max_span do
       %__MODULE__{from: from, to: to, key: "custom"}
     else
-      _ -> preset(params["period"] || default, now, opts[:since], default)
+      _ -> preset(params["period"] || default, now, opts, default)
     end
   end
 
-  defp preset("all", now, since, _default) do
-    from = (since && DateTime.truncate(since, :second)) || DateTime.add(now, -365, :day)
-    from = if DateTime.compare(from, now) == :lt, do: from, else: DateTime.add(now, -1, :day)
+  # Up to the next whole minute (a time already on one stays).
+  defp align(at) do
+    unix = DateTime.to_unix(at, :microsecond)
+    step = @align_s * 1_000_000
+    DateTime.from_unix!(div(unix + step - 1, step) * @align_s)
+  end
+
+  defp preset("all", now, opts, _default) do
+    since = if Keyword.has_key?(opts, :since), do: opts[:since], else: earliest()
+
+    from =
+      (since && DateTime.truncate(since, :second)) || DateTime.add(now, -365, :day)
+
+    from =
+      cond do
+        DateTime.compare(from, now) != :lt -> DateTime.add(now, -1, :day)
+        DateTime.diff(now, from) > @max_span -> DateTime.add(now, -@max_span)
+        true -> from
+      end
+
     %__MODULE__{from: from, to: now, key: "all"}
   end
 
-  defp preset(key, now, since, default) do
+  defp preset(key, now, opts, default) do
     case @presets[key] do
-      nil -> preset(default, now, since, default)
+      nil -> preset(default, now, opts, default)
       span -> %__MODULE__{from: DateTime.add(now, -span), to: now, key: key}
     end
+  end
+
+  # When the earliest public channel's tracking began: where "all" starts
+  # on pages across channels. Cached; it only moves when channels change.
+  defp earliest do
+    Cache.fetch({:earliest_tracked_since}, 300, &Reports.earliest_tracked_since/0)
   end
 
   defp time(nil), do: :error

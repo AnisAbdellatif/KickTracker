@@ -12,9 +12,11 @@ production.
 | `shadow/readers.sql` | Read-only users for the primary / shadow pair |
 | `Caddyfile` | The bundled Caddy (profile `caddy`): HTTPS, from `caddy/sites.caddy` |
 | `caddy/sites.caddy` | The sites: the admin allowlist, the web pair, the receivers' failover; imported by the bundled Caddy or the host's own |
+| `caddy/backup-receiver.caddy` | The stage 2 backup receiver's Caddy (a Cloudflare origin certificate) |
 | `db/` | TimescaleDB with WAL-G (continuous backups) |
 | `backup/` | Base backups and the scripted restore test |
 | `ops/check-host.sh` | Disk and certificate checks |
+| `ops/common.sh` | Shared by the cron scripts: reading the secrets, alerts, heartbeats |
 | `rabbitmq/` | Topology and users; `make-prod-definitions.sh` for production |
 | `secrets/` | sops-encrypted env files (see its README) |
 
@@ -22,8 +24,19 @@ production.
 
 On a fresh VPS with Docker, `sops` and `age`:
 
-1. Clone the repository to `/srv/kick_tracker` and decrypt the secrets
-   (`secrets/README.md`).
+1. As the user that will deploy (in the `docker` group), give the server
+   read access to GitHub and clone the repository to `/srv/kick_tracker`,
+   then decrypt the secrets (`secrets/README.md`):
+   - git: a read-only **deploy key** (`ssh-keygen -t ed25519`, its
+     `~/.ssh/id_ed25519.pub` added under the repository's Settings,
+     Deploy keys, write access off), and clone over SSH
+     (`git@github.com:<owner>/<repo>.git`) so the `git pull` of every
+     deploy needs no password. A public repository can be cloned over
+     HTTPS with no credentials instead.
+   - images: `docker login ghcr.io -u <GitHub user>` with a personal
+     access token (classic) that has only `read:packages`; Docker keeps it
+     in `~/.docker/config.json` for every later pull. Not needed if the
+     packages are public.
 2. `./rabbitmq/make-prod-definitions.sh` with `secrets/rabbitmq.env` loaded
    (it writes `rabbitmq/definitions.prod.json`, git-ignored).
 3. Pin the app image in `deploy/.env` (git-ignored; the deploy workflow
@@ -46,7 +59,8 @@ On a fresh VPS with Docker, `sops` and `age`:
 6. Start everything: `docker compose -f compose.single.yml up -d`.
 7. Take the first base backup (`./backup/base-backup.sh`) and install the
    cron lines from `backup/base-backup.sh`, `backup/restore-test.sh` and
-   `ops/check-host.sh`.
+   `ops/check-host.sh` in the deploy user's crontab (`crontab -e`: the
+   decrypted secrets are readable by that user only).
 8. Invite the first admin and open the link from an allowed network:
 
        docker compose -f compose.single.yml exec web-a /app/bin/invite you@example.org
@@ -107,8 +121,9 @@ It needs, once:
   `/srv/kick_tracker` (e.g. `/opt/kick_tracker`); the paths in this file
   and in the cron lines of `backup/` and `ops/` are then that directory;
 - on the server, as that user: the checkout in `DEPLOY_DIR` able to
-  `git pull`, `docker login ghcr.io` done, `sops` installed and the
-  server's age key in `~/.config/sops/age/keys.txt`.
+  `git pull` without a prompt and `docker login ghcr.io` done (both in
+  "First deployment", step 1), `sops` installed and the server's age key
+  in `~/.config/sops/age/keys.txt`.
 
 To stop deploying on merge, set the repository variable `AUTO_DEPLOY` to
 `false` (Settings, Secrets and variables, Actions, Variables).
@@ -142,6 +157,38 @@ Which collector leads:
 Before trusting a change to any of this, rehearse it on a development
 machine: `rehearsal/rehearse.sh` (rehearsal/README.md).
 
+## The backup receiver (stage 2, §15.2)
+
+A second receiver on the stage 2 machine takes webhooks while the main VPS
+is down, spools them, and forwards them to the main RabbitMQ once it
+answers again (`compose.backup-receiver.yml`).
+
+1. Link the two machines privately (WireGuard or Tailscale) and set
+   `PRIVATE_IP` in the main VPS's `deploy/.env` to its private address,
+   then `docker compose -f compose.single.yml up -d rabbitmq`: AMQP (5672)
+   is then published on that address only (loopback while it is unset).
+   AMQP is plain here, the tunnel is what encrypts it, so never set
+   `PRIVATE_IP` to a public address. Docker's published ports bypass
+   `ufw`: allow only the backup machine's private address, with the
+   tunnel's own rules (Tailscale ACLs, WireGuard `AllowedIPs`) or an
+   `iptables -I DOCKER-USER` rule.
+2. On the backup machine, `secrets/receiver.env` from its example with
+   `AMQP_URL=amqp://receiver:<password>@<main private address>:5672`,
+   and `secrets/stack.env` with `INGRESS_HOST`.
+3. Certificates: Cloudflare's load balancer sends the ingress host to the
+   main VPS while it is healthy, so an ACME challenge for it never reaches
+   the backup machine and Caddy can't get a public certificate there.
+   Create a Cloudflare Origin CA certificate for the ingress host
+   (Cloudflare dashboard, SSL/TLS, Origin Server) and save it as
+   `secrets/origin-cert.pem` and its key as `secrets/origin-key.pem`
+   (git-ignored; `chmod 600` the key). Set the zone's SSL mode to
+   "Full (strict)". The main VPS keeps its public certificate (Caddy
+   renews it a month ahead, so a renewal missed during a failover is
+   retried); it may use the same origin certificate instead.
+4. `docker compose -f compose.backup-receiver.yml up -d`, then add both
+   machines to the Cloudflare load balancer's pool for the ingress host,
+   with a monitor on `https://<ingress host>/health`.
+
 ## The shadow collector (§10.5)
 
 An independent collector on a second machine (the stage 2 one), with its
@@ -153,7 +200,8 @@ minutes, for the last `BACKFILL_DAYS` (7).
 1. Link the two machines privately (WireGuard or Tailscale) and set
    `PRIVATE_IP` in each `deploy/.env` to that machine's private address:
    each database is then published on it (main on 5432, shadow on 5433),
-   and on nothing public.
+   and on nothing public (the main VPS's RabbitMQ too, on 5672, for the
+   backup receiver).
 2. Register a second app on kick.com for the shadow (its own token and rate
    limits).
 3. On the shadow machine: `secrets/shadow.env` and `secrets/shadow-db.env`
@@ -183,9 +231,17 @@ data only matters until the main side has filled its gaps.
 - `backup/base-backup.sh`, daily: a full base backup and pruning (keeps 7).
 - `backup/restore-test.sh`, weekly: restores the latest backup into a
   scratch container, replays the WAL, checks row counts against the live
-  database and that recent streams' figures agree with their samples.
-  A failure is sent to `ALERT_WEBHOOK_URL`; success pings
-  `RESTORE_HEARTBEAT_URL`.
+  database (the stack's `db`, through `docker compose exec`, when it runs
+  on the same host; or `LIVE_DATABASE_URL`) and that recent streams'
+  figures agree with their samples.
+- Both run from the deploy user's crontab (the cron lines are at the top
+  of each script) and need nothing from cron's environment: they read
+  `secrets/db.env` (WAL-G's storage, `POSTGRES_USER`/`POSTGRES_DB`,
+  `BACKUP_HEARTBEAT_URL`, `RESTORE_HEARTBEAT_URL`) and the alert settings
+  of `secrets/collector.env` (or `app.env`). Any failure, expected or not,
+  is sent to `ALERT_WEBHOOK_URL` and/or Telegram; each success pings its
+  heartbeat URL, so a job that stops running is noticed too.
+  `ops/check-host.sh` reads its settings the same way.
 - Also keep: `deploy/` (in git), the RabbitMQ definitions (regenerated from
   secrets), and the age private keys (offline). Receiver spools are
   short-lived and not backed up.

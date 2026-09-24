@@ -154,7 +154,16 @@ defmodule KickTracker.Alerts do
         heartbeat_at: heartbeat_at,
         journal_depth: journal["depth"] || 0,
         journal_oldest_at: parse_time(journal["oldest_at"]),
-        journal_buried: journal["buried"] || 0
+        journal_buried: journal["buried"] || 0,
+        quarantined:
+          for(
+            q <- status["quarantined"] || [],
+            do: %{
+              channel_id: q["channel_id"],
+              failures: q["failures"],
+              since: parse_time(q["since"])
+            }
+          )
       }
     end)
   end

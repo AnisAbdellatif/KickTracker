@@ -7,6 +7,7 @@ defmodule KickTracker.Channels do
   """
 
   import Ecto.Query
+  require Logger
 
   alias KickTracker.Channels.Channel
   alias KickTracker.Kick.API
@@ -219,11 +220,20 @@ defmodule KickTracker.Channels do
   @doc """
   Records the slug Kick reports for a channel by id (a rename closes the
   previous slug's period): a collector write, applied from its journal.
+
+  Kick answers by broadcaster id, so what it reports is the truth for
+  this channel. If another active channel still holds that slug here (it
+  was renamed or banned and Kick's answer didn't list it, or two renames
+  happened within one poll), that one is the stale holder: it gives the
+  slug up for a marked placeholder (`<old slug>~<id>`, which no real slug
+  can be) until Kick reports its new one, and this is logged as an error
+  for the admin. Never raises over it.
   """
   @spec store_slug(integer(), String.t(), DateTime.t()) :: :ok
   def store_slug(channel_id, slug, at) do
     {:ok, _} =
       Repo.transaction(fn ->
+        release_slug(channel_id, slug, at)
         record_slug(%{id: channel_id}, slug, at)
 
         from(c in Channel, where: c.id == ^channel_id and c.slug != ^slug)
@@ -233,13 +243,54 @@ defmodule KickTracker.Channels do
     :ok
   end
 
+  defp release_slug(channel_id, slug, at) do
+    holders =
+      Repo.all(
+        from c in Channel,
+          where:
+            c.active and c.id != ^channel_id and
+              fragment("lower(?)", c.slug) == ^String.downcase(slug),
+          select: {c.id, c.slug}
+      )
+
+    for {id, old} <- holders do
+      Logger.error(
+        "channel #{channel_id} is now called #{slug}, which channel #{id} still held: " <>
+          "channel #{id} keeps a placeholder until Kick reports its new slug"
+      )
+
+      from(c in Channel, where: c.id == ^id)
+      |> Repo.update_all(set: [slug: "#{old}~#{id}", updated_at: DateTime.utc_now()])
+
+      from(s in "channel_slugs", where: s.channel_id == ^id and is_nil(s.seen_to))
+      |> Repo.update_all(set: [seen_to: at])
+    end
+  end
+
   @doc """
-  Tells the channel's running processes about a changed row (a rename, a
-  chatroom id learnt), on the channel's own topic.
+  Tells a channel's running processes that some fields of its row changed
+  (a rename, a chatroom id learnt), on the channel's own topic, as
+  `{:channel_fields, fields}`. Only the fields that changed travel, so a
+  sender holding an older copy of the row can't undo what another learnt.
+  Given a whole row (just read from the database), its slug and Kick ids.
   """
+  @spec announce(integer(), map()) :: :ok
+  def announce(channel_id, fields) when is_integer(channel_id) and is_map(fields) do
+    Phoenix.PubSub.broadcast(
+      KickTracker.PubSub,
+      "channel_row:#{channel_id}",
+      {:channel_fields, fields}
+    )
+  end
+
   @spec announce(Channel.t()) :: :ok
   def announce(%Channel{} = channel) do
-    Phoenix.PubSub.broadcast(KickTracker.PubSub, "channel_row:#{channel.id}", {:channel, channel})
+    fields =
+      channel
+      |> Map.take([:slug, :kick_channel_id, :chatroom_id, :timezone])
+      |> Map.reject(fn {_k, v} -> is_nil(v) end)
+
+    announce(channel.id, fields)
   end
 
   defp record_slug(channel, slug, at) do

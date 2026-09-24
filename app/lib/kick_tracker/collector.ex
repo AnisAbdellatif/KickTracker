@@ -63,6 +63,13 @@ defmodule KickTracker.Collector do
       journal: journal,
       writer: s[:writer],
       sources: for({{:source, name}, v} <- s, into: %{}, do: {name, v}),
+      # Channels whose processes kept crashing, waiting to be restarted
+      # (`Tracking.Manager`).
+      quarantined:
+        for(
+          {id, q} <- s[:quarantined_channels] || %{},
+          do: %{channel_id: id, failures: q.failures, since: q.since}
+        ),
       version: to_string(Application.spec(:kick_tracker, :vsn))
     }
   end

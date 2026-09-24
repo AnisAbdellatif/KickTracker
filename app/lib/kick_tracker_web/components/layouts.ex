@@ -260,7 +260,7 @@ defmodule KickTrackerWeb.Layouts do
         hidden
       >
         {gettext("Attempting to reconnect")}
-        <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
+        <.icon name="hero-arrow-path" class="ms-1 size-3 motion-safe:animate-spin" />
       </.flash>
 
       <.flash
@@ -275,7 +275,7 @@ defmodule KickTrackerWeb.Layouts do
         hidden
       >
         {gettext("Attempting to reconnect")}
-        <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
+        <.icon name="hero-arrow-path" class="ms-1 size-3 motion-safe:animate-spin" />
       </.flash>
     </div>
     """
@@ -288,33 +288,53 @@ defmodule KickTrackerWeb.Layouts do
   """
   def theme_toggle(assigns) do
     ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
-      <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 [[data-theme-source=system]_&]:!left-0 transition-[left]" />
+    <div
+      id="theme-toggle"
+      phx-update="ignore"
+      class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full"
+      role="group"
+      aria-label={gettext("Theme")}
+    >
+      <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 start-0 [[data-theme=light]_&]:start-1/3 [[data-theme=dark]_&]:start-2/3 [[data-theme-source=system]_&]:!start-0 transition-[inset-inline-start]" />
 
       <button
+        :for={
+          {theme, icon, label} <- [
+            {"system", "hero-computer-desktop-micro", gettext("System theme")},
+            {"light", "hero-sun-micro", gettext("Light theme")},
+            {"dark", "hero-moon-micro", gettext("Dark theme")}
+          ]
+        }
+        type="button"
         class="flex p-2 cursor-pointer w-1/3"
         phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="system"
+        data-phx-theme={theme}
+        aria-label={label}
+        title={label}
+        aria-pressed="false"
       >
-        <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="light"
-      >
-        <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="dark"
-      >
-        <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
+        <.icon name={icon} class="size-4 opacity-75 hover:opacity-100" />
       </button>
     </div>
     """
+  end
+
+  @doc "The page's language, from the Gettext locale (`<html lang>`)."
+  def html_lang, do: Gettext.get_locale(KickTrackerWeb.Gettext) |> String.replace("_", "-")
+
+  @rtl ~w(ar arc dv fa he ks ku ps sd ug ur yi)
+
+  @doc "The page's direction: right-to-left for languages written that way."
+  def html_dir do
+    lang = html_lang() |> String.split("-") |> hd()
+    if lang in @rtl, do: "rtl", else: "ltr"
+  end
+
+  @doc "The page's description, for search results and link previews."
+  def description(assigns) do
+    assigns[:page_description] ||
+      gettext(
+        "Viewers, streams, chat and support of Kick channels, tracked over time. Not affiliated with Kick."
+      )
   end
 end

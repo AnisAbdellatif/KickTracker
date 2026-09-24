@@ -63,46 +63,108 @@ defmodule KickTracker.Admins do
     end
   end
 
-  @doc "Changes an admin's password, after checking the current one. Ends their other sessions."
-  @spec change_password(Admin.t(), String.t(), map()) ::
+  @doc """
+  Changes an admin's password, after checking the current one. Ends all
+  their sessions, open live pages included (see `end_sessions/1`).
+  """
+  @spec change_password(Admin.t(), term(), map()) ::
           {:ok, Admin.t()} | {:error, Ecto.Changeset.t()}
   def change_password(%Admin{} = admin, current, attrs) do
-    changeset = Admin.password_changeset(admin, attrs)
+    changeset =
+      Admin.password_changeset(admin, strings(attrs, ~w(password password_confirmation)))
 
     changeset =
-      if Password.verify(current, admin.hashed_password),
+      if is_binary(current) and Password.verify(current, admin.hashed_password),
         do: changeset,
         else: Ecto.Changeset.add_error(changeset, :current_password, "is not valid")
 
     Repo.transaction(fn ->
       case Repo.update(changeset) do
-        {:ok, admin} ->
-          Repo.delete_all(
-            from t in AdminToken, where: t.admin_id == ^admin.id and t.context == "session"
-          )
-
-          admin
-
-        {:error, changeset} ->
-          Repo.rollback(changeset)
+        {:ok, admin} -> {admin, delete_sessions(admin)}
+        {:error, changeset} -> Repo.rollback(changeset)
       end
     end)
+    |> after_ending_sessions()
   end
 
-  @doc "Disables or re-enables an admin; disabling ends their sessions."
+  @doc """
+  Disables or re-enables an admin. Disabling ends their sessions, open live
+  pages included, and revokes the invitations they created and nobody has
+  used yet.
+  """
   @spec set_disabled(Admin.t(), boolean()) :: {:ok, Admin.t()}
   def set_disabled(%Admin{} = admin, disabled?) do
     Repo.transaction(fn ->
-      if disabled?,
-        do:
+      tokens =
+        if disabled? do
           Repo.delete_all(
-            from t in AdminToken, where: t.admin_id == ^admin.id and t.context == "session"
+            from t in AdminToken, where: t.admin_id == ^admin.id and t.context == "invite"
           )
 
-      admin
-      |> Ecto.Changeset.change(disabled_at: if(disabled?, do: DateTime.utc_now()))
-      |> Repo.update!()
+          delete_sessions(admin)
+        else
+          []
+        end
+
+      admin =
+        admin
+        |> Ecto.Changeset.change(disabled_at: if(disabled?, do: DateTime.utc_now()))
+        |> Repo.update!()
+
+      {admin, tokens}
     end)
+    |> after_ending_sessions()
+  end
+
+  defp delete_sessions(%Admin{id: id}) do
+    {_, tokens} =
+      Repo.delete_all(
+        from t in AdminToken,
+          where: t.admin_id == ^id and t.context == "session",
+          select: t.token
+      )
+
+    tokens
+  end
+
+  # Once the tokens are gone for good (committed), closes their live pages.
+  defp after_ending_sessions({:ok, {admin, tokens}}) do
+    end_sessions(tokens)
+    {:ok, admin}
+  end
+
+  defp after_ending_sessions({:error, _} = error), do: error
+
+  @doc """
+  Disconnects the live pages of these session tokens: each session's
+  socket is identified by `live_socket_id/1`, and a `"disconnect"`
+  broadcast to it closes the socket. A deleted token then fails the
+  reconnection's mount.
+  """
+  @spec end_sessions([binary()]) :: :ok
+  def end_sessions(tokens) do
+    for token <- tokens do
+      topic = live_socket_id(token)
+
+      Phoenix.PubSub.broadcast(KickTracker.PubSub, topic, %Phoenix.Socket.Broadcast{
+        topic: topic,
+        event: "disconnect",
+        payload: %{}
+      })
+    end
+
+    :ok
+  end
+
+  @doc "The id of the live socket a session token opens (`:live_socket_id` in the session)."
+  @spec live_socket_id(binary()) :: String.t()
+  def live_socket_id(token), do: "admin_sessions:#{Base.url_encode64(token)}"
+
+  # Only strings reach the changesets and hashing: a nested map or a list
+  # from a crafted form is treated as missing.
+  defp strings(attrs, keys) do
+    attrs = Map.new(attrs, fn {k, v} -> {to_string(k), v} end)
+    Map.new(keys, fn k -> {k, if(is_binary(attrs[k]), do: attrs[k])} end)
   end
 
   ## Sessions
@@ -128,6 +190,24 @@ defmodule KickTracker.Admins do
     )
   end
 
+  @doc """
+  When a session token stops being valid by age (nil for an unknown
+  token). Live pages check it so a page left open doesn't outlive its
+  session.
+  """
+  @spec session_expires_at(binary()) :: DateTime.t() | nil
+  def session_expires_at(token) when is_binary(token) do
+    Repo.one(
+      from t in AdminToken,
+        where: t.token == ^token and t.context == "session",
+        select: t.inserted_at
+    )
+    |> case do
+      nil -> nil
+      at -> DateTime.add(at, @session_days * 24 * 3600)
+    end
+  end
+
   @spec delete_session_token(binary()) :: :ok
   def delete_session_token(token) do
     Repo.delete_all(from t in AdminToken, where: t.token == ^token and t.context == "session")
@@ -138,7 +218,8 @@ defmodule KickTracker.Admins do
 
   @doc """
   Invites an email address. Returns the token for the link
-  (`/admin/invite/<token>`), which is shown once and stored only hashed.
+  (`/admin/invite?token=<token>`: in the query, which request logs leave
+  out), which is shown once and stored only hashed.
   `inviter` is nil for the first admin, invited from the command line.
   """
   @spec invite(Admin.t() | nil, String.t()) :: {:ok, String.t()} | {:error, Ecto.Changeset.t()}
@@ -171,7 +252,7 @@ defmodule KickTracker.Admins do
 
   @doc "The invitation behind a link, while valid."
   @spec get_invite(String.t()) :: AdminToken.t() | nil
-  def get_invite(encoded) do
+  def get_invite(encoded) when is_binary(encoded) do
     case Base.url_decode64(encoded, padding: false) do
       {:ok, raw} ->
         Repo.one(
@@ -184,6 +265,8 @@ defmodule KickTracker.Admins do
         nil
     end
   end
+
+  def get_invite(_), do: nil
 
   @doc "Pending invitations, newest first."
   @spec list_invites() :: [AdminToken.t()]
@@ -215,7 +298,7 @@ defmodule KickTracker.Admins do
         attrs,
         at \\ DateTime.utc_now()
       ) do
-    attrs = Map.new(attrs, fn {k, v} -> {to_string(k), v} end)
+    attrs = strings(attrs, ~w(password password_confirmation code))
 
     changeset =
       %Admin{totp_secret: totp_secret, invited_by_id: invite.admin_id}
@@ -232,8 +315,15 @@ defmodule KickTracker.Admins do
       end
 
     Repo.transaction(fn ->
-      # Used once: a second acceptance finds nothing to delete.
-      case Repo.delete_all(from t in AdminToken, where: t.id == ^invite.id) do
+      # Used once: a second acceptance finds nothing to delete. The row is
+      # checked again here, not trusted from when the page was opened: an
+      # invitation revoked (or its inviter disabled) or expired since then
+      # is gone or too old.
+      case Repo.delete_all(
+             from t in AdminToken,
+               where: t.id == ^invite.id and t.token == ^invite.token,
+               where: t.context == "invite" and t.inserted_at > ago(@invite_days, "day")
+           ) do
         {1, _} ->
           case Repo.insert(changeset) do
             {:ok, admin} -> admin
@@ -241,7 +331,11 @@ defmodule KickTracker.Admins do
           end
 
         _ ->
-          Repo.rollback(Ecto.Changeset.add_error(changeset, :email, "invitation already used"))
+          changeset
+          |> Ecto.Changeset.add_error(:email, "invitation already used or expired")
+          # So the form shows it.
+          |> Map.put(:action, :insert)
+          |> Repo.rollback()
       end
     end)
   end

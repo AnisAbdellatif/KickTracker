@@ -1,5 +1,6 @@
-// Sparklines (project.md §13.7): a tiny line without axes, from values
-// embedded in the page (no request). A single reading shows as a dot.
+// Sparklines (project.md §13.7): a tiny line without axes, from
+// /data/v1/sparklines (the home page moves the URL each minute) or inline
+// values. A single reading shows as a dot.
 import {alpha} from "./theme"
 
 export function option(data, opts, t) {

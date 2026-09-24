@@ -7,31 +7,31 @@ defmodule KickTrackerWeb.HomeLive do
 
   use KickTrackerWeb, :live_view
 
-  alias KickTracker.{Cache, Groups, Reports}
-  alias KickTrackerWeb.Period
+  alias KickTracker.{Cache, Groups, Reports, Settings}
+  alias KickTrackerWeb.{PageParams, Period}
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket),
       do: Phoenix.PubSub.subscribe(KickTracker.PubSub, KickTracker.Tracking.live_topic())
 
-    {:ok, socket |> assign(page_title: gettext("Live now")) |> load_live()}
+    {:ok,
+     socket
+     |> assign(
+       page_title: gettext("Live now"),
+       page_description:
+         gettext("Who is live now, leaderboards and notable moments of the channels we track.")
+     )
+     |> assign(live: Reports.live_now(), seen: nil, spark_at: minute(DateTime.utc_now()))}
   end
 
-  defp load_live(socket) do
-    live = Reports.live_now()
-    assign(socket, live: live, sparks: sparks(live))
-  end
-
-  # The last 3 hours, moving with each reading; shared by every visitor for
-  # a minute (the buckets are 5 minutes).
-  defp sparks(live) do
-    ids = live |> Enum.map(& &1.channel_id) |> Enum.sort()
-    KickTracker.Cache.fetch({:sparks, ids}, 60, fn -> Reports.sparklines(ids) end)
-  end
+  # The sparklines' data URL changes each minute, so their hook fetches
+  # the moved window (cacheable JSON, never kept here: §13.5).
+  defp minute(%DateTime{} = at), do: div(DateTime.to_unix(at), 60) * 60
 
   @impl true
   def handle_params(params, _uri, socket) do
+    params = PageParams.clean(params)
     period = Period.parse(params, default: "30d")
 
     metric =
@@ -57,6 +57,12 @@ defmodule KickTrackerWeb.HomeLive do
         Reports.notable(period.from, period.to)
       end)
 
+    # Gifters are people: named only where the site shows top people.
+    notable =
+      if Settings.get("top_people_public"),
+        do: notable,
+        else: Enum.map(notable, &Map.delete(&1, :who))
+
     {:noreply,
      assign(socket,
        period: period,
@@ -70,25 +76,50 @@ defmodule KickTrackerWeb.HomeLive do
   end
 
   @impl true
-  def handle_info({:live, %{viewers: viewers}}, socket) do
-    current = MapSet.new(socket.assigns.live, & &1.channel_id)
+  def handle_event("custom_range", form, socket) do
+    case PageParams.custom_range(form["from"], form["to"]) do
+      {:ok, range} ->
+        params = socket.assigns.params |> Map.delete("period") |> Map.merge(range)
+        {:noreply, push_patch(socket, to: home_path(params))}
 
-    if MapSet.equal?(current, MapSet.new(Map.keys(viewers))) do
-      live =
-        Enum.map(
-          socket.assigns.live,
-          &%{&1 | viewers: Map.get(viewers, &1.channel_id, &1.viewers)}
-        )
-
-      {:noreply,
-       assign(socket, live: Enum.sort_by(live, &(-(&1.viewers || 0))), sparks: sparks(live))}
-    else
-      # Someone went live or offline: read the list again.
-      {:noreply, load_live(socket)}
+      {:error, message} ->
+        {:noreply, put_flash(socket, :error, message)}
     end
   end
 
+  # The broadcast names every channel Kick reports live, private ones and
+  # ones without an open stream here included. Only a change among the
+  # public ones reads the list again, once (not every minute while, say, a
+  # private channel is live); otherwise the viewers are updated in place.
+  @impl true
+  def handle_info({:live, %{viewers: viewers} = msg}, socket) do
+    public = public_ids()
+    relevant = viewers |> Map.keys() |> Enum.filter(&MapSet.member?(public, &1)) |> MapSet.new()
+    current = MapSet.new(socket.assigns.live, & &1.channel_id)
+
+    live =
+      if MapSet.equal?(relevant, socket.assigns.seen || current),
+        do: socket.assigns.live,
+        else: Cache.fetch({:live_now, Enum.sort(relevant)}, 30, &Reports.live_now/0)
+
+    live =
+      live
+      |> Enum.map(&%{&1 | viewers: Map.get(viewers, &1.channel_id, &1.viewers)})
+      |> Enum.sort_by(&(-(&1.viewers || 0)))
+
+    {:noreply,
+     assign(socket,
+       live: live,
+       seen: relevant,
+       spark_at: minute(Map.get(msg, :at) || DateTime.utc_now())
+     )}
+  end
+
   def handle_info(_other, socket), do: {:noreply, socket}
+
+  defp public_ids do
+    Cache.fetch({:public_channel_ids}, 60, fn -> MapSet.new(Reports.channels(), & &1.id) end)
+  end
 
   defp metric_label("hours_watched"), do: gettext("Hours watched")
   defp metric_label("avg_viewers"), do: gettext("Average viewers")
@@ -146,7 +177,7 @@ defmodule KickTrackerWeb.HomeLive do
             {gettext("Nobody we track is live right now.")}
           </div>
           <ul id="live-now" class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <li :for={l <- @live} id={"live-#{l.channel_id}"}>
+            <li :for={l <- @live} id={"live-#{l.channel_id}"} class="min-w-0">
               <.link
                 navigate={~p"/c/#{l.slug}/streams/#{l.stream_id}"}
                 class="card-surface block p-4"
@@ -181,11 +212,12 @@ defmodule KickTrackerWeb.HomeLive do
                   phx-hook="Chart"
                   phx-update="ignore"
                   data-kind="sparkline"
-                  data-values={Jason.encode!(@sparks[l.channel_id] || [])}
-                  class="mt-3 h-12"
+                  data-src={~p"/data/v1/sparklines/#{l.slug}?at=#{@spark_at}"}
+                  data-error={gettext("Couldn't load this chart.")}
+                  class="relative mt-3 h-12"
                 >
                 </div>
-                <div class="mt-1 flex justify-between text-[0.65rem] text-base-content/40">
+                <div class="mt-1 flex justify-between text-[0.65rem] text-base-content/70">
                   <span>{gettext("3 h ago")}</span><span>{gettext("now")}</span>
                 </div>
               </.link>
@@ -248,7 +280,7 @@ defmodule KickTrackerWeb.HomeLive do
                   </td>
                 </tr>
                 <tr :for={{r, i} <- Enum.with_index(@board, 1)} class="hover:bg-base-200/60">
-                  <td class="tabular-nums text-base-content/50">{i}</td>
+                  <td class="tabular-nums text-base-content/70">{i}</td>
                   <td class="min-w-44">
                     <.link
                       navigate={~p"/c/#{r.slug}?#{Period.to_params(@period)}"}
@@ -325,13 +357,13 @@ defmodule KickTrackerWeb.HomeLive do
                         {gettext("by %{who}", who: n.who)}
                       </span>
                     <% kind -> %>
-                      {kind} ·
+                      {event_label(kind)} ·
                       <.link navigate={~p"/c/#{n.slug}"} class="hover:underline">{n.slug}</.link>
                       {n[:other]}
                       <.num value={n.value} />
                   <% end %>
                 </div>
-                <div class="mt-0.5 text-xs text-base-content/50"><.time at={n.at} /></div>
+                <div class="mt-0.5 text-xs text-base-content/70"><.time at={n.at} /></div>
               </div>
             </li>
           </ul>

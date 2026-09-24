@@ -100,6 +100,12 @@ export function gapAreas(gaps, t) {
   ])
 }
 
+// Streamer-controlled text (titles, categories, raiders) put into a
+// tooltip's HTML is escaped, so it shows as text and never as markup.
+export function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c])
+}
+
 // Days drawn in the channel's timezone (§13.6), when the data says so.
 export function dayFormatter(tz) {
   const f = new Intl.DateTimeFormat(undefined, {month: "short", day: "numeric", timeZone: tz || undefined})

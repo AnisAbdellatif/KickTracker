@@ -12,13 +12,34 @@ defmodule KickTrackerWeb.Admin.SessionController do
     )
   end
 
-  def create(conn, %{"admin" => %{"email" => email, "password" => password, "code" => code}}) do
-    if RateLimit.login_banned?(conn) do
-      conn |> send_resp(429, "Too many failed logins. Try again later.") |> halt()
-    else
-      authenticate(conn, email, password, code)
+  def create(conn, params) do
+    cond do
+      RateLimit.login_banned?(conn) ->
+        conn |> send_resp(429, "Too many failed logins. Try again later.") |> halt()
+
+      login_params?(params) ->
+        %{"email" => email, "password" => password, "code" => code} = params["admin"]
+        authenticate(conn, email, password, code)
+
+      # Not three strings (a field missing, or a map or list where a string
+      # goes): a failure like any other, answered 400, never a crash.
+      true ->
+        RateLimit.login_failed(conn)
+
+        conn
+        |> put_status(:bad_request)
+        |> put_flash(:error, gettext("Invalid email, password or code."))
+        |> render(:new,
+          form: Phoenix.Component.to_form(%{}, as: "admin"),
+          page_title: "Admin login"
+        )
     end
   end
+
+  defp login_params?(%{"admin" => %{"email" => e, "password" => p, "code" => c}}),
+    do: is_binary(e) and is_binary(p) and is_binary(c)
+
+  defp login_params?(_), do: false
 
   defp authenticate(conn, email, password, code) do
     case Admins.authenticate(email, password, code) do

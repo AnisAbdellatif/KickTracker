@@ -13,6 +13,9 @@ defmodule Sim.Fixtures.LeakCheck do
     * integers of 4+ digits under `id` or any `*_id` key;
     * strings of 8+ characters under `id`, `uuid` or any `*_id` key (UUIDs,
       opaque ids like `channel_01abc…`);
+    * integers of 4+ digits under `order_column`;
+    * every UUID inside any string, under any key (a media file name like
+      `<uuid>___fullsize_1200_675.webp`);
 
   all outside category, emote, badge and gift data, which is kept on purpose.
   """
@@ -22,6 +25,9 @@ defmodule Sim.Fixtures.LeakCheck do
   @name_keys ~w(username slug channel_slug display_name)
   @safe_id_keys ~w(category_id subcategory_id parent_category_id emote_id badge_id
                    gift_id reward_id subscription_id message_id)
+
+  @uuid ~r/(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])/i
+  @fake_uuid_prefix "00000000-0000-4000-8000-"
 
   @doc "Sensitive values in a decoded raw document, as `%{value => field path}`."
   @spec sensitive(term()) :: %{String.t() => String.t()}
@@ -56,7 +62,7 @@ defmodule Sim.Fixtures.LeakCheck do
     # JSON nested in a string (Pusher's data, recorded bodies).
     case nested_json(binary) do
       {:ok, decoded} -> collect(decoded, path, acc)
-      :error -> acc
+      :error -> binary |> uuids() |> Enum.reduce(acc, &put(&2, &1, path))
     end
   end
 
@@ -75,7 +81,7 @@ defmodule Sim.Fixtures.LeakCheck do
       key == "content" and is_binary(value) and String.length(value) >= 6 ->
         put(acc, value, here)
 
-      id_key?(key) and is_integer(value) and value >= 1000 ->
+      (id_key?(key) or key == "order_column") and is_integer(value) and value >= 1000 ->
         put(acc, Integer.to_string(value), here)
 
       (id_key?(key) or key == "uuid") and is_binary(value) and byte_size(value) >= 8 and
@@ -117,10 +123,43 @@ defmodule Sim.Fixtures.LeakCheck do
       end
 
     words = Regex.split(~r/[^\p{L}\p{N}_-]+/u, s, trim: true)
-    [s, String.downcase(s) | words ++ Enum.map(words, &String.downcase/1)] ++ nested
+    # A UUID glued to more text (`<uuid>___fullsize.webp`) is one word above.
+    uuids = s |> uuids() |> Enum.map(&String.downcase/1)
+    [s, String.downcase(s) | words ++ Enum.map(words, &String.downcase/1)] ++ uuids ++ nested
   end
 
   defp scalars(_), do: []
+
+  @doc """
+  UUIDs that are not the anonymizer's fakes (`00000000-0000-4000-8000-…`),
+  anywhere in an anonymized document, as `%{field path => count}`. Needs no
+  raw recording: the check run on the committed fixtures themselves.
+  """
+  @spec real_uuids(term()) :: %{String.t() => pos_integer()}
+  def real_uuids(doc), do: doc |> real_uuids([]) |> Enum.frequencies()
+
+  defp real_uuids(%{} = map, path),
+    do: Enum.flat_map(map, fn {k, v} -> real_uuids(v, [k | path]) end)
+
+  defp real_uuids(list, path) when is_list(list),
+    do: Enum.flat_map(list, &real_uuids(&1, ["[]" | path]))
+
+  defp real_uuids(s, path) when is_binary(s) do
+    case nested_json(s) do
+      {:ok, decoded} ->
+        real_uuids(decoded, path)
+
+      :error ->
+        s
+        |> uuids()
+        |> Enum.reject(&String.starts_with?(&1, @fake_uuid_prefix))
+        |> Enum.map(fn _ -> path_string(path) end)
+    end
+  end
+
+  defp real_uuids(_, _), do: []
+
+  defp uuids(s), do: @uuid |> Regex.scan(s) |> List.flatten()
 
   defp nested_json(<<c, _::binary>> = s) when c in [?{, ?[] do
     case Jason.decode(s) do

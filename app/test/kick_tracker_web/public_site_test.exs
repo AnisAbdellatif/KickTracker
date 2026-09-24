@@ -60,6 +60,33 @@ defmodule KickTrackerWeb.PublicSiteTest do
     assert redirected_to(get(conn, "/search?q=dailystr")) == "/c/dailystreamer"
   end
 
+  test "support figures are unknown, not 0, for a period we weren't receiving events", %{
+    conn: conn
+  } do
+    {:ok, view, _} = live(conn, "/c/dailystreamer/support?#{@range}")
+    refute render(view) =~ "so these figures are unknown"
+
+    KickTracker.Repo.query!("DELETE FROM coverage WHERE source = 'ingress'")
+
+    {:ok, view, html} = live(conn, "/c/dailystreamer/support?#{@range}")
+    assert html =~ "so these figures are unknown"
+    refute has_element?(view, "#support-kpis [data-num]")
+  end
+
+  test "follower gain from before the first reading says it counts from that reading", %{
+    conn: conn
+  } do
+    # History starts 3 days before @to; the range starts 10 days before.
+    from = DateTime.to_unix(DateTime.add(@to, -10, :day))
+    {:ok, _view, html} = live(conn, "/c/dailystreamer?from=#{from}&to=#{DateTime.to_unix(@to)}")
+    assert html =~ "since the first reading"
+
+    # A range starting inside the history has a reading before it.
+    from = DateTime.to_unix(DateTime.add(@to, -1, :day))
+    {:ok, _view, html} = live(conn, "/c/dailystreamer?from=#{from}&to=#{DateTime.to_unix(@to)}")
+    refute html =~ "since the first reading"
+  end
+
   test "the support page is public only while the setting says so", %{conn: conn} do
     assert {:ok, _, _} = live(conn, "/c/dailystreamer/support")
     {:ok, false} = KickTracker.Settings.put("support_page_public", false)

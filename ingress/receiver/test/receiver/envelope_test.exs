@@ -55,6 +55,35 @@ defmodule Receiver.EnvelopeTest do
     assert {:error, {:missing_header, _}} = Envelope.build(%{}, @body, @at, "r")
   end
 
+  test "a header outside the schema's limits is an error naming it" do
+    for {header, value} <- [
+          {"kick-event-type", "Channel.Followed"},
+          {"kick-event-type", "followed"},
+          {"kick-event-type", "channel.followed\n"},
+          {"kick-event-type", "channel.followed; drop"},
+          {"kick-event-message-id", String.duplicate("a", 129)},
+          {"kick-event-subscription-id", String.duplicate("a", 129)},
+          {"kick-event-version", String.duplicate("1", 17)},
+          {"kick-event-message-timestamp", String.duplicate("2", 65)},
+          {"kick-event-signature", "not base64!"},
+          {"kick-event-message-id", <<0xFF, 0xFE>>}
+        ] do
+      h = Map.put(headers(), header, value)
+      assert Envelope.build(h, @body, @at, "r") == {:error, {:invalid_header, header}}
+    end
+  end
+
+  test "sent_at is judged too old only when readable and past the limit" do
+    now = ~U[2026-09-24 18:00:00Z]
+
+    assert Envelope.too_old?("2026-09-22T17:59:59Z", now, 2 * 86_400)
+    refute Envelope.too_old?("2026-09-22T18:00:00Z", now, 2 * 86_400)
+    refute Envelope.too_old?("2026-09-24T19:30:00+02:00", now, 3_600)
+    assert Envelope.too_old?("2026-09-24T18:30:00+02:00", now, 3_600)
+    refute Envelope.too_old?("not a time", now, 1)
+    refute Envelope.too_old?("2000-01-01T00:00:00Z", now, nil)
+  end
+
   test "a body that isn't UTF-8 travels as base64, and comes back byte for byte" do
     body = <<0xFF, 0xFE, ?{, ?}>>
     {:ok, envelope} = Envelope.build(headers(body), body, @at, "r")
@@ -113,6 +142,28 @@ defmodule Receiver.EnvelopeTest do
 
         assert valid_against_schema?(envelope)
         assert Envelope.raw_body(decoded) == body
+      end
+    end
+
+    property "whatever the headers say, an envelope that is built meets the schema" do
+      field = one_of([string(:printable, max_length: 140), binary(max_length: 140)])
+
+      check all(
+              values <- fixed_map(%{type: field, id: field, sub: field, version: field}),
+              max_runs: 300
+            ) do
+        h =
+          Map.merge(headers(), %{
+            "kick-event-type" => values.type,
+            "kick-event-message-id" => values.id,
+            "kick-event-subscription-id" => values.sub,
+            "kick-event-version" => values.version
+          })
+
+        case Envelope.build(h, @body, @at, "r") do
+          {:ok, envelope} -> assert valid_against_schema?(envelope)
+          {:error, {kind, _}} -> assert kind in [:missing_header, :invalid_header]
+        end
       end
     end
   end

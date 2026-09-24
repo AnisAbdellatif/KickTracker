@@ -8,7 +8,7 @@ defmodule KickTrackerWeb.Admin.TransferLive do
 
   use KickTrackerWeb, :live_view
 
-  alias KickTracker.{Channels, Transfers}
+  alias KickTracker.{Audit, Channels, Transfers}
 
   @refresh_ms 2_000
 
@@ -77,10 +77,14 @@ defmodule KickTrackerWeb.Admin.TransferLive do
 
     case result do
       [{:ok, t}] ->
+        Audit.log(admin, "transfer.upload", "#{t.id}", %{"size" => t.size})
+
         {:noreply,
          assign(socket, pending: {t, Transfers.preview(t)}, transfers: Transfers.list())}
 
       [{:error, t}] ->
+        Audit.log(admin, "transfer.upload", "#{t.id}", %{"size" => t.size, "error" => t.error})
+
         {:noreply,
          socket
          |> assign(transfers: Transfers.list())
@@ -107,6 +111,7 @@ defmodule KickTrackerWeb.Admin.TransferLive do
   def handle_event("discard", _params, socket) do
     {t, _} = socket.assigns.pending
     Transfers.cancel_import(Transfers.get!(t.id))
+    Audit.log(socket.assigns.current_admin, "transfer.discard", "#{t.id}")
     {:noreply, assign(socket, pending: nil, transfers: Transfers.list())}
   end
 

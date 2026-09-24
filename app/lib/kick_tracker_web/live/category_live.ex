@@ -4,18 +4,30 @@ defmodule KickTrackerWeb.CategoryLive do
   use KickTrackerWeb, :live_view
 
   alias KickTracker.{Cache, Reports}
-  alias KickTrackerWeb.Period
+  alias KickTrackerWeb.{PageParams, Period}
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
     case Reports.category_by_slug(slug) do
-      nil -> raise KickTrackerWeb.NotFoundError, "no category #{slug}"
-      category -> {:ok, assign(socket, category: category, page_title: category.name)}
+      nil ->
+        raise KickTrackerWeb.NotFoundError, "no category #{slug}"
+
+      category ->
+        {:ok,
+         assign(socket,
+           category: category,
+           page_title: category.name,
+           page_description:
+             gettext("The tracked channels streaming %{category}, ranked by hours watched.",
+               category: category.name
+             )
+         )}
     end
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
+    params = PageParams.clean(params)
     period = Period.parse(params)
     c = socket.assigns.category
 
@@ -29,6 +41,22 @@ defmodule KickTrackerWeb.CategoryLive do
   end
 
   @impl true
+  def handle_event("custom_range", form, socket) do
+    case PageParams.custom_range(form["from"], form["to"]) do
+      {:ok, range} ->
+        params = socket.assigns.params |> Map.delete("period") |> Map.merge(range)
+
+        {:noreply,
+         push_patch(socket,
+           to: ~p"/category/#{socket.assigns.category.slug}?#{params}"
+         )}
+
+      {:error, message} ->
+        {:noreply, put_flash(socket, :error, message)}
+    end
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash}>
@@ -38,33 +66,35 @@ defmodule KickTrackerWeb.CategoryLive do
           <span class="flex-1"></span>
           <.period_picker period={@period} path={~p"/category/#{@category.slug}"} params={@params} />
         </div>
-        <table id="category-channels" class="table table-sm mt-4">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>{gettext("Channel")}</th>
-              <th class="text-end">{gettext("Hours watched")}</th>
-              <th class="text-end">{gettext("Airtime")}</th>
-              <th class="text-end">{gettext("Avg viewers")}</th>
-              <th class="text-end">{gettext("Peak")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={{r, i} <- Enum.with_index(@rows, 1)}>
-              <td class="opacity-60">{i}</td>
-              <td>
-                <.link
-                  navigate={~p"/c/#{r.slug}/categories?#{Period.to_params(@period)}"}
-                  class="link font-medium"
-                >{r.slug}</.link>
-              </td>
-              <td class="text-end"><.num value={r.hours_watched} compact /></td>
-              <td class="text-end"><.duration seconds={r.airtime_s} /></td>
-              <td class="text-end"><.num value={r.avg_viewers} /></td>
-              <td class="text-end"><.num value={r.peak_viewers} /></td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="mt-4 overflow-x-auto">
+          <table id="category-channels" class="table table-sm">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>{gettext("Channel")}</th>
+                <th class="text-end">{gettext("Hours watched")}</th>
+                <th class="text-end">{gettext("Airtime")}</th>
+                <th class="text-end">{gettext("Avg viewers")}</th>
+                <th class="text-end">{gettext("Peak")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={{r, i} <- Enum.with_index(@rows, 1)}>
+                <td class="opacity-60">{i}</td>
+                <td>
+                  <.link
+                    navigate={~p"/c/#{r.slug}/categories?#{Period.to_params(@period)}"}
+                    class="link font-medium"
+                  >{r.slug}</.link>
+                </td>
+                <td class="text-end"><.num value={r.hours_watched} compact /></td>
+                <td class="text-end"><.duration seconds={r.airtime_s} /></td>
+                <td class="text-end"><.num value={r.avg_viewers} /></td>
+                <td class="text-end"><.num value={r.peak_viewers} /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p :if={@rows == []} class="mt-4 text-sm opacity-60">
           {gettext("No tracked channel streamed this in the period.")}
         </p>

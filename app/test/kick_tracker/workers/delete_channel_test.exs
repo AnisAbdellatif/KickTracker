@@ -1,6 +1,7 @@
 defmodule KickTracker.Workers.DeleteChannelTest do
   use KickTracker.DataCase, async: false
   use Oban.Testing, repo: KickTracker.Repo
+  @moduletag :capture_log
 
   alias KickTracker.{Bulk, Channels, Reports}
   alias KickTracker.Workers.DeleteChannel
@@ -73,5 +74,49 @@ defmodule KickTracker.Workers.DeleteChannelTest do
     assert Repo.query!("SELECT kind, kick_user_id FROM removals").rows == [
              ["channel", gone.kick_user_id]
            ]
+  end
+
+  test "a channel being collected is stopped, and its last writes made, before anything is deleted" do
+    alias KickTracker.Tracking
+    alias KickTracker.Tracking.{ChannelServer, Manager}
+
+    gone = Channels.get_by_slug("gonestreamer")
+
+    # The channels have chatroom ids: their chat sockets try to connect.
+    # Nothing answers here, so they only retry (no chat, no coverage writes).
+    kick = Application.get_env(:kick_tracker, :kick)
+
+    Application.put_env(
+      :kick_tracker,
+      :kick,
+      Keyword.put(kick, :pusher_url, "ws://127.0.0.1:1/app/test?protocol=7")
+    )
+
+    on_exit(fn -> Application.put_env(:kick_tracker, :kick, kick) end)
+    start_supervised!({Registry, keys: :unique, name: Tracking.registry()})
+
+    start_supervised!(
+      {DynamicSupervisor, name: Tracking.ChannelsSupervisor, strategy: :one_for_one}
+    )
+
+    start_supervised!({Manager, on_change: fn -> :ok end})
+    Manager.sync()
+    server = ChannelServer.whereis(gone.kick_user_id)
+
+    # Chat gathered but not yet written: its process writes it when it stops.
+    send(server, {:chat, %{id: "x", sender_id: 7, username: nil, at: DateTime.utc_now()}})
+    ChannelServer.info(server)
+
+    assert :ok = perform_job(DeleteChannel, %{"channel_id" => gone.id})
+
+    # Before, the job only broadcast `:removed` and went on deleting while
+    # the process still ran: its last chat then failed to write for a
+    # channel no longer there, or came after the delete.
+    refute Process.alive?(server)
+    assert Tracking.whereis({:channel_sup, gone.id}) == nil
+    assert Channels.get_by_slug("gonestreamer") == nil
+
+    assert Repo.query!("SELECT count(*) FROM chat_minute_users WHERE channel_id = $1", [gone.id]).rows ==
+             [[0]]
   end
 end

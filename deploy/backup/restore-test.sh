@@ -4,48 +4,70 @@
 # database must start, hold the main tables with about as many rows as the
 # live one, and give the same figures for recent streams.
 #
-# Run from cron weekly, on any host with Docker and the backup credentials:
-#   43 4 * * 0  cd /srv/kick_tracker/deploy && ./backup/restore-test.sh >> /var/log/kt-restore.log 2>&1
+# Run from cron weekly, as the user that deploys (it reads the decrypted
+# secrets and runs docker):
+#   43 4 * * 0  /srv/kick_tracker/deploy/backup/restore-test.sh >> "$HOME/kt-restore.log" 2>&1
 #
-# Environment: DB_IMAGE (the database image with WAL-G), the WAL-G storage
-# variables (WALG_S3_PREFIX + AWS_* or WALG_FILE_PREFIX, and
-# WALG_LIBSODIUM_KEY if backups are encrypted), LIVE_DATABASE_URL (optional:
-# to compare row counts), POSTGRES_USER / POSTGRES_DB, ALERT_WEBHOOK_URL,
-# RESTORE_HEARTBEAT_URL, WALG_VOLUME (for WALG_FILE_PREFIX: a volume or
-# path mounted at the prefix).
+# Needs nothing from cron's environment. From secrets/db.env: the WAL-G
+# storage settings (every WALG_* and AWS_* line), POSTGRES_USER and
+# POSTGRES_DB, RESTORE_HEARTBEAT_URL (pinged on success); from
+# secrets/collector.env or app.env: ALERT_WEBHOOK_URL / TELEGRAM_* (told
+# about any failure). The environment overrides any of them, so it can run
+# on another host with only the storage variables exported. Also:
+#   DB_IMAGE           the database image with WAL-G (default: DB_IMAGE in
+#                      deploy/.env, else the one compose.single.yml uses)
+#   LIVE_DATABASE_URL  compare row counts with this database; by default
+#                      they're compared with the stack's own `db` when it
+#                      runs on this host (through `docker compose exec`)
+#   COMPOSE_FILE       default compose.single.yml
+#   WALG_VOLUME        for WALG_FILE_PREFIX: a volume or path mounted there
+#   KEEP_RESTORE       set: leave the scratch container for a look
 set -eu
 
-DB_IMAGE=${DB_IMAGE:-kicktracker-db}
-PGUSER=${POSTGRES_USER:-postgres}
-PGDB=${POSTGRES_DB:-kick_tracker}
+DEPLOY_DIR=$(cd "$(dirname "$0")/.." && pwd)
+. "$DEPLOY_DIR/ops/common.sh"
+cd "$DEPLOY_DIR"
+
+load_alert_settings
+alert_on_failure "the weekly restore test"
+
+DB_ENV=$SECRETS_DIR/db.env
+COMPOSE_FILE=${COMPOSE_FILE:-compose.single.yml}
+DB_IMAGE=${DB_IMAGE:-$(env_get DB_IMAGE "$DEPLOY_DIR/.env")}
+DB_IMAGE=${DB_IMAGE:-ghcr.io/anisabdellatif/kicktracker-db:latest}
+PG_USER=$(setting POSTGRES_USER "$DB_ENV")
+PG_USER=${PG_USER:-kick_tracker}
+PG_DB=$(setting POSTGRES_DB "$DB_ENV")
+PG_DB=${PG_DB:-$PG_USER}
+RESTORE_HEARTBEAT_URL=$(setting RESTORE_HEARTBEAT_URL "$DB_ENV")
 NAME=kt-restore-test-$$
+ENV_FILE=$(mktemp)
 
 say() { echo "$(date -u +%FT%TZ) $*"; }
 
-notify() {
-  if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
-    curl -fsS -m 20 -H 'content-type: application/json' \
-      -d "{\"content\":\"$1\",\"text\":\"$1\"}" "$ALERT_WEBHOOK_URL" >/dev/null || true
-  fi
+cleanup_hook() {
+  rm -f "$ENV_FILE"
+  [ -n "${KEEP_RESTORE:-}" ] || docker rm -f "$NAME" >/dev/null 2>&1 || true
 }
 
-cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
-[ -n "${KEEP_RESTORE:-}" ] || trap cleanup EXIT
+# WAL-G's settings for the scratch container: db.env's, then the
+# environment's (later lines win). Only those: no database password.
+chmod 600 "$ENV_FILE"
+if [ -r "$DB_ENV" ]; then
+  grep -E '^(WALG|AWS)_[A-Za-z0-9_]*=' "$DB_ENV" | sed "s/=[\"']\(.*\)[\"']$/=\1/" >>"$ENV_FILE" || true
+fi
+env | grep -E '^(WALG|AWS)_[A-Za-z0-9_]*=' >>"$ENV_FILE" || true
+grep -qE '^WALG_(S3|FILE|GS|AZ|SWIFT|SSH)_PREFIX=.' "$ENV_FILE" ||
+  fail "no WAL-G storage configured (WALG_S3_PREFIX in $DB_ENV or the environment)"
 
-fail() {
-  say "RESTORE TEST FAILED: $1"
-  notify "🔴 restore test failed: $1"
-  exit 1
-}
-
-envs=""
-for v in $(env | grep -E '^(WALG_|AWS_)' | cut -d= -f1); do envs="$envs -e $v"; done
+WALG_FILE_PREFIX=${WALG_FILE_PREFIX:-$(env_get WALG_FILE_PREFIX "$ENV_FILE")}
 mount=""
 if [ -n "${WALG_VOLUME:-}" ]; then mount="-v ${WALG_VOLUME}:${WALG_FILE_PREFIX}:ro"; fi
 
-say "fetching the latest base backup"
+say "fetching the latest base backup ($DB_IMAGE)"
 # shellcheck disable=SC2086
-docker run -d --name "$NAME" $envs $mount --entrypoint sleep "$DB_IMAGE" infinity >/dev/null
+docker run -d --name "$NAME" --env-file "$ENV_FILE" $mount --entrypoint sleep "$DB_IMAGE" infinity >/dev/null ||
+  fail "could not start a scratch container from $DB_IMAGE"
 r() { docker exec -u postgres "$NAME" "$@"; }
 
 r sh -c 'mkdir -p /tmp/restore && chmod 700 /tmp/restore && wal-g backup-fetch /tmp/restore LATEST' ||
@@ -62,24 +84,46 @@ touch /tmp/restore/recovery.signal" || fail "recovery setup"
 r sh -c 'pg_ctl -D /tmp/restore -l /tmp/restore.log -o "-c listen_addresses= -c port=5433" -w -t 600 start' ||
   { r cat /tmp/restore.log || true; fail "the restored database did not start"; }
 
-q() { r psql -h /var/run/postgresql -p 5433 -U "$PGUSER" -d "$PGDB" -tAc "$1"; }
+q() { r psql -h /var/run/postgresql -p 5433 -U "$PG_USER" -d "$PG_DB" -tAc "$1"; }
 
-for i in $(seq 1 300); do
+for _ in $(seq 1 300); do
   [ "$(q 'SELECT pg_is_in_recovery()' 2>/dev/null)" = "f" ] && break
   sleep 2
 done
 [ "$(q 'SELECT pg_is_in_recovery()')" = "f" ] || fail "recovery did not finish"
 
+# The live database, to compare row counts with: LIVE_DATABASE_URL, or the
+# stack's db on this host (inside its network: it needs no published port
+# and no password), or none.
+if [ -n "${LIVE_DATABASE_URL:-}" ]; then
+  LIVE=url
+elif [ -n "$(docker compose -f "$COMPOSE_FILE" ps -q db 2>/dev/null)" ]; then
+  LIVE=compose
+else
+  LIVE=none
+  say "no live database here to compare row counts with (set LIVE_DATABASE_URL)"
+fi
+
+live() {
+  case $LIVE in
+    url) docker run --rm --network host "$DB_IMAGE" psql "$LIVE_DATABASE_URL" -tAc "$1" ;;
+    compose)
+      # shellcheck disable=SC2016
+      docker compose -f "$COMPOSE_FILE" exec -T db \
+        sh -c 'psql -U "$POSTGRES_USER" -d "${POSTGRES_DB:-$POSTGRES_USER}" -tAc "$1"' sh "$1"
+      ;;
+  esac
+}
+
 say "checking tables"
 for t in channels streams viewer_samples webhook_events stream_stats; do
   n=$(q "SELECT count(*) FROM $t") || fail "reading $t"
   say "  $t: $n rows"
-  if [ -n "${LIVE_DATABASE_URL:-}" ]; then
-    live=$(docker run --rm --network host "$DB_IMAGE" psql "$LIVE_DATABASE_URL" -tAc "SELECT count(*) FROM $t") ||
-      fail "reading the live $t"
+  if [ "$LIVE" != none ]; then
+    live_n=$(live "SELECT count(*) FROM $t") || fail "reading the live $t"
     # The backup can only be behind the live database, and not by much.
-    [ "$n" -le "$live" ] || fail "$t has more rows restored ($n) than live ($live)"
-    [ "$live" -eq 0 ] || [ $((n * 100 / live)) -ge 95 ] || fail "$t: $n restored of $live live"
+    [ "$n" -le "$live_n" ] || fail "$t has more rows restored ($n) than live ($live_n)"
+    [ "$live_n" -eq 0 ] || [ $((n * 100 / live_n)) -ge 95 ] || fail "$t: $n restored of $live_n live"
   fi
 done
 
@@ -101,4 +145,4 @@ bad=$(q "
 [ "$bad" = "0" ] || fail "$bad recent streams' hours watched disagree with their samples"
 
 say "restore test passed"
-if [ -n "${RESTORE_HEARTBEAT_URL:-}" ]; then curl -fsS -m 20 "$RESTORE_HEARTBEAT_URL" >/dev/null || true; fi
+ping_url "$RESTORE_HEARTBEAT_URL"
