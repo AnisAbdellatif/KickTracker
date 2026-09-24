@@ -155,6 +155,9 @@ defmodule KickTrackerWeb.Layouts do
             {gettext("Dead letters")}
           </.admin_link>
           <.admin_link to={~p"/admin/data"} active={@active == :data}>{gettext("Data")}</.admin_link>
+          <.admin_link to={~p"/admin/transfer"} active={@active == :transfer}>
+            {gettext("Export / import")}
+          </.admin_link>
           <.admin_link to={~p"/admin/privacy"} active={@active == :privacy}>
             {gettext("Privacy")}
           </.admin_link>

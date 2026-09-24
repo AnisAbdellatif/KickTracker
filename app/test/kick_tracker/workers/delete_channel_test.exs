@@ -68,5 +68,10 @@ defmodule KickTracker.Workers.DeleteChannelTest do
 
     assert count.("viewer_samples", staying.id) == before
     assert_enqueued(worker: KickTracker.Workers.SubscriptionSync)
+
+    # Remembered, so an import can't bring it back.
+    assert Repo.query!("SELECT kind, kick_user_id FROM removals").rows == [
+             ["channel", gone.kick_user_id]
+           ]
   end
 end

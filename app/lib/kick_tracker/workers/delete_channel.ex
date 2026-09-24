@@ -51,6 +51,7 @@ defmodule KickTracker.Workers.DeleteChannel do
             ])
 
             Repo.query!("DELETE FROM channels WHERE id = $1", [id])
+            KickTracker.Removals.record(:channel, kick_user_id)
           end,
           timeout: :infinity
         )

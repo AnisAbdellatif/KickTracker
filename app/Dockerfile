@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 open
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8 MIX_ENV=prod
 WORKDIR /app
-RUN useradd --system --home /app app && chown app /app
+RUN useradd --system --home /app app && chown app /app && mkdir /transfers && chown app /transfers
 COPY --from=build --chown=app /app/_build/prod/rel/kick_tracker ./
 USER app
 EXPOSE 4100

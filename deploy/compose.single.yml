@@ -13,6 +13,9 @@ x-app: &app
   image: ${APP_IMAGE:-ghcr.io/anisabdellatif/kicktracker-app:latest}
   env_file: [secrets/app.env]
   restart: unless-stopped
+  # Exports and imports: web takes uploads and serves downloads, the
+  # collector does the work (TRANSFER_DIR, project.md §13.8).
+  volumes: [transfers:/transfers]
   depends_on:
     db: {condition: service_healthy}
 
@@ -94,6 +97,7 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  transfers:
   spool1:
   spool2:
   rabbitmq:

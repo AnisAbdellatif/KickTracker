@@ -67,6 +67,7 @@ defmodule KickTracker.Privacy do
           support_payloads = scrub_support_payloads(user_id)
           %{num_rows: names} = Repo.query!("DELETE FROM kick_users WHERE id = $1", [user_id])
           bodies = redact_bodies(user_id)
+          KickTracker.Removals.record(:user, user_id)
 
           %{
             chat_minutes: minutes,

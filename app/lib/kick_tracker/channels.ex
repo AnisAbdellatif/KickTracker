@@ -141,6 +141,7 @@ defmodule KickTracker.Channels do
             end
 
           record_slug(channel, kick_slug, now)
+          KickTracker.Removals.clear_channel(user_id)
           Repo.get!(Channel, channel.id)
         end)
 

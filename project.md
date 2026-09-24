@@ -1165,6 +1165,18 @@ auth check.
     viewbots", "charity stream"), optionally shown publicly on charts.
 - **Privacy:** find everything held about a Kick user id; delete it
   (per-user rows, username, raw event bodies redacted).
+- **Export / import:** download chosen channels, alone or with their
+  history over an optional date range, as a `.zip` of CSVs (one per table,
+  local ids kept so they join, plus `manifest.json`); upload one from
+  another instance, preview it (new channels, channels already here,
+  channels it would delete), and merge it. Only raw facts and admin
+  corrections travel; derived tables are rebuilt afterwards. Imports only
+  add, matching rows on natural keys (Kick ids, `(channel, started_at)`,
+  `message_id`), so rows already here win and a second import changes
+  nothing. Removal requests travel with the data (`removals`): a channel or
+  user removed on either side stays removed. The collector does the work
+  (`Workers.Transfer`, its own queue); the files live in `TRANSFER_DIR`,
+  shared by both roles, for 7 days.
 - **Settings:** feature flags (show the support page publicly, show top
   chatters and supporters by name), the assumptions behind the revenue
   estimate; public groups on their own page. Polling cadences stay in code,
@@ -1179,8 +1191,10 @@ the database every minute, so a lost message only delays the change.
 
 New tables for this: `admins`, `admin_tokens` (sessions, invitations), `channel_groups`,
 `channel_group_members`, `stream_overrides` (merge / split / exclude),
-`annotations`, `admin_audit_log`, `settings`. The `web` role is read-only
-against the collected data and writes only these.
+`annotations`, `admin_audit_log`, `settings`, `transfers` (export and
+import log). The `web` role is read-only against the collected data and
+writes only these. `removals` (Kick ids whose removal was carried out) is
+written by the collector, with the deletion itself.
 
 ### 13.9 Performance targets
 

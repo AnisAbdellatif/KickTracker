@@ -78,6 +78,21 @@ config :kick_tracker, :amqp_url, setting.("AMQP_URL")
 # The public name (never Kick's, project.md §18.3).
 config :kick_tracker, :site_name, System.get_env("SITE_NAME", "Stream Tracker")
 
+# Exports and imports from the admin (project.md §13.8): a directory both
+# roles see (a shared volume in production), and the largest upload taken.
+config :kick_tracker,
+       :transfer_dir,
+       System.get_env("TRANSFER_DIR") ||
+         (case config_env() do
+            :prod -> "/transfers"
+            :test -> Path.join(System.tmp_dir!(), "kick_tracker_transfers_test")
+            :dev -> Path.expand("../tmp/transfers", __DIR__)
+          end)
+
+config :kick_tracker,
+       :transfer_max_upload,
+       String.to_integer(System.get_env("TRANSFER_MAX_UPLOAD_MB", "20000")) * 1_000_000
+
 # How many proxies of ours stand in front of the web role (Caddy: 1; with
 # Cloudflare in front of Caddy: 2), for the visitor's address (§19.3).
 config :kick_tracker,

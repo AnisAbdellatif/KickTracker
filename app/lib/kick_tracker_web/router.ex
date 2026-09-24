@@ -94,6 +94,7 @@ defmodule KickTrackerWeb.Router do
       live "/subscriptions", SubscriptionsLive
       live "/dead-letters", DeadLettersLive
       live "/data", DataLive
+      live "/transfer", TransferLive
       live "/privacy", PrivacyLive
       live "/settings", SettingsLive
       live "/admins", AdminsLive
@@ -104,6 +105,8 @@ defmodule KickTrackerWeb.Router do
 
   scope "/admin" do
     pipe_through [:browser, :require_admin]
+
+    get "/transfers/:id/download", KickTrackerWeb.Admin.TransferController, :download
 
     live_dashboard "/dashboard",
       metrics: KickTrackerWeb.Telemetry,
