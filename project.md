@@ -50,9 +50,9 @@ Four sources, each used for what only it does well.
 Observed in the recordings (2026-09-24, `sim/recordings/`):
 
 - **`viewer_count` changes about once a minute** (median 61s between
-  changes, shortest 46s, over 40 polls at 15s). Polling every 15s sees each
-  value about four times; peaks and averages can't be finer than Kick's own
-  refresh.
+  changes, shortest 46s, over 40 polls at 15s). Polling every 15s saw each
+  value about four times, so viewers are polled **every 60s** (§3.1): peaks
+  and averages can't be finer than Kick's own refresh anyway.
 - **Subscriber counts are filled for a channel that hasn't authorized us**
   (real non-zero values with the app token). `stream.key` and `stream.url`
   are empty strings.
@@ -183,7 +183,7 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
 | What | How | Cadence |
 |---|---|---|
 | Stream start and end | `livestream.status.updated`; Kick's own `started_at` / `ended_at` | Event |
-| Viewers | `GET /livestreams`, batched | **Every 15s** (Kick refreshes about every 60s, §2.1) |
+| Viewers | `GET /livestreams`, batched | **Every 60s** (Kick refreshes about every 60s, §2.1) |
 | Title changes | `livestream.metadata.updated` (+ compared on each poll) | Event |
 | Category changes | `livestream.metadata.updated` (+ compared on each poll) | Event |
 | Active chatters | unique senders per minute, per user (§12) | **Per minute** |
@@ -207,7 +207,7 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
 ### 3.3 Stream identity
 
 - **Start:** Kick's `started_at`. **End:** Kick's `ended_at`, or the last live
-  reading if the event was missed (accurate to 15s).
+  reading if the event was missed (accurate to 60s).
 - **Kick sends no livestream id**: neither `livestream.status.updated` nor
   `GET /livestreams` carries one. A stream is identified by
   **`(channel_id, started_at)`**, Kick's own start time, which both the
@@ -243,7 +243,7 @@ per-minute table loses no long-term statistic.
 | Metric | Source |
 |---|---|
 | Live / offline, start and end time | webhook, poll as backup |
-| Viewers | public API, every 15s |
+| Viewers | public API, every 60s |
 | Title, category, language, tags | webhook + public API |
 | Follower total | v2 |
 | Subscriber totals (active, gifted, cancelled) | public API `/channels` |
@@ -261,8 +261,8 @@ can be recomputed if a formula changes.
 |---|---|
 | Airtime, number of streams, active days | stream start and end |
 | Average viewers | mean of viewer samples while live |
-| Peak viewers | highest sample (15s resolution) |
-| Hours watched | Σ viewers × min(Δt, 60s) |
+| Peak viewers | highest sample (60s resolution, Kick's own refresh rate) |
+| Hours watched | Σ viewers × min(Δt, 75s) |
 | Viewer curve per stream | the raw samples |
 | Viewers / hours watched / time per category | samples grouped by the category they carry |
 | Title and category impact | viewer samples around change events |
@@ -326,13 +326,13 @@ unique chatters per stream on average, no chat text stored.
 
 | | 10 channels | 100 channels | 1 000 channels |
 |---|---|---|---|
-| Viewer rows/day (15s) | ~10k | ~100k | ~1M |
+| Viewer rows/day (60s) | ~2.5k | ~25k | ~250k |
 | Chat minute × chatter rows/day (kept 90 days) | ~50k | ~500k | ~5M |
 | Chat stream × chatter rows/day (kept) | ~3k | ~30k | ~300k |
 | Stored after the first year, compressed | ~0.1 GB | ~1 GB | ~10 GB |
 | Open chat websockets | 10 | 100 | 1 000 |
 | Chat messages/s at peak | ~5–50 | ~50–500 | ~500–5 000 |
-| Viewer polls (public API) | 1 req / 15s | 1 req / 15s | ~4 req / 15s |
+| Viewer polls (public API) | 1 req / min | 1 req / min | ~4 req / min |
 | Safety-net polls | 1 req / 5 min | 2 req / 5 min | 20 req / 5 min |
 | v2 follower requests | < 1 / min | ~1–2 / min | ~15 / min |
 | Webhook subscriptions | ~80 | ~800 | ~8 000 (limit 10 000 per type) |
@@ -562,7 +562,7 @@ KickTrackerWeb.Supervisor
   and the 5-minute poll repairs anything else.
 
 **Poller** (one process)
-- Every **15s**: `GET /livestreams` for the channels currently live, 50 per
+- Every **60s**: `GET /livestreams` for the channels currently live, 50 per
   request, and sends each `ChannelServer` its reading: `{:reading, data, at}`.
 - Every **5 min**: `GET /channels` for all tracked channels, as a safety net
   for missed live/offline and metadata events.
@@ -806,7 +806,7 @@ stream_changes     (id, stream_id, occurred_at, field: title | category |
 -- time series (hypertables, compressed, segmented by channel_id)
 viewer_samples     (channel_id, observed_at, stream_id, viewers, category_id,
                     PRIMARY KEY (channel_id, observed_at))
-                   -- every 15s while live
+                   -- every 60s while live
 follower_samples   (channel_id, observed_at, followers,
                     PRIMARY KEY (channel_id, observed_at))
                    -- 15 min live, daily offline, stream start and end
@@ -909,7 +909,7 @@ shared.
 
 One time axis, stacked panels sharing zoom and crosshair:
 
-1. **Viewers** (15s resolution), with:
+1. **Viewers** (60s resolution), with:
    - **shaded bands** for category segments, labeled ("Just Chatting",
      "GTA V"), and ticks for title changes;
    - **markers** for raids/hosts in and out (with viewer counts), sub gift
@@ -921,7 +921,7 @@ One time axis, stacked panels sharing zoom and crosshair:
 
 Beside it: stream stat cards, the change timeline (title and category
 history), top chatters and supporters of the stream. While live, new points
-append every 15s and the cards update.
+append every 60s and the cards update.
 
 ### 13.4 Resolution by range
 
@@ -930,7 +930,7 @@ The server chooses the bucket from the requested range, so no series exceeds
 
 | Range | Viewers | Chat | Source |
 |---|---|---|---|
-| One stream (≤ ~12h) | raw 15s samples | per minute | `viewer_samples`, `chat_minutes` |
+| One stream (≤ ~12h) | raw 60s samples | per minute | `viewer_samples`, `chat_minutes` |
 | ≤ 7 days | 5-min buckets | 5-min buckets | `viewer_samples` (time_bucket) |
 | ≤ 90 days | hourly | hourly | continuous aggregates |
 | Longer | daily (channel timezone) | daily | from hourly aggregates |
@@ -949,9 +949,9 @@ are sent as `null` (a break), never 0.
   Ranges that include "now" get a short TTL (e.g. 30s).
 - **Live over LiveView:** the page subscribes to `"channel:<id>"`; new
   readings are pushed to the chart hook with `push_event` (append a point),
-  at most every 15s. Chart data is **never kept in LiveView assigns**, so a
+  at most every 60s. Chart data is **never kept in LiveView assigns**, so a
   connected visitor costs a few KB, not a copy of the series.
-- **Home page:** one aggregated `"live"` broadcast every 15s with all live
+- **Home page:** one aggregated `"live"` broadcast every 60s with all live
   channels' current viewers, not one per channel.
 - **Query cache** (Cachex) in the `web` role for expensive aggregates
   (leaderboards, 30-day cards), keyed by query and period: minutes for
@@ -1060,8 +1060,9 @@ against the collected data and writes only these.
 
 - **Gaps are recorded as gaps.** A failed poll writes nothing, never a zero.
   No answer is not the same as offline. Every gap lands in `coverage`.
-- **Hours watched** = Σ `viewers × min(Δt, 60s)`, so an outage is never
-  filled in by interpolation.
+- **Hours watched** = Σ `viewers × min(Δt, 75s)`: 75s tolerates a poll a
+  few seconds late, while a missed poll (a 120s gap) is filled by at most
+  15s, never interpolated.
 - **Events are idempotent** (unique `message_id`) and **order-independent**
   (event timestamps and `started_at`, never arrival order).
 - **UTC everywhere, channel timezone at read time**: daily and weekday
@@ -1087,7 +1088,7 @@ against the collected data and writes only these.
 |---|---|---|---|
 | `receiver` ×2 | `ingress/receiver` | Rarely, one at a time | Nothing, while the other answers |
 | `rabbitmq` | official | Rarely | Receivers spool to disk; nothing lost |
-| `collector` | `app`, `ROLE=collector` | When tracking changes | Events wait in the queue; ~one missed 15s reading and seconds of chat, recorded in `coverage` |
+| `collector` | `app`, `ROLE=collector` | When tracking changes | Events wait in the queue; at most one missed 60s reading and seconds of chat, recorded in `coverage` |
 | `web` | `app`, `ROLE=web` | Often | Site down; collection unaffected |
 | `db` | TimescaleDB | Rarely | Consumer stops acking, events wait in the queue; polling pauses |
 | `caddy` | official | Rarely | Ingress unreachable (see stage 2) |
