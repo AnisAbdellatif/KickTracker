@@ -42,10 +42,28 @@ Four sources, each used for what only it does well.
   category rankings.
 - `GET /channels`: slug, broadcaster id, title, category, `stream` (is_live,
   viewer_count, start time, language, tags), description, banner, and
-  subscriber count fields (probably only filled for a channel that authorized
-  us; to verify). Up to **50 per request**, by id or by slug (not mixed).
-  **No follower count.**
+  **subscriber counts** (`active_subscribers_count`,
+  `active_gifted_subscribers_count`, `canceled_subscribers_count`). Up to
+  **50 per request**, by id or by slug (not mixed). **No follower count.**
 - Back off on 429.
+
+Observed in the recordings (2026-09-24, `sim/recordings/`):
+
+- **`viewer_count` changes about once a minute** (median 61s between
+  changes, shortest 46s, over 40 polls at 15s). Polling every 15s sees each
+  value about four times; peaks and averages can't be finer than Kick's own
+  refresh.
+- **Subscriber counts are filled for a channel that hasn't authorized us**
+  (real non-zero values with the app token). `stream.key` and `stream.url`
+  are empty strings.
+- **An unknown slug fails the whole request** with 400 `Invalid request`, not
+  an empty result. Slugs are checked one at a time when a channel is added;
+  batched calls use broadcaster ids.
+- **Offline** `/livestreams` answers 200 `{"data": [], "message": "OK"}`.
+- **No rate-limit headers** in any response; the limits stay unknown.
+- App tokens last **60 days** (`expires_in` 5 184 000).
+- The API lags the real end of a stream by a few seconds: live 3s after
+  `ended_at`, empty 19s after.
 
 ### 2.2 Official webhooks: events
 
@@ -83,6 +101,31 @@ Four sources, each used for what only it does well.
 - Local development needs a tunnel (cloudflared or ngrok) so Kick can reach
   the ingress.
 
+Observed in the recordings (2026-09-24):
+
+- **All 9 event types were accepted with the app token** for a channel that
+  hasn't authorized us (`livestream.*`, `channel.followed`,
+  `channel.subscription.*`, `kicks.gifted`, `moderation.banned`,
+  `channel.reward.redemption.updated`). Deliveries seen so far: follows,
+  status, metadata; subs, gifts and Kicks not observed yet.
+- **Start and end are the same event type**, `livestream.status.updated`:
+  start has `is_live: true, ended_at: null`, end has `is_live: false` and
+  `ended_at`. Both carry the same `started_at`, and it is **string-identical
+  to `/livestreams`' `started_at`** (`YYYY-MM-DDTHH:MM:SSZ`, second
+  precision). Stream length = `ended_at − started_at`.
+- The `title` in status events is the title **at that moment** (the end event
+  had the changed title), so status events are not a source of title changes.
+- **`livestream.metadata.updated` is a full snapshot** (title, language,
+  `has_mature_content`, category), sent whenever any of them changes; which
+  field changed is found by comparing with the previous snapshot. The
+  category appears **twice**, as `category` and `Category`, with the same
+  value; we read the lowercase one.
+- **`livestream.metadata.updated` and `channel.followed` carry no timestamp**
+  in the body; when it happened comes from `Kick-Event-Message-Timestamp`
+  (`...Z`, second precision).
+- **Delivery is fast**: 0.2–0.9s after Kick's timestamp; the end event arrived
+  5s after `ended_at`. Every delivery's signature verified.
+
 ### 2.3 Private v2 API: follower totals only
 
 `https://kick.com/api/v2/channels/<slug>`, Kick's own frontend API (the one
@@ -99,6 +142,9 @@ KickPlus uses). The only source of the **total follower count**
   `playback_url` with a signed token; it is never stored.
 - Isolated in its own module so it can be replaced. Failures are gaps, never
   zeros; `channel.followed` keeps counting gross follows meanwhile.
+- Observed (2026-09-24): 200 with `followers_count` from a home machine; the
+  datacenter test is still open. The response repeats the channel id under
+  `chatroom.chatable_id`.
 
 ### 2.4 Pusher websocket: chat, raids and hosts (unofficial)
 
@@ -111,6 +157,19 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
 - `App\Events\ChatMessageEvent` carries `sender.id` and `sender.username`.
 - Also carries host/raid events (event names to confirm), and possibly other
   events on the per-channel feed `channel.<id>` (to verify).
+- Observed (2026-09-24, from a home machine):
+  - Accepted without auth; subscribing to `chatrooms.<id>.v2` and
+    `channel.<id>` both succeed.
+  - **The server's first frame (`connection_established`) often arrives in
+    the same read as the upgrade response.** A client must process those
+    bytes or it never subscribes (the recorder had this bug; fixed and
+    tested).
+  - `App\Events\ChatMessageEvent` has `type` `message` or `reply`; a reply
+    carries `metadata.original_message` (id, content) and
+    `metadata.original_sender` (id, username), plus `thread_parent_id`.
+    Message ids are UUIDs. Senders carry `identity.badges_v2`.
+  - Nothing arrived on `channel.<id>` in 20 minutes besides the subscription
+    confirmation. No raid or host seen yet.
 - Chat stays here rather than on the chat webhook: a webhook is one HTTP
   request per message, heavy on busy channels, and capped at 1 000 channels
   for an unverified app. The webhook is the official fallback if Pusher stops.
@@ -124,12 +183,13 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
 | What | How | Cadence |
 |---|---|---|
 | Stream start and end | `livestream.status.updated`; Kick's own `started_at` / `ended_at` | Event |
-| Viewers | `GET /livestreams`, batched | **Every 15s** |
+| Viewers | `GET /livestreams`, batched | **Every 15s** (Kick refreshes about every 60s, §2.1) |
 | Title changes | `livestream.metadata.updated` (+ compared on each poll) | Event |
 | Category changes | `livestream.metadata.updated` (+ compared on each poll) | Event |
 | Active chatters | unique senders per minute, per user (§12) | **Per minute** |
 | Hosts and raids | Pusher events | Event |
 | Followers (total) | v2 `followers_count` | **Every 15 min**, plus **at stream start and end** |
+| Subscribers (active, gifted, cancelled) | `GET /channels` (the safety-net poll) | **Every 5 min** |
 | Follows | `channel.followed` | Event |
 | Subs, resubs, gifted subs | `channel.subscription.*` | Event |
 | Kicks | `kicks.gifted` | Event |
@@ -139,6 +199,7 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
 | What | How | Cadence |
 |---|---|---|
 | Followers (total) | v2 `followers_count` | **Once a day** |
+| Subscribers (active, gifted, cancelled) | `GET /channels` (the safety-net poll) | **Every 5 min** |
 | Going live | `livestream.status.updated` | Event |
 | Safety-net poll | `GET /channels`, batched, all channels | Every 5 min |
 | Follows, subs, gifts, Kicks | webhooks | Event |
@@ -154,6 +215,8 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
   stream keeps its `started_at` and stays one stream; a new `started_at`
   starts a new one. v2's livestream id may be stored as an extra, never
   relied on.
+- **Confirmed on real data**: the start event, the end event and the API
+  poll all reported the identical `started_at` string for the same stream.
 - The safety-net poll opens or closes streams whose webhooks were missed.
 
 ### 3.4 Chat windows are chosen at read time
@@ -183,6 +246,7 @@ per-minute table loses no long-term statistic.
 | Viewers | public API, every 15s |
 | Title, category, language, tags | webhook + public API |
 | Follower total | v2 |
+| Subscriber totals (active, gifted, cancelled) | public API `/channels` |
 | Follows | webhook |
 | Subs, resubs, gifted subs, Kicks | webhooks |
 | Chat messages (sender, time) | Pusher |
@@ -203,6 +267,7 @@ can be recomputed if a formula changes.
 | Viewers / hours watched / time per category | samples grouped by the category they carry |
 | Title and category impact | viewer samples around change events |
 | Follower gain (per stream, period) | follower totals at start and end; gross follows from webhook |
+| Subscriber growth, gifted share, cancellations | subscriber samples over time |
 | Active chatters (any window), messages, unique chatters | chat minutes |
 | Engagement rate | chatters ÷ viewers |
 | New vs returning chatters, overlap between channels | chat minutes across streams and channels |
@@ -215,9 +280,9 @@ All of these cover only the period since we started tracking a channel.
 
 ### 4.3 With limits
 
-- **Subscriber total:** events give what we saw (new, resubs, gifts), not the
-  channel's current count. The `channels` endpoint's subscriber fields are
-  probably empty for channels that haven't authorized us.
+- **Subscriber totals** come from `/channels` every 5 minutes (active,
+  gifted, cancelled), so they're known at that resolution; who subscribed,
+  and when exactly, comes only from the webhook events we received.
 - **Revenue:** Kicks and subs have known prices, so money figures are
   possible, but only as labeled **estimates** (Kick's cut, regional pricing).
 
@@ -698,6 +763,11 @@ a stream's per-minute detail is gone, but its per-minute counts
 ### 12.4 Titles and categories
 
 - `stream_changes` is an append-only log: field, old value, new value, when.
+  It is built by comparing each `livestream.metadata.updated` snapshot with
+  the previous one (the event carries every field, not only the changed
+  one); `occurred_at` is the delivery's `Kick-Event-Message-Timestamp`. The
+  poll's title and category fill in changes whose events were missed.
+  Titles in `livestream.status.updated` are not used for changes.
 - `stream_segments` is derived from it: stretches where title, category and
   language don't change. "Time per category" and "viewers after the switch
   to GTA" are simple queries on it.
@@ -740,6 +810,9 @@ viewer_samples     (channel_id, observed_at, stream_id, viewers, category_id,
 follower_samples   (channel_id, observed_at, followers,
                     PRIMARY KEY (channel_id, observed_at))
                    -- 15 min live, daily offline, stream start and end
+subscriber_samples (channel_id, observed_at, active, active_gifted, canceled,
+                    PRIMARY KEY (channel_id, observed_at))
+                   -- every 5 min, from the /channels safety-net poll
 chat_minutes       (channel_id, minute, stream_id, messages, chatters,
                     PRIMARY KEY (channel_id, minute))
 chat_minute_users  (channel_id, minute, user_id, messages,
@@ -1061,7 +1134,20 @@ Answered:
 - ~~Batching limits?~~ 50 channels per request for `livestreams` and
   `channels`.
 - ~~Is there a "stream started" signal?~~ Yes, `livestream.status.updated`,
-  subscribable with the app token.
+  subscribable with the app token; the same event signals the end.
+- ~~How often does Kick refresh `viewer_count`?~~ About every 60s (§2.1).
+- ~~Are the `channels` subscriber-count fields filled for channels that
+  haven't authorized us?~~ Yes (§2.1); now tracked every 5 minutes.
+- ~~Does Pusher accept connections without auth?~~ Yes, from a home machine
+  (§2.4).
+
+Partly answered:
+
+- **Sub, gift and Kicks webhooks with the app token:** subscriptions are
+  accepted for a channel that hasn't authorized us; no delivery of those
+  types observed yet. Record a channel where people subscribe and gift.
+- **Public API rate limits:** no rate-limit headers are sent, so the limits
+  are unknown. We don't probe for them; stay batched and back off on 429.
 
 Still open:
 
@@ -1069,17 +1155,9 @@ Still open:
    whether and when it is delivered again. Decides how urgent stages 2 and 3
    are.
 2. **Does v2 answer from the VPS** (datacenter IP), not just from home?
-3. **Do sub, gift and Kicks webhooks work with the app token** for a channel
-   that hasn't authorized us? Test on one real channel.
-4. **How often does Kick refresh `viewer_count`?** If it's every 30–60s, most
-   15s readings repeat (harmless, they compress; but worth knowing).
-5. **Public API rate limits** (requests per minute).
-6. **Pusher from a server:** accepted, any limit on subscriptions per
-   connection, and the exact raid/host event names. Does the `channel.<id>`
-   feed carry anything useful (live status, follower counts)?
-7. **Are the `channels` subscriber-count fields** filled for channels that
-   haven't authorized us?
-8. **Outgoing raids:** visible from the raiding channel's feed, or only in the
+3. **Pusher from a datacenter IP**, any limit on subscriptions per
+   connection, and the exact raid/host event names.
+4. **Outgoing raids:** visible from the raiding channel's feed, or only in the
    target's?
 
 ## 17. Development: recorded payloads and a fake Kick
@@ -1113,12 +1191,15 @@ usernames and slugs, avatars and every URL, and free text (chat, titles,
 bios) are replaced consistently, so the same person stays the same fake
 person across files and runs (the mapping stays in `sim/recordings/`). It
 reports every text field it kept without a rule, by path only, for review
-before committing. Signed webhook fixtures keep their original
+before committing, and then runs an independent **leak check**: every real
+username, slug, chat text and id in the raw files is searched for in the
+output, and the run fails if any is found. (On the first real data it caught
+the channel id under `chatroom.chatable_id`, which the rules had missed.) Signed webhook fixtures keep their original
 body next to the anonymized one, since re-signing is impossible without
 Kick's key; signature tests use the originals, and those files stay out of
 the public repo if it ever becomes public.
 
-The same run answers most open questions (§16.1–5): retry behavior, refresh
+The same run answers most open questions (§16): retry behavior, refresh
 rate of `viewer_count`, rate limits, v2 from the VPS, app-token access to
 sub / Kicks events.
 
@@ -1275,7 +1356,7 @@ Tests are written alongside every step (§17.3), not as a step of their own.
 2. `contracts/envelope.md` + schema.
 3. The recorder (§17.1): record API, v2, webhooks (through a tunnel) and
    Pusher for one or two channels; anonymize into `fixtures/`. Answer
-   §16.1–5 along the way.
+   the open questions (§16) along the way.
 
 **Phase 1: the fake Kick**
 
