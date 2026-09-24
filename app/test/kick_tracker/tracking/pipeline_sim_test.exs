@@ -176,3 +176,89 @@ defmodule KickTracker.Tracking.FollowersSimTest do
     refute_enqueued(worker: FollowerPoll, args: %{channel_id: off.id})
   end
 end
+
+defmodule KickTracker.Tracking.ChatSimTest do
+  @moduledoc "Chat from the fake Kick's Pusher, through the socket, into the chat tables."
+
+  use KickTracker.SimCase
+  @moduletag :capture_log
+
+  import KickTracker.Fixtures
+  alias KickTracker.Channels
+  alias KickTracker.Tracking.{ChannelServer, ChatSocket, Manager}
+
+  setup do
+    start_sim([[slug: "livestreamer", schedule: :always]])
+    start_collector()
+    {:ok, c} = Channels.add("livestreamer")
+    sim = Sim.Scenario.channel(Sim.Server.scenario(), "livestreamer")
+    Manager.sync()
+    # The chatroom id arrives after the channel's processes started (in
+    # production, from the first follower reading): the socket connects then.
+    c = Channels.put_ids(c, nil, sim.chatroom_id)
+    Channels.announce(c)
+    poll()
+    socket = KickTracker.Tracking.whereis({:chat, c.id})
+    assert eventually(fn -> ChatSocket.subscribed?(socket) end)
+    %{channel: c, socket: socket}
+  end
+
+  defp say(sender, text \\ "hello"),
+    do: sim_ctl(:post, "/channels/livestreamer/chat", %{"content" => text, "sender_id" => sender})
+
+  defp flush(c) do
+    pid = ChannelServer.whereis(c.kick_user_id)
+    ChannelServer.flush_chat_now(pid, DateTime.add(DateTime.utc_now(), 600))
+  end
+
+  # The fake Kick's own audience chats too; these senders are the test's.
+  @a 990_000_101
+  @b 990_000_102
+
+  defp mine(table, key),
+    do: rows(table, [key]) |> Enum.filter(&(&1.user_id in [@a, @b]))
+
+  test "messages become per-minute counts inside the open stream, and no text is stored",
+       %{channel: c} do
+    say(@a, "a secret message")
+    say(@a, "second")
+    say(@b, "third")
+
+    assert eventually(fn ->
+             flush(c)
+             Enum.sum_by(mine("chat_minute_users", "user_id"), & &1.messages) == 3
+           end)
+
+    [stream] = rows("streams", ["id"])
+    assert Enum.all?(rows("chat_minutes", ["minute"]), &(&1.stream_id == stream.id))
+
+    assert mine("chat_stream_users", "user_id") |> Enum.map(&{&1.user_id, &1.messages}) ==
+             [{@a, 2}, {@b, 1}]
+
+    assert Enum.all?(
+             [@a, @b],
+             &(Repo.query!("SELECT 1 FROM kick_users WHERE id = $1", [&1]).num_rows == 1)
+           )
+
+    %{rows: dump} =
+      Repo.query!("SELECT * FROM chat_minutes, chat_minute_users, chat_stream_users, kick_users")
+
+    refute inspect(dump) =~ "secret"
+  end
+
+  test "a dropped connection is a recorded gap, then chat resumes", %{channel: c, socket: socket} do
+    sim_ctl(:post, "/pusher/disconnect")
+    assert eventually(fn -> not ChatSocket.subscribed?(socket) end)
+    assert eventually(fn -> ChatSocket.subscribed?(socket) end)
+
+    say(103)
+
+    assert eventually(fn ->
+             flush(c)
+             rows("chat_minutes", ["minute"]) != []
+           end)
+
+    chat = rows("coverage", ["id"]) |> Enum.filter(&(&1.source == "chat")) |> Enum.map(& &1.ok)
+    assert chat == [true, false, true]
+  end
+end

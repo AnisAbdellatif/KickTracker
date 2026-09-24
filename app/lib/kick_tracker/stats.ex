@@ -202,4 +202,106 @@ defmodule KickTracker.Stats do
 
     :ok
   end
+
+  # --- chat ------------------------------------------------------------------
+
+  @doc """
+  Writes finished chat minutes, each `%{minute:, stream_id:, users: %{user_id
+  => %{messages:, first_at:, last_at:}}}`, in one transaction:
+  `chat_minute_users` rows (added to, if a late message's minute was
+  already written), `chat_minutes` recounted from them, and per-stream
+  totals in `chat_stream_users` for minutes inside a stream.
+  """
+  @spec write_chat(integer(), [map()]) :: :ok
+  def write_chat(_channel_id, []), do: :ok
+
+  def write_chat(channel_id, minutes) do
+    Repo.transaction(fn ->
+      user_rows =
+        for m <- minutes, {user_id, u} <- m.users do
+          %{channel_id: channel_id, minute: m.minute, user_id: user_id, messages: u.messages}
+        end
+
+      for chunk <- Enum.chunk_every(user_rows, 5_000) do
+        Repo.insert_all("chat_minute_users", chunk,
+          on_conflict:
+            from(u in "chat_minute_users",
+              update: [set: [messages: fragment("? + EXCLUDED.messages", u.messages)]]
+            ),
+          conflict_target: [:channel_id, :minute, :user_id]
+        )
+      end
+
+      for m <- minutes do
+        Repo.query!(
+          """
+          INSERT INTO chat_minutes (channel_id, minute, stream_id, messages, chatters)
+          SELECT channel_id, minute, $3::bigint, sum(messages), count(*)
+          FROM chat_minute_users WHERE channel_id = $1 AND minute = $2
+          GROUP BY channel_id, minute
+          ON CONFLICT (channel_id, minute) DO UPDATE SET
+            messages = EXCLUDED.messages,
+            chatters = EXCLUDED.chatters,
+            stream_id = COALESCE(chat_minutes.stream_id, EXCLUDED.stream_id)
+          """,
+          [channel_id, m.minute, m.stream_id]
+        )
+      end
+
+      stream_rows =
+        for m <- minutes, m.stream_id != nil, {user_id, u} <- m.users do
+          %{
+            stream_id: m.stream_id,
+            user_id: user_id,
+            messages: u.messages,
+            first_at: u.first_at,
+            last_at: u.last_at
+          }
+        end
+        |> merge_stream_rows()
+
+      for chunk <- Enum.chunk_every(stream_rows, 5_000) do
+        Repo.insert_all("chat_stream_users", chunk,
+          on_conflict:
+            from(u in "chat_stream_users",
+              update: [
+                set: [
+                  messages: fragment("? + EXCLUDED.messages", u.messages),
+                  first_at: fragment("LEAST(?, EXCLUDED.first_at)", u.first_at),
+                  last_at: fragment("GREATEST(?, EXCLUDED.last_at)", u.last_at)
+                ]
+              ]
+            ),
+          conflict_target: [:stream_id, :user_id]
+        )
+      end
+    end)
+
+    :ok
+  end
+
+  # One row per stream and user, so one statement never touches a row twice.
+  defp merge_stream_rows(rows) do
+    rows
+    |> Enum.group_by(&{&1.stream_id, &1.user_id})
+    |> Enum.map(fn {_, [first | _] = same} ->
+      %{
+        first
+        | messages: Enum.sum_by(same, & &1.messages),
+          first_at: same |> Enum.map(& &1.first_at) |> Enum.min(DateTime),
+          last_at: same |> Enum.map(& &1.last_at) |> Enum.max(DateTime)
+      }
+    end)
+  end
+
+  @doc "Records a raid or host once, however often it is seen."
+  @spec insert_channel_event(map()) :: :ok
+  def insert_channel_event(row) do
+    Repo.insert_all("channel_events", [row],
+      on_conflict: :nothing,
+      conflict_target: [:channel_id, :dedup_key]
+    )
+
+    :ok
+  end
 end

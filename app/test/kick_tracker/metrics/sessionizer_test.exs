@@ -123,6 +123,18 @@ defmodule KickTracker.Metrics.SessionizerTest do
     assert closed_at == at(@s2, 300)
   end
 
+  test "which stream a minute belongs to" do
+    {state, _} =
+      run([{:live, @s, at(@s, 30)}, {:ended, @s, at(@s, 3600)}, {:live, @s2, at(@s2, 5)}])
+
+    assert S.stream_during(state, at(@s, 60), at(@s, 120)) == u(@s)
+    # The minute in which it started, and the one in which it ended, count.
+    assert S.stream_during(state, at(@s, -30), at(@s, 30)) == u(@s)
+    assert S.stream_during(state, at(@s, 3570), at(@s, 3630)) == u(@s)
+    assert S.stream_during(state, at(@s, 7200), at(@s, 7260)) == nil
+    assert S.stream_during(state, at(@s2, 600), at(@s2, 660)) == u(@s2)
+  end
+
   # --- order independence -------------------------------------------------
 
   # A true history of streams, and every observation it would produce: a

@@ -205,6 +205,25 @@ defmodule KickTracker.Metrics.Sessionizer do
     end
   end
 
+  @doc """
+  The start of the stream that was live during `[from, to)`, if any: the
+  latest one started before `to` and not over before `from`.
+  """
+  @spec stream_during(t(), DateTime.t(), DateTime.t()) :: DateTime.t() | nil
+  def stream_during(state, from, to) do
+    state.streams
+    |> Map.values()
+    |> Enum.filter(fn s ->
+      DateTime.before?(s.started_at, to) and
+        (s.ended_at == nil or not DateTime.before?(s.ended_at, from))
+    end)
+    |> Enum.max_by(& &1.started_at, DateTime, fn -> nil end)
+    |> case do
+      nil -> nil
+      s -> s.started_at
+    end
+  end
+
   @doc "The known streams as `{started_at, ended_at, end_source}`, oldest first."
   @spec streams(t()) :: [{DateTime.t(), DateTime.t() | nil, :event | :poll | nil}]
   def streams(state) do

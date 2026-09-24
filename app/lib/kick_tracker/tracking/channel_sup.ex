@@ -31,6 +31,9 @@ defmodule KickTracker.Tracking.ChannelSup do
   end
 
   defp children(channel) do
-    [{KickTracker.Tracking.ChannelServer, channel}]
+    [
+      {KickTracker.Tracking.ChannelServer, channel},
+      {KickTracker.Tracking.ChatSocket, channel}
+    ]
   end
 end

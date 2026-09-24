@@ -3,11 +3,16 @@ defmodule KickTracker.Tracking.ChannelServer do
   One per tracked channel (project.md §10): the channel's live state and
   every write that depends on it.
 
-  It hears two things: poll readings from `KickTracker.Tracking.Poller`
-  (`{:reading, livestream | :offline, at}`) and stream status and metadata
-  events from the queue consumer (`{:event, envelope}`). Both become
-  observations for the pure `Sessionizer` and `Changes`; this process
-  only carries their state and writes what they decide.
+  It hears three things: poll readings from `KickTracker.Tracking.Poller`
+  (`{:reading, livestream | :offline, at}`), stream status and metadata
+  events from the queue consumer (`{:event, envelope}`), and chat messages
+  from its `ChatSocket` (`{:chat, message}`). They go to the pure
+  `Sessionizer`, `Changes` and `ChatMinutes`; this process only carries
+  their state and writes what they decide.
+
+  Chat is written minute by minute (`chat_minutes`, `chat_minute_users`,
+  `chat_stream_users`) once each minute is over, so a crash loses at most
+  the last minute or so of chat.
 
   On start it reloads the channel's recent streams (so a restart mid-stream
   continues the same stream) and then handles its channel's events still
@@ -19,10 +24,12 @@ defmodule KickTracker.Tracking.ChannelServer do
   use GenServer, restart: :permanent
   require Logger
 
+  @flush_every_ms 15_000
+
   alias KickTracker.{Events, Stats, Tracking}
   alias KickTracker.Channels.Channel
   alias KickTracker.Events.Envelope
-  alias KickTracker.Metrics.{Changes, Sessionizer}
+  alias KickTracker.Metrics.{ChatMinutes, Changes, Sessionizer}
   alias KickTracker.Workers.FollowerPoll
 
   @spec start_link(Channel.t()) :: GenServer.on_start()
@@ -47,7 +54,10 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   @impl true
   def init(%Channel{} = channel) do
+    # So a shutdown (a deploy) writes the chat gathered so far.
+    Process.flag(:trap_exit, true)
     Phoenix.PubSub.subscribe(KickTracker.PubSub, "channel_row:#{channel.id}")
+    Process.send_after(self(), :flush_chat, @flush_every_ms)
     rows = Stats.recent_streams(channel.id)
     sessions = Sessionizer.new(rows)
     ids = Map.new(rows, &{Sessionizer.norm(&1.started_at), &1.id})
@@ -58,7 +68,9 @@ defmodule KickTracker.Tracking.ChannelServer do
       ids: ids,
       changes: nil,
       changes_for: nil,
-      pending_meta: nil
+      pending_meta: nil,
+      chat: ChatMinutes.new(),
+      unknown_events: MapSet.new()
     }
 
     {:ok, restore_changes(state), {:continue, :catch_up}}
@@ -75,6 +87,8 @@ defmodule KickTracker.Tracking.ChannelServer do
   end
 
   @impl true
+  def handle_call({:flush_chat, now}, _from, state), do: {:reply, :ok, flush_chat(state, now)}
+
   def handle_call(:info, _from, state) do
     {:reply,
      %{
@@ -101,6 +115,74 @@ defmodule KickTracker.Tracking.ChannelServer do
     {:noreply, %{state | channel: channel}}
   end
 
+  def handle_info({:chat, message}, state) do
+    {:noreply, %{state | chat: ChatMinutes.add(state.chat, message)}}
+  end
+
+  # A chat-feed event we don't know (raids and hosts aren't recorded yet,
+  # project.md §16): its name is logged once, its data never kept.
+  def handle_info({:pusher_other, name, pusher_channel}, state) do
+    if MapSet.member?(state.unknown_events, name) do
+      {:noreply, state}
+    else
+      Logger.info(
+        "channel #{state.channel.id}: unknown chat-feed event #{name} on #{pusher_channel}"
+      )
+
+      {:noreply, %{state | unknown_events: MapSet.put(state.unknown_events, name)}}
+    end
+  end
+
+  def handle_info(:flush_chat, state) do
+    Process.send_after(self(), :flush_chat, @flush_every_ms)
+    {:noreply, flush_chat(state, DateTime.utc_now())}
+  end
+
+  def handle_info({:EXIT, _pid, reason}, state), do: {:stop, reason, state}
+
+  @impl true
+  def terminate(_reason, state) do
+    # Everything gathered, finished minutes or not.
+    flush_chat(state, DateTime.add(DateTime.utc_now(), 3600))
+  rescue
+    _ -> :ok
+  end
+
+  @doc false
+  # For tests: write every chat minute over as of `now`.
+  def flush_chat_now(pid, now), do: GenServer.call(pid, {:flush_chat, now})
+
+  # --- chat ------------------------------------------------------------------
+
+  defp flush_chat(state, now) do
+    {minutes, users, chat} = ChatMinutes.take_done(state.chat, now)
+
+    rows =
+      for m <- minutes do
+        started_at =
+          Sessionizer.stream_during(state.sessions, m.minute, DateTime.add(m.minute, 60))
+
+        Map.put(m, :stream_id, started_at && Map.get(state.ids, started_at))
+      end
+
+    Stats.write_chat(state.channel.id, rows)
+    KickTracker.KickUsers.upsert(users)
+
+    for m <- rows do
+      broadcast(
+        state,
+        {:chat_minute,
+         %{
+           minute: m.minute,
+           messages: Enum.sum_by(Map.values(m.users), & &1.messages),
+           chatters: map_size(m.users)
+         }}
+      )
+    end
+
+    %{state | chat: chat}
+  end
+
   # --- readings ------------------------------------------------------------
 
   defp reading(state, livestream, at) do
@@ -110,6 +192,7 @@ defmodule KickTracker.Tracking.ChannelServer do
         state
 
       started_at ->
+        state = learn_channel_id(state, livestream["channel_id"])
         state = observe(state, {:live, started_at, at})
         {snapshot, category} = Changes.from_livestream(livestream)
 
@@ -137,6 +220,17 @@ defmodule KickTracker.Tracking.ChannelServer do
           else: state
     end
   end
+
+  # The livestream carries Kick's channel id, which the chat feed's
+  # per-channel topic uses.
+  defp learn_channel_id(%{channel: %{kick_channel_id: nil} = channel} = state, id)
+       when is_integer(id) do
+    channel = KickTracker.Channels.put_ids(channel, id, nil)
+    KickTracker.Channels.announce(channel)
+    %{state | channel: channel}
+  end
+
+  defp learn_channel_id(state, _id), do: state
 
   # --- events --------------------------------------------------------------
 

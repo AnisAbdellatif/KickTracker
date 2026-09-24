@@ -666,8 +666,12 @@ KickTrackerWeb.Supervisor
 - Broadcasts readings and events on `"channel:<id>"` for LiveView pages.
 
 **ChatSocket** (one per channel)
-- Connects to Pusher, subscribes to `chatrooms.<id>.v2`, answers pings.
-- Sends `{:chat, sender_id, at}` and raid/host events to its `ChannelServer`.
+- Connects to Pusher, subscribes to `chatrooms.<id>.v2` and, once known,
+  `channel.<kick channel id>`; answers pings, pings after the activity
+  timeout, reconnects if no pong comes. Waits until the chatroom id is known
+  (from v2).
+- Sends `{:chat, message}` (sender, id, time) to its `ChannelServer`, and
+  the names of events it doesn't know (raids and hosts, until recorded).
   No message text is kept.
 - Reconnects with exponential backoff (1s up to 30s) and reports connected /
   disconnected so chat coverage is recorded.
@@ -923,9 +927,13 @@ support_events     (message_id PK, channel_id, occurred_at,
                     quantity,                -- giftees, months, or Kicks amount
                     tier, payload jsonb)     -- giftee ids, expiry, gift type;
                                              -- never message text or usernames
-channel_events     (id, channel_id, stream_id NULL, occurred_at,
+channel_events     (id, channel_id, occurred_at,
                     kind: raid_in | raid_out | host | ...,
-                    other_channel_id NULL, viewers NULL, payload jsonb)
+                    other_channel NULL, viewers NULL, dedup_key, payload jsonb,
+                    UNIQUE (channel_id, dedup_key))
+                   -- created; filled once raid/host event names are
+                   -- recorded (§16). Unknown chat-feed events are logged
+                   -- by name only meanwhile
 ```
 
 - Follows and support events carry **no stream id**: which stream they
