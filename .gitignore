@@ -1,0 +1,13 @@
+# Elixir build output
+_build/
+deps/
+*.ez
+erl_crash.dump
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Raw, un-anonymized recordings from the real Kick (AGENTS.md §6)
+sim/recordings/
