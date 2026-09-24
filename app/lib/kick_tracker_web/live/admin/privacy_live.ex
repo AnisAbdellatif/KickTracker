@@ -16,25 +16,32 @@ defmodule KickTrackerWeb.Admin.PrivacyLive do
   end
 
   @impl true
-  def handle_event("find", %{"q" => q}, socket) do
+  def handle_event("find", %{"q" => q}, socket) when is_binary(q) do
     q = String.trim(q)
 
-    user_id =
+    {by, user_id} =
       case Integer.parse(q) do
         {id, ""} ->
-          id
+          {"id", id}
 
         _ ->
-          Repo.one(
-            from k in "kick_users",
-              where: fragment("lower(?)", k.username) == ^String.downcase(q),
-              select: k.id
-          )
+          {"username",
+           Repo.one(
+             from k in "kick_users",
+               where: fragment("lower(?)", k.username) == ^String.downcase(q),
+               select: k.id
+           )}
       end
 
     found = user_id && Privacy.find(user_id)
 
-    Audit.log(socket.assigns.current_admin, "privacy.find", q)
+    # That a search happened, never what was searched for: the term is
+    # often a username, maybe of someone we hold nothing about, and a
+    # later deletion couldn't reach it in the audit log.
+    Audit.log(socket.assigns.current_admin, "privacy.find", nil, %{
+      "by" => by,
+      "found" => found != nil
+    })
 
     {:noreply,
      socket
@@ -43,6 +50,8 @@ defmodule KickTrackerWeb.Admin.PrivacyLive do
        if found, do: s, else: put_flash(s, :error, gettext("Nobody by that id or username."))
      end)}
   end
+
+  def handle_event("find", _params, socket), do: {:noreply, socket}
 
   def handle_event("delete", %{"confirm" => confirm}, socket) do
     found = socket.assigns.found

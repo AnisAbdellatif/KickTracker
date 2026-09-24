@@ -65,6 +65,7 @@ defmodule KickTracker.Privacy do
 
           # Giftee lists and similar keep the gift, not the person.
           support_payloads = scrub_support_payloads(user_id)
+          audit = redact_audit_log(user_id)
           %{num_rows: names} = Repo.query!("DELETE FROM kick_users WHERE id = $1", [user_id])
           bodies = redact_bodies(user_id)
           KickTracker.Removals.record(:user, user_id)
@@ -75,13 +76,33 @@ defmodule KickTracker.Privacy do
             follows: follows,
             support_events: support + support_payloads,
             usernames: names,
-            webhook_events: bodies
+            webhook_events: bodies,
+            audit_entries: audit
           }
         end,
         timeout: :infinity
       )
 
     result
+  end
+
+  # The audit log is append-only, except for this: a privacy search logged
+  # by an older version named whom it looked for (username or id). The
+  # search entry stays, without the name. Runs before `kick_users` loses
+  # the username.
+  defp redact_audit_log(user_id) do
+    %{num_rows: n} =
+      Repo.query!(
+        """
+        UPDATE admin_audit_log SET target = NULL
+        WHERE action = 'privacy.find' AND target IS NOT NULL
+          AND (target = $1::text
+               OR lower(target) = (SELECT lower(username) FROM kick_users WHERE id = $2))
+        """,
+        [Integer.to_string(user_id), user_id]
+      )
+
+    n
   end
 
   defp scrub_support_payloads(user_id) do
