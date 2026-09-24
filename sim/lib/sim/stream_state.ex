@@ -42,13 +42,30 @@ defmodule Sim.StreamState do
     end
   end
 
-  @doc "The segment running at `at`, or the last one if `at` is past the end."
+  @doc """
+  The segment running at `at`, or the last one if `at` is past the end.
+  A title or category set by hand (the control API) replaces the
+  segment's from that moment on, without changing where segments start.
+  """
   @spec at(Channel.t(), Schedule.window(), DateTime.t()) :: segment()
   def at(%Channel{} = channel, window, at) do
     segments = segments(channel, window)
 
-    Enum.find(segments, List.last(segments), fn segment ->
-      DateTime.compare(at, segment.from) != :lt and DateTime.compare(at, segment.to) == :lt
+    segment =
+      Enum.find(segments, List.last(segments), fn segment ->
+        DateTime.compare(at, segment.from) != :lt and DateTime.compare(at, segment.to) == :lt
+      end)
+
+    channel.overrides.metadata
+    |> Enum.filter(fn o ->
+      DateTime.compare(o.window_started_at, window.started_at) == :eq and
+        DateTime.compare(o.at, at) != :gt
+    end)
+    |> Enum.sort_by(& &1.at, DateTime)
+    |> Enum.reduce(segment, fn o, segment ->
+      segment
+      |> then(&if(o[:title], do: %{&1 | title: o.title}, else: &1))
+      |> then(&if(o[:category], do: %{&1 | category: o.category}, else: &1))
     end)
   end
 

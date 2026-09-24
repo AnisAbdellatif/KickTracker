@@ -88,7 +88,37 @@ Kick's documented field lists and must be re-checked once recorded
 Raids and hosts aren't simulated yet: none has been recorded, so their
 Pusher event names are unknown (project.md §16).
 
-**Not built yet:** the control API and CLI, and bulk history.
+### Driving it by hand: `mix sim.ctl`
+
+With `mix sim` running, another terminal drives it:
+
+```bash
+mix sim.ctl status
+mix sim.ctl live <channel> --minutes 90      # start a stream now
+mix sim.ctl offline <channel>                # end it now (scheduled or not)
+mix sim.ctl title <channel> "New title"
+mix sim.ctl category <channel> 15
+mix sim.ctl event <channel> gift --count 20 --anonymous
+mix sim.ctl chat <channel> "hello chat"
+mix sim.ctl clock --advance 2h               # or --at <ISO time>, --speed 60
+mix sim.ctl webhooks http://localhost:4040/  # where to deliver
+mix sim.ctl webhooks --drop-next 3           # lose the next three on purpose
+mix sim.ctl faults --drop 0.1 --pusher-disconnect 30
+mix sim.ctl disconnect                       # close every Pusher socket
+mix sim.ctl expire-tokens                    # force the app to re-authenticate
+```
+
+`mix help sim.ctl` lists every option. It's a thin client over the control
+API at `/_sim` (documented in `Sim.Http.Control`), which tests can call
+directly.
+
+Manual changes are **overrides layered over the schedule**, stored with the
+channel: a stream started by hand is a window like any other, and a
+scheduled one ended early has its real end recorded. So the simulation
+stays a function of time, and the stream-end event reports when the stream
+actually ended.
+
+**Not built yet:** bulk history (phase 2, once the database exists).
 
 ## Setup
 

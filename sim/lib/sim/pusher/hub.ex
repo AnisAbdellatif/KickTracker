@@ -27,6 +27,25 @@ defmodule Sim.Pusher.Hub do
   @spec listened?(String.t()) :: boolean()
   def listened?(channel), do: Registry.lookup(__MODULE__, channel) != []
 
+  # Every socket joins this on connect, so all of them can be reached.
+  @everyone "__every_socket__"
+
+  @doc "Registers the calling socket as connected (whatever it subscribes to)."
+  @spec connected() :: :ok
+  def connected, do: join(@everyone)
+
+  @doc "How many sockets are connected."
+  @spec count() :: non_neg_integer()
+  def count, do: length(Registry.lookup(__MODULE__, @everyone))
+
+  @doc "Closes every connected socket with 4200, as if Pusher asked all clients to reconnect."
+  @spec disconnect_all() :: non_neg_integer()
+  def disconnect_all do
+    sockets = Registry.lookup(__MODULE__, @everyone)
+    for {pid, _} <- sockets, do: send(pid, :fault_disconnect)
+    length(sockets)
+  end
+
   @doc "Sends already-encoded frames to every socket subscribed to the channel."
   @spec broadcast(String.t(), [String.t()]) :: :ok
   def broadcast(_channel, []), do: :ok

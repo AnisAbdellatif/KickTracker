@@ -46,7 +46,7 @@ defmodule Sim.Webhooks do
   @impl true
   def init(opts) do
     :ets.new(@table, [:set, :public, :named_table, read_concurrency: true])
-    {:ok, %{url: Keyword.get(opts, :webhook_url), sent: []}}
+    {:ok, %{url: Keyword.get(opts, :webhook_url), sent: [], drop_next: 0}}
   end
 
   @doc "Where deliveries are sent. Nil means the simulator has nowhere to deliver."
@@ -118,6 +118,17 @@ defmodule Sim.Webhooks do
     GenServer.call(__MODULE__, {:deliver, broadcaster_user_id, event, body, at})
   end
 
+  @doc """
+  Drops the next `n` deliveries on purpose, whatever their type, as if Kick
+  never sent them. For testing what the app does about a missed event.
+  """
+  @spec drop_next(non_neg_integer()) :: :ok
+  def drop_next(n) when is_integer(n) and n >= 0, do: GenServer.call(__MODULE__, {:drop_next, n})
+
+  @doc "How many deliveries are still to be dropped."
+  @spec dropping() :: non_neg_integer()
+  def dropping, do: GenServer.call(__MODULE__, :dropping)
+
   @doc "Every delivery attempted so far, newest first. For tests and the control API."
   @spec sent() :: [map()]
   def sent, do: GenServer.call(__MODULE__, :sent)
@@ -126,6 +137,8 @@ defmodule Sim.Webhooks do
   def handle_call(:url, _from, state), do: {:reply, state.url, state}
   def handle_call({:put_url, url}, _from, state), do: {:reply, :ok, %{state | url: url}}
   def handle_call(:sent, _from, state), do: {:reply, state.sent, state}
+  def handle_call({:drop_next, n}, _from, state), do: {:reply, :ok, %{state | drop_next: n}}
+  def handle_call(:dropping, _from, state), do: {:reply, state.drop_next, state}
 
   def handle_call({:deliver, user_id, event, body, at}, _from, state) do
     subscription = subscription_for(user_id, event)
@@ -133,6 +146,10 @@ defmodule Sim.Webhooks do
     cond do
       is_nil(state.url) or is_nil(subscription) ->
         {:reply, :ignored, state}
+
+      state.drop_next > 0 ->
+        state = %{state | drop_next: state.drop_next - 1}
+        {:reply, :ok, record(state, %{event: event, at: at, dropped: true})}
 
       drop?() ->
         {:reply, :ok, record(state, %{event: event, at: at, dropped: true})}

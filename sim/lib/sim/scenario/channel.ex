@@ -24,7 +24,8 @@ defmodule Sim.Scenario.Channel do
     :titles,
     :chat,
     :followers,
-    :subscribers
+    :subscribers,
+    overrides: %{manual: [], cuts: [], metadata: []}
   ]
 
   @type schedule ::
@@ -70,7 +71,10 @@ defmodule Sim.Scenario.Channel do
       titles: Map.get(spec, :titles, ["Stream time", "Late night stream", "Back at it"]),
       chat: chat(Map.get(spec, :chat, %{})),
       followers: Map.get(spec, :followers, followers(spec, hash)),
-      subscribers: subscribers(Map.get(spec, :subscribers, %{}))
+      subscribers: subscribers(Map.get(spec, :subscribers, %{})),
+      # Changes made by hand through the control API, layered over the
+      # schedule (see `Sim.Control`). Empty in a scenario file.
+      overrides: %{manual: [], cuts: [], metadata: []}
     }
   end
 

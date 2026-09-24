@@ -1314,7 +1314,12 @@ handshake, pings, and the disconnect codes real Pusher uses). The recorder
 drives all of it unchanged, and its payload shapes (API, webhooks, chat
 frames) are checked against `fixtures/` by tests, so a shape Kick changes
 shows up when we re-record. Raids and hosts wait for a recording (their
-event names are unknown). Still to come: the control API, and bulk mode.
+event names are unknown). A control API (`/_sim`) and CLI (`mix sim.ctl`)
+drive it by hand: start or end a stream now, change title or category,
+send any event, move or speed up the clock, drop the next N webhooks, set
+faults, disconnect Pusher clients, expire tokens. Manual changes are
+overrides layered over the schedule, so the simulation stays a function of
+time. Still to come: bulk mode (phase 2).
 
 **Two modes:**
 

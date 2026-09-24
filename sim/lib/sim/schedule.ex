@@ -15,63 +15,109 @@ defmodule Sim.Schedule do
 
   @always %{days: [1, 2, 3, 4, 5, 6, 7], start_hour: 0, start_minute: 0, duration_min: 1440}
 
-  @doc "The stream running at `at`, or nil when the channel is offline."
+  @doc """
+  The stream running at `at`, or nil when the channel is offline.
+
+  Manual overrides (from the control API) come first: a stream started by
+  hand wins over the schedule, and a scheduled stream ended early by hand
+  is over from that moment.
+  """
   @spec stream_at(Channel.t(), DateTime.t()) :: window() | nil
-  def stream_at(%Channel{schedule: :never}, _at), do: nil
-
-  def stream_at(%Channel{schedule: :always} = channel, at),
-    do: find(%{channel | schedule: @always}, at)
-
-  def stream_at(%Channel{} = channel, at), do: find(channel, at)
+  def stream_at(%Channel{} = channel, at) do
+    Enum.find(channel.overrides.manual, &contains?(&1, at)) ||
+      channel |> scheduled(at_dates(channel, at)) |> Enum.find(&contains?(&1, at))
+  end
 
   @doc "Whether the channel is live at `at`."
   @spec live?(Channel.t(), DateTime.t()) :: boolean()
   def live?(channel, at), do: stream_at(channel, at) != nil
 
   @doc """
-  Every stream window that overlaps `from..to`, oldest first. This is what
-  makes months of history computable without simulating forward.
+  Every stream window that overlaps `from..to`, oldest first, overrides
+  included. This is what makes months of history computable without
+  simulating forward.
   """
   @spec windows_between(Channel.t(), DateTime.t(), DateTime.t()) :: [window()]
-  def windows_between(%Channel{schedule: :never}, _from, _to), do: []
-
   def windows_between(%Channel{} = channel, from, to) do
-    schedule = schedule(channel)
-    first = from |> DateTime.to_date() |> Date.add(-days_back(schedule))
-    last = DateTime.to_date(to)
+    dates =
+      case schedule(channel) do
+        nil ->
+          []
 
-    Date.range(first, last)
-    |> Enum.flat_map(&List.wrap(window_starting_on(schedule, &1)))
+        schedule ->
+          Date.range(
+            from |> DateTime.to_date() |> Date.add(-days_back(schedule)),
+            DateTime.to_date(to)
+          )
+      end
+
+    (scheduled(channel, dates) ++ channel.overrides.manual)
     |> Enum.filter(&overlaps?(&1, from, to))
     |> Enum.sort_by(& &1.started_at, DateTime)
   end
 
   @doc "When the channel next goes live at or after `at`, or nil within the next week."
   @spec next_start(Channel.t(), DateTime.t()) :: DateTime.t() | nil
-  def next_start(%Channel{schedule: :never}, _at), do: nil
-
   def next_start(%Channel{} = channel, at) do
-    schedule = schedule(channel)
     date = DateTime.to_date(at)
 
-    Date.range(date, Date.add(date, 8))
-    |> Enum.flat_map(&List.wrap(window_starting_on(schedule, &1)))
+    (scheduled(channel, Date.range(date, Date.add(date, 8))) ++ channel.overrides.manual)
     |> Enum.map(& &1.started_at)
     |> Enum.filter(&(DateTime.compare(&1, at) != :lt))
     |> Enum.min_by(&DateTime.to_unix/1, fn -> nil end)
   end
 
+  @doc """
+  A window as it really ran: if it was ended early by hand, its end is
+  when that happened. Streams keep their planned `duration_s`, so the
+  viewer curve doesn't jump when a stream is cut short.
+  """
+  @spec effective(Channel.t(), window()) :: window()
+  def effective(%Channel{} = channel, window) do
+    case Enum.find(channel.overrides.cuts, &same_start?(&1, window)) do
+      nil -> window
+      cut -> %{window | ends_at: cut.ended_at}
+    end
+  end
+
+  @doc """
+  The up-to-date version of a window seen earlier: a manual stream's
+  current end, or a scheduled one's after any cut. This is how the end
+  event reports when a stream really ended, even if it was cut short after
+  the window was first seen.
+  """
+  @spec current(Channel.t(), window()) :: window()
+  def current(%Channel{} = channel, window) do
+    Enum.find(channel.overrides.manual, &same_start?(&1, window)) || effective(channel, window)
+  end
+
+  defp schedule(%Channel{schedule: :never}), do: nil
   defp schedule(%Channel{schedule: :always}), do: @always
   defp schedule(%Channel{schedule: schedule}), do: schedule
 
-  defp find(channel, at) do
-    schedule = schedule(channel)
-
-    0..days_back(schedule)
-    |> Enum.map(&Date.add(DateTime.to_date(at), -&1))
-    |> Enum.flat_map(&List.wrap(window_starting_on(schedule, &1)))
-    |> Enum.find(&contains?(&1, at))
+  defp at_dates(channel, at) do
+    case schedule(channel) do
+      nil -> []
+      schedule -> Enum.map(0..days_back(schedule), &Date.add(DateTime.to_date(at), -&1))
+    end
   end
+
+  # The scheduled windows starting on these dates, as they really ran: a
+  # window cut before it began is dropped entirely.
+  defp scheduled(channel, dates) do
+    case schedule(channel) do
+      nil ->
+        []
+
+      schedule ->
+        dates
+        |> Enum.flat_map(&List.wrap(window_starting_on(schedule, &1)))
+        |> Enum.map(&effective(channel, &1))
+        |> Enum.filter(&(DateTime.compare(&1.ends_at, &1.started_at) == :gt))
+    end
+  end
+
+  defp same_start?(a, b), do: DateTime.compare(a.started_at, b.started_at) == :eq
 
   # A stream can start on an earlier day and still be running, so we look
   # back far enough to cover the longest possible one.

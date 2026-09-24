@@ -50,7 +50,9 @@ defmodule Sim.Channel.Timeline do
     if same_window?(state.window, window) do
       within(channel, state, window, now)
     else
-      ended = if state.window, do: [end_of(channel, state.window)], else: []
+      ended =
+        if state.window, do: [end_of(channel, Schedule.current(channel, state.window))], else: []
+
       started = if window, do: start_of(channel, window, now), else: []
       {ended ++ started, start(channel, now)}
     end

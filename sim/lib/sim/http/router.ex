@@ -25,6 +25,9 @@ defmodule Sim.Http.Router do
   plug(Plug.Parsers, parsers: [:urlencoded, :json], json_decoder: Jason, pass: ["*/*"])
   plug(:dispatch)
 
+  # The simulator's own controls, not part of Kick (see `Sim.Http.Control`).
+  forward("/_sim", to: Sim.Http.Control)
+
   post "/oauth/token" do
     case conn.body_params do
       %{"grant_type" => "client_credentials", "client_id" => id, "client_secret" => secret}

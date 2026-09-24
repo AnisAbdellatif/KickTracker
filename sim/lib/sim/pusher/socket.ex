@@ -35,6 +35,8 @@ defmodule Sim.Pusher.Socket do
 
   def init(_opts) do
     config = Server.pusher()
+    Hub.connected()
+
     socket_id = "#{:rand.uniform(999_999_999)}.#{:rand.uniform(999_999_999)}"
 
     Process.send_after(self(), :ping, config.ping_ms)
