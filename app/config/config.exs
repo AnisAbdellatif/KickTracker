@@ -44,7 +44,14 @@ config :error_tracker,
   repo: KickTracker.Repo,
   otp_app: :kick_tracker,
   enabled: true,
+  # Passwords, TOTP codes and invitation tokens never reach the database.
+  filter: KickTracker.ErrorFilter,
   plugins: [{ErrorTracker.Plugins.Pruner, max_age: :timer.hours(24 * 30)}]
+
+# Nor the logs: any param whose name contains one of these is logged as
+# [FILTERED] (the same list as KickTracker.ErrorFilter.secret_keys/0).
+config :phoenix,
+  filter_parameters: ~w(password secret token code totp otp cookie authorization signature)
 
 config :kick_tracker, KickTrackerWeb.Endpoint,
   url: [host: "localhost"],
