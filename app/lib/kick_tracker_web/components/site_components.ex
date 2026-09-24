@@ -175,6 +175,13 @@ defmodule KickTrackerWeb.SiteComponents do
   The sum of figures that may be unknown (`nil`): unknown if any part is,
   never a partial sum passed off as the whole (webhook counts are `nil`
   where we weren't receiving events).
+
+      iex> KickTrackerWeb.SiteComponents.known_sum([1, 2, 3])
+      6
+      iex> KickTrackerWeb.SiteComponents.known_sum([1, nil, 3])
+      nil
+      iex> KickTrackerWeb.SiteComponents.known_sum([])
+      0
   """
   @spec known_sum([number() | nil]) :: number() | nil
   def known_sum(values) do

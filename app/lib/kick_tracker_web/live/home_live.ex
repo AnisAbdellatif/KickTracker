@@ -141,7 +141,10 @@ defmodule KickTrackerWeb.HomeLive do
   defp live_for(%DateTime{} = at), do: format_duration(DateTime.diff(DateTime.utc_now(), at))
   defp live_for(_), do: nil
 
-  defp total_watching(live), do: live |> Enum.map(&(&1.viewers || 0)) |> Enum.sum()
+  # Unknown if any live channel has no current reading: counting it as 0
+  # would show a confident undercount during a polling gap.
+  @doc false
+  def total_watching(live), do: live |> Enum.map(& &1.viewers) |> known_sum()
 
   @impl true
   def render(assigns) do
