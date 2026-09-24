@@ -74,6 +74,7 @@ config :kick_tracker, :kick,
   public_key: System.get_env("KICK_PUBLIC_KEY")
 
 config :kick_tracker, :amqp_url, setting.("AMQP_URL")
+config :kick_tracker, :amqp_queue, System.get_env("AMQP_QUEUE", "kick_tracker.events")
 
 if config_env() == :dev do
   # Reload browser tabs when matching files change.

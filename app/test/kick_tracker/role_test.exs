@@ -25,6 +25,15 @@ defmodule KickTracker.RoleTest do
     refute KickTrackerWeb.Endpoint in names.([:collector])
     assert KickTrackerWeb.Endpoint in names.([:collector, :web])
 
+    # Collection runs only on a collector.
+    assert KickTracker.Events.Consumer in names.([:collector])
+    refute KickTracker.Events.Consumer in names.([:web])
+
+    without_collection =
+      [:collector] |> KickTracker.Application.children(collect: false) |> Enum.map(&child_name/1)
+
+    refute KickTracker.Events.Consumer in without_collection
+
     # Both roles share the database and PubSub, the link from collector to site.
     for roles <- [[:collector], [:web]] do
       assert KickTracker.Repo in names.(roles)

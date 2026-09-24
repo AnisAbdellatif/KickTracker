@@ -10,18 +10,23 @@ defmodule KickTracker.Application do
   @impl true
   def start(_type, _args) do
     KickTracker.Role.current()
-    |> children()
+    |> children(collect: Application.get_env(:kick_tracker, :collect, true))
     |> Supervisor.start_link(strategy: :one_for_one, name: KickTracker.Supervisor)
   end
 
   @doc false
   # What a node with these roles starts. Public for the role tests.
-  @spec children([KickTracker.Role.t()]) :: [
+  #
+  # `collect: false` leaves collection out even on a collector node: tests
+  # start the pieces they need themselves.
+  @spec children([KickTracker.Role.t()], keyword()) :: [
           Supervisor.child_spec() | module() | {module(), term()}
         ]
-  def children(roles) do
+  def children(roles, opts \\ []) do
+    collect? = Keyword.get(opts, :collect, true)
+
     shared() ++
-      if(:collector in roles, do: collector(), else: []) ++
+      if(:collector in roles and collect?, do: collector(), else: []) ++
       if(:web in roles, do: web(), else: [])
   end
 
@@ -36,9 +41,15 @@ defmodule KickTracker.Application do
     ]
   end
 
-  # The poller, channel processes and queue consumer arrive with the
-  # pipeline (project.md §20, steps 9-12).
-  defp collector, do: []
+  # Collection (project.md §10). The queue consumer comes last, so the
+  # channel processes it hands events to are already running.
+  defp collector do
+    [
+      {Registry, keys: :unique, name: KickTracker.Tracking.registry()},
+      KickTracker.Kick.PublicKey,
+      KickTracker.Events.Consumer
+    ]
+  end
 
   defp web, do: [KickTrackerWeb.Endpoint]
 

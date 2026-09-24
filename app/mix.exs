@@ -72,7 +72,15 @@ defmodule KickTracker.MixProject do
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:broadway, "~> 1.3"},
+      {:broadway_rabbitmq, "~> 0.8.2"},
+      {:oban, "~> 2.24"},
+      {:mint_web_socket, "~> 1.0"},
+      {:stream_data, "~> 1.4", only: [:dev, :test]},
+      # The fake Kick (../sim): integration tests run against it, and bulk
+      # mode writes its history into the raw tables. Never in production.
+      {:sim, path: "../sim", only: [:dev, :test]}
     ]
   end
 
