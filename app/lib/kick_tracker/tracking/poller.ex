@@ -124,10 +124,7 @@ defmodule KickTracker.Tracking.Poller do
 
   defp observe_slug(channel, %{"slug" => slug}, at) when is_binary(slug) and slug != "" do
     updated = Channels.observe_slug(channel, slug, at)
-
-    if updated.slug != channel.slug,
-      do:
-        if(pid = ChannelServer.whereis(channel.kick_user_id), do: send(pid, {:channel, updated}))
+    if updated.slug != channel.slug, do: Channels.announce(updated)
   end
 
   defp observe_slug(_channel, _data, _at), do: :ok

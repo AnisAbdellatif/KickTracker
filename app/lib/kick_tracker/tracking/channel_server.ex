@@ -23,6 +23,7 @@ defmodule KickTracker.Tracking.ChannelServer do
   alias KickTracker.Channels.Channel
   alias KickTracker.Events.Envelope
   alias KickTracker.Metrics.{Changes, Sessionizer}
+  alias KickTracker.Workers.FollowerPoll
 
   @spec start_link(Channel.t()) :: GenServer.on_start()
   def start_link(%Channel{} = channel),
@@ -46,6 +47,7 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   @impl true
   def init(%Channel{} = channel) do
+    Phoenix.PubSub.subscribe(KickTracker.PubSub, "channel_row:#{channel.id}")
     rows = Stats.recent_streams(channel.id)
     sessions = Sessionizer.new(rows)
     ids = Map.new(rows, &{Sessionizer.norm(&1.started_at), &1.id})
@@ -209,14 +211,23 @@ defmodule KickTracker.Tracking.ChannelServer do
     end
   end
 
-  defp announce(state, {:open, started_at}),
-    do: broadcast(state, {:stream_started, started_at})
+  # A follower reading at each stream's start and end gives its exact
+  # follower gain (§3.1). Only for ends that just happened: replaying an
+  # old event must not trigger a reading now.
+  defp announce(state, {:open, started_at}) do
+    FollowerPoll.enqueue(state.channel.id, :stream_start)
+    broadcast(state, {:stream_started, started_at})
+  end
 
   defp announce(state, {:reopen, started_at}),
     do: broadcast(state, {:stream_started, started_at})
 
-  defp announce(state, {:close, started_at, ended_at, _source}),
-    do: broadcast(state, {:stream_ended, started_at, ended_at})
+  defp announce(state, {:close, started_at, ended_at, _source}) do
+    if DateTime.diff(DateTime.utc_now(), ended_at) < 600,
+      do: FollowerPoll.enqueue(state.channel.id, :stream_end)
+
+    broadcast(state, {:stream_ended, started_at, ended_at})
+  end
 
   # A stream just became the open one: start its change log, with any
   # metadata that arrived before its status event.

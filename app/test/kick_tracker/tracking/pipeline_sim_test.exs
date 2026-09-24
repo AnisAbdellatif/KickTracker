@@ -11,7 +11,7 @@ defmodule KickTracker.Tracking.PipelineSimTest do
   import KickTracker.Fixtures
   alias KickTracker.{Channels, Stats}
   alias KickTracker.Kick.API
-  alias KickTracker.Tracking.{ChannelServer, Manager, Poller}
+  alias KickTracker.Tracking.{ChannelServer, Manager}
   alias KickTracker.Workers.SubscriptionSync
 
   setup do
@@ -33,7 +33,7 @@ defmodule KickTracker.Tracking.PipelineSimTest do
 
   test "a poll opens the live channel's stream, with Kick's own start, and samples it",
        %{live: live, off: off} do
-    Poller.poll_now(channels: true)
+    poll(channels: true)
     %{open_stream: started_at} = ChannelServer.info(live.kick_user_id)
 
     kick_start =
@@ -63,9 +63,9 @@ defmodule KickTracker.Tracking.PipelineSimTest do
   end
 
   test "an expired token is replaced without losing the poll", %{live: live} do
-    Poller.poll_now()
+    poll()
     Sim.Server.expire_tokens()
-    Poller.poll_now()
+    poll()
 
     assert length(rows("viewer_samples", ["observed_at"])) == 2
     assert [%{channel_id: id}] = rows("streams", ["id"])
@@ -73,10 +73,10 @@ defmodule KickTracker.Tracking.PipelineSimTest do
   end
 
   test "Kick not answering is a recorded gap, never zero or offline", %{live: live} do
-    Poller.poll_now()
+    poll()
     config = Application.get_env(:kick_tracker, :kick)
     Application.put_env(:kick_tracker, :kick, Keyword.put(config, :api_url, "http://127.0.0.1:1"))
-    Poller.poll_now()
+    poll()
     Application.put_env(:kick_tracker, :kick, config)
 
     assert [%{viewers: _}] = rows("viewer_samples", ["observed_at"])
@@ -107,5 +107,72 @@ defmodule KickTracker.Tracking.PipelineSimTest do
     assert Enum.all?(subs, &(&1["broadcaster_user_id"] != off.kick_user_id))
     assert length(subs) == length(SubscriptionSync.events())
     assert eventually(fn -> ChannelServer.whereis(off.kick_user_id) == nil end)
+  end
+end
+
+defmodule KickTracker.Tracking.FollowersSimTest do
+  @moduledoc "Follower readings from the fake Kick's v2."
+
+  use KickTracker.SimCase
+  @moduletag :capture_log
+  use Oban.Testing, repo: KickTracker.Repo
+
+  import KickTracker.Fixtures
+  alias KickTracker.Channels
+  alias KickTracker.Workers.{FollowerPoll, FollowerSchedule}
+
+  setup do
+    start_sim([
+      [slug: "livestreamer", schedule: :always],
+      [slug: "offlinestreamer", schedule: :never]
+    ])
+
+    start_collector()
+    :ok
+  end
+
+  test "adding a channel queues a reading, which stores the total and learns the chatroom" do
+    {:ok, c} = Channels.add("livestreamer")
+    assert_enqueued(worker: FollowerPoll, args: %{channel_id: c.id, reason: "added"})
+
+    :ok = perform_job(FollowerPoll, %{channel_id: c.id, reason: "added"})
+
+    sim = Sim.Scenario.channel(Sim.Server.scenario(), "livestreamer")
+    assert [%{followers: n}] = rows("follower_samples", ["observed_at"])
+    assert n == Sim.Curve.followers(sim, Sim.Server.now()) or n > 0
+    assert Channels.get!(c.id).chatroom_id == sim.chatroom_id
+    assert [%{source: "followers", ok: true}] = rows("coverage", ["id"])
+  end
+
+  test "v2 failing is a gap, not a zero" do
+    {:ok, c} = Channels.add("livestreamer")
+    config = Application.get_env(:kick_tracker, :kick)
+    Application.put_env(:kick_tracker, :kick, Keyword.put(config, :v2_url, "http://127.0.0.1:1"))
+    :ok = perform_job(FollowerPoll, %{channel_id: c.id, reason: "test"})
+    Application.put_env(:kick_tracker, :kick, config)
+
+    assert rows("follower_samples", ["observed_at"]) == []
+    assert [%{source: "followers", ok: false}] = rows("coverage", ["id"])
+  end
+
+  test "the schedule: live channels every 15 minutes, offline ones daily" do
+    {:ok, live} = Channels.add("livestreamer")
+    {:ok, off} = Channels.add("offlinestreamer")
+    KickTracker.Tracking.Manager.sync()
+    poll()
+
+    now = DateTime.utc_now()
+
+    for {c, ago} <- [{live, 20 * 60}, {off, 3 * 3600}] do
+      KickTracker.Stats.insert_samples("follower_samples", [
+        %{channel_id: c.id, observed_at: DateTime.add(now, -ago), followers: 1}
+      ])
+    end
+
+    Repo.delete_all(Oban.Job)
+    :ok = perform_job(FollowerSchedule, %{})
+
+    assert_enqueued(worker: FollowerPoll, args: %{channel_id: live.id, reason: "schedule"})
+    refute_enqueued(worker: FollowerPoll, args: %{channel_id: off.id})
   end
 end

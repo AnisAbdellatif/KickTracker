@@ -21,7 +21,8 @@ config :kick_tracker, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"*/15 * * * *", KickTracker.Workers.SubscriptionSync},
-       {"*/5 * * * *", KickTracker.Workers.ProcessEvents}
+       {"*/5 * * * *", KickTracker.Workers.ProcessEvents},
+       {"*/5 * * * *", KickTracker.Workers.FollowerSchedule}
      ]}
   ]
 

@@ -54,6 +54,8 @@ defmodule KickTracker.Channels do
 
       with {:ok, channel} <- result do
         broadcast({:added, channel.id})
+        # A first follower reading, which also learns the chatroom id.
+        KickTracker.Workers.FollowerPoll.enqueue(channel.id, :added)
         {:ok, channel}
       end
     else
@@ -93,6 +95,15 @@ defmodule KickTracker.Channels do
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
     channel |> Ecto.Changeset.change(changes) |> Repo.update!()
+  end
+
+  @doc """
+  Tells the channel's running processes about a changed row (a rename, a
+  chatroom id learnt), on the channel's own topic.
+  """
+  @spec announce(Channel.t()) :: :ok
+  def announce(%Channel{} = channel) do
+    Phoenix.PubSub.broadcast(KickTracker.PubSub, "channel_row:#{channel.id}", {:channel, channel})
   end
 
   defp record_slug(channel, slug, at) do

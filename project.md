@@ -146,8 +146,9 @@ KickPlus uses). The only source of the **total follower count**
   IPs: **test from the VPS before relying on it**.
 - Light use only: one channel per request, every 15 min while live and once a
   day offline (§3).
-- Read `followers_count` and discard the rest. The response also carries a
-  `playback_url` with a signed token; it is never stored.
+- Read `followers_count`, and `chatroom.id` (the only source of the id chat
+  needs), and discard the rest. The response also carries a
+  `playback_url` with a signed token; it is never stored or logged.
 - Isolated in its own module so it can be replaced. Failures are gaps, never
   zeros; `channel.followed` keeps counting gross follows meanwhile.
 - Observed (2026-09-24): 200 with `followers_count` from a home machine; the
@@ -915,20 +916,23 @@ chat_minute_users  (channel_id, minute, user_id, messages,
 -- per-stream and event facts (normal tables)
 chat_stream_users  (stream_id, user_id, messages, first_at, last_at,
                     PRIMARY KEY (stream_id, user_id))
-follows            (message_id PK, channel_id, stream_id NULL,
-                    occurred_at, user_id)
-support_events     (message_id PK, channel_id, stream_id NULL, occurred_at,
+follows            (message_id PK, channel_id, occurred_at, user_id)
+support_events     (message_id PK, channel_id, occurred_at,
                     kind: sub | resub | gift | kicks,
                     user_id NULL,            -- subscriber / gifter / sender
                     quantity,                -- giftees, months, or Kicks amount
-                    tier, payload jsonb)
+                    tier, payload jsonb)     -- giftee ids, expiry, gift type;
+                                             -- never message text or usernames
 channel_events     (id, channel_id, stream_id NULL, occurred_at,
                     kind: raid_in | raid_out | host | ...,
                     other_channel_id NULL, viewers NULL, payload jsonb)
 ```
 
-- `stream_id` is null for things that happen while offline (follows, subs,
-  Kicks).
+- Follows and support events carry **no stream id**: which stream they
+  belong to is read from `occurred_at` against the streams' ranges. A
+  follow stored before its stream's start event arrives is then still
+  counted for that stream, whatever the arrival order. `channel_events`
+  works the same way.
 - `payload jsonb` keeps raw data so new fields need no migration.
 - `follows` and `support_events` can be rebuilt from `webhook_events`.
 - Unique keys on hypertables include the time column (a TimescaleDB rule).

@@ -72,6 +72,26 @@ defmodule KickTracker.SimCase do
     :ok
   end
 
+  @doc """
+  Polls now, then waits until every channel's process has handled what the
+  poll sent it (a call is answered only after earlier messages).
+  """
+  def poll(opts \\ []) do
+    KickTracker.Tracking.Poller.poll_now(opts)
+    settle()
+  end
+
+  @doc "Waits until every running channel process has handled its mailbox."
+  def settle do
+    for {_, pid, _} <-
+          Registry.select(KickTracker.Tracking.registry(), [
+            {{{:channel, :_}, :"$1", :_}, [], [{{nil, :"$1", nil}}]}
+          ]),
+        do: KickTracker.Tracking.ChannelServer.info(pid)
+
+    :ok
+  end
+
   @doc "Waits until `fun` returns truthy (up to ~5s); returns its last value."
   def eventually(fun, tries \\ 100) do
     case fun.() do
