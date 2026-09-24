@@ -108,7 +108,13 @@ mix fixtures.anonymize
 It prints every field whose text was kept without a rule (paths only). **Read
 that list before committing `fixtures/`.** If a listed path can hold
 something personal, add a rule to `Sim.Fixtures.Anonymizer` (with a test)
-and run it again. Then skim a few fixture files yourself.
+and run it again.
+
+It then runs a **leak check**, independent of those rules: every real
+username, slug, chat text and id found in the raw files is searched for in
+the output. If any is found, the task fails, showing field paths (never
+values). Don't commit `fixtures/` after a failed run. Then skim a few
+fixture files yourself.
 
 ## Tests
 

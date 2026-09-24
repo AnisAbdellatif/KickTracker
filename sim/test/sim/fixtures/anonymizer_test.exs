@@ -95,6 +95,101 @@ defmodule Sim.Fixtures.AnonymizerTest do
     assert first == second
   end
 
+  test "a reply keeps its message ids (UUIDs) but loses who and what" do
+    reply = %{
+      "id" => "0b5c7e1a-2f3d-4c5b-9a8e-1f2e3d4c5b6a",
+      "thread_parent_id" => "9f8e7d6c-5b4a-4321-8765-0fedcba98765",
+      "type" => "reply",
+      "content" => "agreed",
+      "metadata" => %{
+        "message_ref" => "1790217929123",
+        "original_message" => %{
+          "id" => "9f8e7d6c-5b4a-4321-8765-0fedcba98765",
+          "content" => "first"
+        },
+        "original_sender" => %{"id" => 55, "username" => "SomeChatter"}
+      },
+      "sender" => %{
+        "id" => 66,
+        "slug" => "otherchatter",
+        "identity" => %{
+          "badges_v2" => [
+            %{
+              "badge_type" => "sub",
+              "name" => "Subscriber",
+              "image_url" => "https://files.kick.com/b.png"
+            }
+          ]
+        }
+      }
+    }
+
+    {out, state} = anon(reply)
+
+    assert out["id"] == reply["id"]
+    assert out["thread_parent_id"] == reply["thread_parent_id"]
+    assert out["metadata"]["original_message"]["id"] == reply["thread_parent_id"]
+    assert out["metadata"]["message_ref"] == "1790217929123"
+    assert out["content"] == "text-1"
+    assert out["metadata"]["original_message"]["content"] == "text-2"
+    assert out["metadata"]["original_sender"] == %{"id" => 900_000_001, "username" => "user0001"}
+    assert out["sender"]["slug"] == "user0002"
+    [badge] = out["sender"]["identity"]["badges_v2"]
+    assert badge["name"] == "Subscriber"
+    assert badge["image_url"] =~ "example.invalid"
+    assert state.unknown == %{}
+  end
+
+  test "a non-UUID string under an id key is still reported" do
+    {_, state} = anon(%{"id" => "not-a-uuid"})
+    assert state.unknown == %{"id" => 1}
+  end
+
+  test "a Pusher channel name anywhere has its ids mapped" do
+    {out, state} =
+      anon(%{"data" => %{"channel" => "chatrooms.123.v2"}, "other" => %{"channel" => "general"}})
+
+    assert out["data"]["channel"] == "chatrooms.900000001.v2"
+    assert out["other"]["channel"] == "general"
+    assert state.unknown == %{"other.channel" => 1}
+  end
+
+  test "any *_id number is mapped (e.g. chatroom.chatable_id), except known-safe ones" do
+    {out, _} =
+      anon(%{
+        "id" => 12_345_678,
+        "chatroom" => %{"id" => 7777, "chatable_id" => 12_345_678, "category_id" => 15}
+      })
+
+    assert out["chatroom"]["chatable_id"] == out["id"]
+    assert out["chatroom"]["category_id"] == 15
+  end
+
+  test "JSON stored as a string is anonymized inside; chat text that looks like JSON is still text" do
+    {out, _} =
+      anon(%{
+        "data" => ~s({"sender":{"id":4242,"username":"SomeChatter"}}),
+        "content" => ~s({"looks":"like json"})
+      })
+
+    assert Jason.decode!(out["data"]) == %{
+             "sender" => %{"id" => 900_000_001, "username" => "user0001"}
+           }
+
+    assert out["content"] == "text-1"
+  end
+
+  test "event names and Kick's public key are known-safe, not reported" do
+    {out, state} =
+      anon(%{
+        "events" => [%{"name" => "livestream.status.updated"}],
+        "data" => %{"public_key" => "-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----"}
+      })
+
+    assert out["events"] == [%{"name" => "livestream.status.updated"}]
+    assert state.unknown == %{}
+  end
+
   property "no real person id survives, and the mapping is one to one" do
     check all(ids <- uniq_list_of(integer(1..9_999_999), min_length: 1, max_length: 30)) do
       payload = %{"data" => Enum.map(ids, &%{"sender" => %{"id" => &1, "username" => "u#{&1}"}})}

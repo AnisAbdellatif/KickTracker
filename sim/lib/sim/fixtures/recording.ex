@@ -84,17 +84,6 @@ defmodule Sim.Fixtures.Recording do
 
     {data, state} = pusher_data(frame["data"], state)
 
-    # A subscribe we sent carries the channel name inside data.
-    {data, state} =
-      case data do
-        %{"channel" => name} = d when is_binary(name) ->
-          {name, state} = Anonymizer.channel_name(name, state)
-          {%{d | "channel" => name}, state}
-
-        d ->
-          {d, state}
-      end
-
     frame = frame |> put_if_present("channel", channel) |> put_if_present("data", data)
     {frame, state}
   end
