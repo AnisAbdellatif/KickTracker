@@ -1346,7 +1346,13 @@ auth check.
 - **Access:** accounts on phx.gen.auth's model (server-side session tokens),
   password + TOTP on every login, **no public sign-up** (admins invite
   admins). Optionally reachable only over the private
-  network (Caddy IP allowlist or Tailscale) as a second layer.
+  network (Caddy IP allowlist or Tailscale) as a second layer. An open
+  admin page is held to its session: disabling an admin or changing a
+  password disconnects their pages, every event re-checks the session
+  before it runs, and a page leaves when its session expires (14 days).
+  Disabling an admin also revokes the invitations they created. An
+  invitation link carries its token in the query
+  (`/admin/invite?token=…`), which request logs leave out.
 - **Channels:**
   - Add by slug: resolve through the public API, preview (avatar, ids, live
     status, category), set timezone (default from language/country, editable)
@@ -1361,7 +1367,11 @@ auth check.
   and dead letters, consumer lag, receivers last seen, Oban queues and
   failures (Oban Web), LiveDashboard.
 - **Dead letters:** list, inspect the envelope, replay into the queue, or
-  discard with a reason.
+  discard with a reason. A message is named by a hash of its id and bytes
+  (one without an id works too); acting on one searches the whole queue,
+  and copies of it are listed once and handled together. One naming a
+  Kick id removed on request is shown redacted and can only be
+  discarded: replaying it would bring the person back.
 - **Subscriptions:** Kick's webhook subscriptions vs what they should be;
   resync one channel or all.
 - **Reprocess:** rebuild `stream_stats` or rollups for a channel and range;
@@ -1373,7 +1383,8 @@ auth check.
   - **annotations** on a channel's timeline ("collector outage", "suspected
     viewbots", "charity stream"), optionally shown publicly on charts.
 - **Privacy:** find everything held about a Kick user id; delete it
-  (per-user rows, username, raw event bodies redacted).
+  (per-user rows, username, raw event bodies redacted). Searches are
+  audited without what was searched for.
 - **Export / import:** download chosen channels, alone or with their
   history over an optional date range, as a `.zip` of CSVs (one per table,
   local ids kept so they join, plus `manifest.json`); upload one from
@@ -1389,8 +1400,11 @@ auth check.
 - **Settings:** feature flags (show the support page publicly, show top
   chatters and supporters by name), the assumptions behind the revenue
   estimate; public groups on their own page. Polling cadences stay in code,
-  with the rules that depend on them.
-- **Audit log:** every admin action, who and when.
+  with the rules that depend on them. Saved all together or not at all,
+  each checked against its range (a share is 0–1).
+- **Audit log:** every admin action, who and when, including resolving
+  or muting errors in ErrorTracker. LiveDashboard is read-only (no
+  killing processes).
 
 **How admin actions reach the collector:** the database is the source of
 truth. The admin writes (e.g. a new active channel) and broadcasts
@@ -1723,7 +1737,8 @@ Notifications (Telegram, Discord or email), not just dashboards, when:
 Plus an **external uptime check** on the ingress URL and the site, a
 **dead man's switch** pinged every minute by the collecting node
 (`HEARTBEAT_URL`), and error tracking (**ErrorTracker**, self-hosted in
-Elixir, or Sentry).
+Elixir, or Sentry), which stores no password, TOTP code or invitation
+token: they are scrubbed from its context, as from the logs.
 
 ### 18.3 Legal and privacy
 
