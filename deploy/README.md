@@ -88,12 +88,20 @@ proxy's address for the rate limits.
 
 ## Deploying a change
 
-Use the Deploy workflow (`.github/workflows/deploy.yml`), which runs
-`deploy.sh` on the server; by hand, from `deploy/`:
+Merge to `main`, wait for CI to build the images, then use the Deploy
+workflow (`.github/workflows/deploy.yml`, tag left empty), which pulls and
+runs `deploy.sh` on the server; by hand, from `deploy/`:
 
-    ROLE=web APP_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha> ./deploy.sh
-    ROLE=collector APP_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha> ./deploy.sh
-    ROLE=receivers RECEIVER_IMAGE=ghcr.io/<owner>/kicktracker-receiver:<sha> ./deploy.sh
+    git pull
+    ROLE=collector ./deploy.sh
+    ROLE=web ./deploy.sh
+    ROLE=receivers ./deploy.sh
+
+Each deploys the images CI built from the checkout's commit (they are
+tagged with the `main` commit they were built from). `TAG=<sha>` deploys
+another build, e.g. to roll back; `APP_IMAGE` / `RECEIVER_IMAGE` name an
+image outright. An image that doesn't exist yet (CI still building) stops
+the script before anything changes.
 
 Migrations run first, as their own step, and only expand-then-contract
 ones (§15.3); each statement waits at most 5s for a lock. Then the pair
@@ -102,8 +110,7 @@ is updated one at a time, each waiting for the other to be healthy:
 collectors' **standby first**, then the leader, whose clean stop hands
 collection over within a second; `receiver-1` then `receiver-2`. Images
 are pinned in `deploy/.env`, so a plain `docker compose up -d` never
-swaps one by accident. A rollback is the same command with the previous
-tag.
+swaps one by accident. A rollback is the same command with `TAG=` the previous sha.
 
 Which collector leads:
 

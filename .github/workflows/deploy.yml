@@ -19,9 +19,9 @@ on:
         type: choice
         options: [web, collector, receivers, migrate-only, shadow]
       tag:
-        description: Image tag (a commit sha from main, or latest)
-        required: true
-        default: latest
+        description: Image tag (empty for the latest main; a commit sha from main to roll back)
+        required: false
+        default: ""
 
 concurrency:
   group: deploy
@@ -44,7 +44,7 @@ jobs:
           TAG: ${{ inputs.tag }}
           TARGET: ${{ secrets.DEPLOY_USER }}@${{ inputs.role == 'shadow' && secrets.DEPLOY_SHADOW_HOST || secrets.DEPLOY_HOST }}
         run: |
-          # The tag is typed by hand: only a sha or a plain tag goes into the command.
-          [[ "$TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad tag: $TAG" >&2; exit 1; }
-          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
-          ssh "$TARGET" "cd /srv/kick_tracker && git pull --ff-only && ROLE=$ROLE APP_IMAGE=$prefix-app:$TAG RECEIVER_IMAGE=$prefix-receiver:$TAG deploy/deploy.sh"
+          # The tag is typed by hand: only a sha or a plain tag goes into the
+          # command. Empty: deploy.sh takes the build of the commit it pulls.
+          [[ -z "$TAG" || "$TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad tag: $TAG" >&2; exit 1; }
+          ssh "$TARGET" "cd /srv/kick_tracker && git pull --ff-only && ROLE=$ROLE TAG=$TAG IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,} deploy/deploy.sh"

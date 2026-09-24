@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Deploys one role (project.md §15.3, deploy/README.md), from deploy/:
+# Deploys one role (project.md §15.3, deploy/README.md), from deploy/,
+# after `git pull` on the server's checkout of main:
 #
-#   ROLE=web APP_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha> ./deploy.sh
+#   ROLE=web ./deploy.sh
 #
 # ROLE: web | collector | receivers | migrate-only | shadow.
-# APP_IMAGE (and RECEIVER_IMAGE for receivers): the images to deploy.
+# Which build: the one CI made of this checkout's commit (images are
+# tagged with the main commit they were built from), unless TAG names
+# another (a sha, to roll back), or APP_IMAGE (and RECEIVER_IMAGE for
+# receivers) names the image outright. migrate-only runs the pinned one.
 # COMPOSE_FILES: overrides the compose files (the rehearsal adds its own).
 #
 # Every pair is updated one at a time, each waiting for the other to be
@@ -22,6 +26,28 @@ cd "$(dirname "$0")"
 [ -n "${APP_IMAGE:-}" ] || unset APP_IMAGE
 [ -n "${RECEIVER_IMAGE:-}" ] || unset RECEIVER_IMAGE
 touch .env
+
+# No image given: this checkout's build.
+TAG=${TAG:-$(git rev-parse HEAD)}
+IMAGE_PREFIX=${IMAGE_PREFIX:-ghcr.io/anisabdellatif/kicktracker}
+case "$ROLE" in
+  web | collector | shadow) APP_IMAGE=${APP_IMAGE:-$IMAGE_PREFIX-app:$TAG} ;;
+  receivers) RECEIVER_IMAGE=${RECEIVER_IMAGE:-$IMAGE_PREFIX-receiver:$TAG} ;;
+esac
+
+# The image is fetched before anything changes: a build that doesn't
+# exist (CI still building it, or it failed) stops here, touching nothing.
+fetch() {
+  docker image inspect "$1" >/dev/null 2>&1 && return 0
+  docker pull -q "$1" >/dev/null || {
+    echo "no image $1: has CI finished building it (Actions, CI, Images)? Nothing was changed." >&2
+    exit 1
+  }
+}
+case "$ROLE" in
+  web | collector | shadow) fetch "$APP_IMAGE" ;;
+  receivers) fetch "$RECEIVER_IMAGE" ;;
+esac
 
 if [ "$ROLE" = shadow ]; then
   files=${COMPOSE_FILES:-compose.shadow.yml}
