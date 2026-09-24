@@ -145,10 +145,22 @@ Migrations run first, as their own step, and only expand-then-contract
 ones (§15.3); each statement waits at most 5s for a lock. Then the pair
 is updated one at a time, each waiting for the other to be healthy:
 `web-a` then `web-b` (Caddy sends visitors to whichever answers); the
-collectors' **standby first**, then the leader, whose clean stop hands
+collectors' **standby only**, which then takes over from the leader: the
+leader restarts in place on its own build, and its clean stop hands
 collection over within a second; `receiver-1` then `receiver-2`. Images
-are pinned in `deploy/.env`, so a plain `docker compose up -d` never
-swaps one by accident. A rollback is the same command with `TAG=` the previous sha.
+are pinned in `deploy/.env` (each collector has its own:
+`COLLECTOR_A_IMAGE`, `COLLECTOR_B_IMAGE`), so a plain `docker compose up
+-d` never swaps one by accident. A rollback of web or the receivers is the
+same command with `TAG=` the previous sha.
+
+The collector left standing by after a deploy still runs the previous
+build, so rolling the collectors back is switching collection to it (a
+second's handover, nothing rebuilt or pulled):
+
+    ROLE=collector-switch ./deploy.sh
+
+Run it again to go forward. The next collector deploy updates whichever
+one stands by, so each deploy leaves the build before it ready.
 
 Which collector leads:
 

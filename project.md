@@ -633,7 +633,7 @@ at boot. Each role is its own service, deployed on its own.
 
 | Role | Runs | Redeployed |
 |---|---|---|
-| `collector` | The journal, the leader election and, on the leading node, the sources, channel processes, chat sockets, Broadway consumer and Oban queues | When tracking logic changes, standby first (§10.1) |
+| `collector` | The journal, the leader election and, on the leading node, the sources, channel processes, chat sockets, Broadway consumer and Oban queues | When tracking logic changes: the standby is updated and takes over, the old leader stays on the previous build (§10.1) |
 | `web` | Public site, admin interface, `/data/v1` JSON, alert checks | Often |
 
 The receiver is **not** a role of the app; it is the ingress (§8.4).
@@ -712,8 +712,10 @@ depends on. The web role can restart freely.
   5 minutes, the collection tree is restarted. The tree giving up (too
   many crashes) is restarted with a backoff (1s to 60s); nothing in
   collection can take the node down.
-- **Deploys** update the standby first, wait for it to be healthy, then the
-  leader (§15.3). Oban queues run only on the leader, so jobs that write
+- **Deploys** update only the standby, wait for it to be healthy, then
+  switch collection to it (the leader restarts in place on its own build,
+  and its clean stop hands over); the old leader stays on the previous
+  build as the standby, so a rollback is switching back (§15.3). Oban queues run only on the leader, so jobs that write
   collected data run where collection runs.
 - **Health**: each collector answers `/healthz` and `/status` on its own
   loopback port (the container healthcheck; the deploy script reads which
@@ -1548,7 +1550,7 @@ written by the collector, with the deletion itself.
 |---|---|---|---|
 | `receiver` ×2 | `ingress/receiver` | Rarely, one at a time | Nothing, while the other answers |
 | `rabbitmq` | official | Rarely | Receivers spool to disk; nothing lost |
-| `collector-a`, `collector-b` | `app`, `ROLE=collector` | When tracking changes, standby first | One down: the other collects (within a second after a clean stop or a crash, ~7s if the leader freezes). Both down: events wait in the queue; polls and chat come from the shadow's backfill (§10.5) |
+| `collector-a`, `collector-b` | `app`, `ROLE=collector` | When tracking changes, the standby is updated and takes over; the other keeps the previous build | One down: the other collects (within a second after a clean stop or a crash, ~7s if the leader freezes). Both down: events wait in the queue; polls and chat come from the shadow's backfill (§10.5) |
 | shadow (second VPS) | `app`, `COLLECTOR_MODE=shadow`, own database | With the collectors | Nothing, while the primary side collects; the main VPS down, it is what still collects |
 | `web-a`, `web-b` | `app`, `ROLE=web` | Often, one at a time | One down: Caddy sends everyone to the other. Both down: site down; collection unaffected |
 | `db` | TimescaleDB | Rarely | Collection continues into the leader's journal and is written when it is back; the consumer stops acking, events wait in the queue; the site is down |
@@ -1588,7 +1590,10 @@ change to the app beyond producer config.
 
 - Migrations are **expand-then-contract**: add first, remove only once no
   running code uses it. `collector` and `web` may run different versions for a
-  while.
+  while, and the standby collector deliberately runs the **previous** build
+  (the rollback), so a contract step ships only once the build before the
+  current one no longer uses what it removes: one deploy later than "no
+  running code".
 - The receiver never touches the database, so app migrations never affect it.
 - The envelope changes only in a backward-compatible way (new optional
   fields); a breaking change means a new `version` and a consumer that reads
@@ -1603,9 +1608,15 @@ change to the app beyond producer config.
   roles. The whole path is rehearsed on a development machine
   with `deploy/rehearsal/rehearse.sh` (the production stack under load,
   upgraded step by step, with what each step costs measured).
-- Redeploy collectors the standby first, waiting for it to be healthy, then
-  the leader, whose clean stop hands over within a second (§10.1). The
-  deploy workflow finds the leader from the collectors' status ports.
+- A collector deploy updates **only the standby**, waits for it to be
+  healthy, then switches collection to it: the leader restarts in place,
+  on the build it had, and its clean stop hands over within a second
+  (§10.1). The old leader stays on the previous build as the standby, so
+  rolling back is `ROLE=collector-switch deploy/deploy.sh` (collection back
+  to it, a second's handover), and the next deploy updates it. Each
+  collector has its own image pin (`COLLECTOR_A_IMAGE`,
+  `COLLECTOR_B_IMAGE`). The deploy script finds the leader from the
+  collectors' status ports.
 - Migrations run with `lock_timeout = 5s`: one that would queue behind
   the collector's writes (and hold every later write behind it) fails and
   is retried at a quieter moment; the collectors' journals absorb the wait.

@@ -4,19 +4,27 @@
 #
 #   ROLE=web ./deploy.sh
 #
-# ROLE: web | collector | receivers | migrate-only | shadow.
+# ROLE: web | collector | collector-switch | receivers | migrate-only | shadow.
 # Which build: the one CI made of this checkout's commit (images are
 # tagged with the main commit they were built from), unless TAG names
 # another (a sha, to roll back), or APP_IMAGE (and RECEIVER_IMAGE for
 # receivers) names the image outright. migrate-only runs the pinned one.
 # COMPOSE_FILES: overrides the compose files (the rehearsal adds its own).
 #
-# Every pair is updated one at a time, each waiting for the other to be
-# healthy: web-a then web-b; the collectors' standby, then their leader
-# (whose clean stop hands collection over within a second); receiver-1
-# then receiver-2. Migrations run first, as their own step. Images are
-# pinned in deploy/.env, so a plain `docker compose up -d` never swaps
-# one by accident. The Deploy workflow runs this over SSH.
+# Web and receiver pairs are updated one at a time, each waiting for the
+# other to be healthy: web-a then web-b, receiver-1 then receiver-2.
+# The collectors are not both updated: only the one standing by gets the
+# new build, then collection is switched to it (the leader restarts in
+# place, on the build it had, and its clean stop hands collection over
+# within a second). The old leader stays on the previous build as the
+# standby, so rolling back is switching back:
+#
+#   ROLE=collector-switch ./deploy.sh
+#
+# Each collector has its own pin (COLLECTOR_A_IMAGE, COLLECTOR_B_IMAGE).
+# Migrations run first, as their own step. Images are pinned in
+# deploy/.env, so a plain `docker compose up -d` never swaps one by
+# accident. The Deploy workflow runs this over SSH.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -32,6 +40,7 @@ TAG=${TAG:-$(git rev-parse HEAD)}
 IMAGE_PREFIX=${IMAGE_PREFIX:-ghcr.io/anisabdellatif/kicktracker}
 case "$ROLE" in
   web | collector | shadow) APP_IMAGE=${APP_IMAGE:-$IMAGE_PREFIX-app:$TAG} ;;
+  collector-switch) ;;
   receivers) RECEIVER_IMAGE=${RECEIVER_IMAGE:-$IMAGE_PREFIX-receiver:$TAG} ;;
 esac
 
@@ -66,11 +75,19 @@ pin() {
   mv .env.new .env
 }
 
+pinned() { grep "^$1=" .env | tail -1 | cut -d= -f2-; }
+
 # Compose needs every pin for any command; a first deploy sets whichever
-# is missing to this image.
-if [ "$ROLE" != shadow ]; then
+# is missing to this image. A collector without its own pin yet keeps the
+# build both ran under the shared COLLECTOR_IMAGE, so it isn't swapped.
+if [ "$ROLE" != shadow ] && [ "$ROLE" != collector-switch ]; then
   grep -q '^APP_IMAGE=' .env || pin APP_IMAGE "${APP_IMAGE:?}"
   grep -q '^COLLECTOR_IMAGE=' .env || pin COLLECTOR_IMAGE "${APP_IMAGE:?}"
+fi
+if [ "$ROLE" != shadow ]; then
+  for c in A B; do
+    grep -q "^COLLECTOR_${c}_IMAGE=" .env || pin "COLLECTOR_${c}_IMAGE" "$(pinned COLLECTOR_IMAGE)"
+  done
 fi
 
 healthy() {
@@ -106,6 +123,42 @@ collectors() {
   if [ "$(leader)" = collector-b ]; then pair collector-a collector-b; else pair collector-b collector-a; fi
 }
 
+other() { if [ "$1" = collector-a ]; then echo collector-b; else echo collector-a; fi; }
+pin_name() { if [ "$1" = collector-a ]; then echo COLLECTOR_A_IMAGE; else echo COLLECTOR_B_IMAGE; fi; }
+
+# Hands collection from the leader to the standby: the leader restarts in
+# place (same container, same build), and its clean stop releases the
+# lease to the standby, which must be healthy first. Fails if the standby
+# didn't end up collecting.
+switch_to() {
+  local to=$1 from
+  from=$(other "$to")
+  healthy "$to"
+  if [ "$(leader)" != "$to" ]; then
+    dc restart -t 60 "$from"
+    healthy "$from"
+  fi
+  for _ in $(seq 1 30); do
+    [ "$(leader)" = "$to" ] && { echo "$to collects; $from stands by"; return 0; }
+    sleep 1
+  done
+  echo "$to did not take over collection (leader: $(leader || true))" >&2
+  return 1
+}
+
+# The standby gets this build, then collects; the leader keeps its build
+# and stands by (a rollback is `collector-switch`). With nobody leading
+# (a first deploy), collector-b is updated and collector-a kept.
+collector_deploy() {
+  local current standby
+  current=$(leader)
+  current=${current:-collector-a}
+  standby=$(other "$current")
+  pin "$(pin_name "$standby")" "${APP_IMAGE:?}"
+  dc up -d --no-deps "$standby"
+  switch_to "$standby"
+}
+
 migrate() {
   dc pull --policy missing migrate
   dc run --rm migrate
@@ -123,10 +176,17 @@ case "$ROLE" in
     ;;
   collector)
     # Migrations from the new image; the web pin stays as it is. They wait
-    # at most 5s for a lock, which the collectors' journals absorb.
+    # at most 5s for a lock, which the collectors' journals absorb. The
+    # build left standing by must work on the migrated schema too, which
+    # expand-then-contract migrations guarantee.
     migrate
     pin COLLECTOR_IMAGE "${APP_IMAGE:?}"
-    collectors
+    collector_deploy
+    ;;
+  collector-switch)
+    # Back to the build the standby runs (the previous one after a deploy).
+    current=$(leader)
+    switch_to "$(other "${current:-collector-b}")"
     ;;
   shadow)
     pin SHADOW_IMAGE "${APP_IMAGE:?}"
