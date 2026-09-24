@@ -99,6 +99,215 @@ defmodule KickTracker.Events.ConsumerTest do
     assert {:store_failed, _} = failed.status |> elem(1)
     assert Enum.map(stored(), & &1.message_id) == ["01C", "01E"]
   end
+
+  describe "a database that can't take writes for a while" do
+    # Fails the first `times` batches with `error`, then stores for real.
+    defp start_flaky(name, error, times) do
+      {:ok, failures} = Agent.start_link(fn -> times end)
+      test = self()
+
+      ingest = fn envelopes ->
+        if Agent.get_and_update(failures, &{&1, &1 - 1}) > 0 do
+          send(test, :ingest_failed)
+          raise error
+        else
+          KickTracker.Events.ingest(envelopes)
+        end
+      end
+
+      start_supervised!(
+        {Consumer,
+         name: name,
+         producer: {Broadway.DummyProducer, []},
+         public_key: :consumer_test_key,
+         dispatch: fn _ -> :ok end,
+         ingest: ingest},
+        id: name
+      )
+    end
+
+    defp pg_error(code),
+      do: Postgrex.Error.exception(postgres: %{code: code, message: "injected"})
+
+    for {what, code} <- [
+          {"an admin shutdown", "57P01"},
+          {"a statement timeout", "57014"},
+          {"a full disk", "53100"},
+          {"a read-only transaction (failover)", "25006"},
+          {"a serialization failure", "40001"},
+          {"a deadlock", "40P01"},
+          {"a lost connection", "08006"}
+        ] do
+      test "#{what} is waited out, not dead-lettered" do
+        name = :"consumer_flaky_#{unquote(code)}"
+        start_flaky(name, pg_error(unquote(code)), 2)
+
+        message = TestKick.message("channel.followed", @follow, message_id: "01F")
+        ref = Broadway.test_message(name, message)
+
+        assert_receive :ingest_failed, 2_000
+        assert_receive :ingest_failed, 2_000
+        assert_receive {:ack, ^ref, [_], []}, 5_000
+        refute_received {:configure, ^ref, _}
+        assert [%{message_id: "01F"}] = stored()
+      end
+    end
+
+    test "a connection error is waited out too" do
+      start_flaky(:consumer_flaky_conn, DBConnection.ConnectionError.exception("gone"), 1)
+
+      ref =
+        Broadway.test_message(:consumer_flaky_conn, TestKick.message("channel.followed", @follow))
+
+      assert_receive {:ack, ^ref, [_], []}, 5_000
+      assert [_] = stored()
+    end
+
+    test "an error in the message itself is still dead-lettered" do
+      # 22021: character_not_in_repertoire, a message that can never store.
+      start_flaky(:consumer_flaky_bad, pg_error("22021"), 100)
+
+      ref =
+        Broadway.test_message(:consumer_flaky_bad, TestKick.message("channel.followed", @follow))
+
+      assert_receive {:configure, ^ref, [on_failure: :reject]}, 2_000
+      assert_receive {:ack, ^ref, [], [_]}, 2_000
+    end
+
+    test "which errors count as transient" do
+      assert Consumer.transient?(DBConnection.ConnectionError.exception("x"))
+
+      for code <-
+            ~w(08000 08006 53100 53200 53300 57014 57P01 57P02 57P03 58030 40001 40P01 25006 55P03),
+          do: assert(Consumer.transient?(pg_error(code)), code)
+
+      for code <- ~w(22021 23505 23503 42P01 42703 22P02 XX000),
+          do: refute(Consumer.transient?(pg_error(code)), code)
+
+      refute Consumer.transient?(%RuntimeError{message: "x"})
+      refute Consumer.transient?(:rollback)
+    end
+  end
+end
+
+defmodule KickTracker.Events.ConsumerKeyTest do
+  @moduledoc "The consumer when Kick's key changes, or can't be fetched in time."
+
+  use KickTracker.DataCase, async: false
+  @moduletag :capture_log
+
+  alias KickTracker.Events.Consumer
+  alias KickTracker.Kick.PublicKey
+  alias KickTracker.TestKick
+
+  @follow ~s({"broadcaster":{"user_id":7},"follower":{"user_id":8}})
+
+  defmodule KeyServer do
+    @moduledoc false
+    @behaviour Plug
+    def init(opts), do: opts
+
+    def call(conn, {pem, delay_ms}) do
+      Process.sleep(delay_ms)
+      body = Jason.encode!(%{"data" => %{"public_key" => pem}, "message" => "OK"})
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.send_resp(200, body)
+    end
+  end
+
+  defp key_server(pem, delay_ms) do
+    {:ok, server} =
+      Bandit.start_link(
+        plug: {KeyServer, {pem, delay_ms}},
+        port: 0,
+        ip: :loopback,
+        startup_log: false
+      )
+
+    {:ok, {_, port}} = ThousandIsland.listener_info(server)
+    "http://127.0.0.1:#{port}"
+  end
+
+  defp start_consumer(name, key_name, opts \\ []) do
+    start_supervised!(
+      {Consumer,
+       [
+         name: name,
+         producer: {Broadway.DummyProducer, []},
+         public_key: key_name,
+         dispatch: fn _ -> :ok end
+       ] ++ opts},
+      id: name
+    )
+  end
+
+  test "a delivery signed with a rotated key is stored once the new key is fetched" do
+    {_private, other_pem} = TestKick.pair(:other)
+
+    start_supervised!(
+      {PublicKey, name: :rotating_key, pem: TestKick.pem(), api_url: key_server(other_pem, 0)}
+    )
+
+    start_consumer(:consumer_rotating, :rotating_key)
+    message = TestKick.message("channel.followed", @follow, key: :other)
+    ref = Broadway.test_message(:consumer_rotating, message)
+
+    assert_receive {:ack, ^ref, [_], []}, 5_000
+    assert PublicKey.get(:rotating_key) == other_pem
+  end
+
+  test "reading the key never waits for a fetch in flight" do
+    start_supervised!(
+      {PublicKey,
+       name: :slow_key, pem: TestKick.pem(), api_url: key_server(TestKick.pem(), 3_000)}
+    )
+
+    refresh = Task.async(fn -> PublicKey.refresh(:slow_key) end)
+    Process.sleep(100)
+
+    {micros, pem} = :timer.tc(fn -> PublicKey.get(:slow_key) end)
+    assert pem == TestKick.pem()
+    assert micros < 10_000
+    assert Task.await(refresh, 5_000) == {:ok, TestKick.pem()}
+  end
+
+  test "a key fetch that doesn't finish in time requeues the message, not dead-letters it" do
+    start_supervised!(
+      {PublicKey,
+       name: :stuck_key, pem: TestKick.pem(), api_url: key_server(TestKick.pem(), 5_000)}
+    )
+
+    start_consumer(:consumer_stuck, :stuck_key, key_wait_ms: 200)
+
+    ref =
+      Broadway.test_message(
+        :consumer_stuck,
+        TestKick.message("channel.followed", @follow, key: :other)
+      )
+
+    assert_receive {:ack, ^ref, [], [failed]}, 2_000
+    assert failed.status == {:failed, :key_unavailable}
+    refute_received {:configure, ^ref, _}
+  end
+
+  test "once the fetch is done, the same key again means a bad signature" do
+    start_supervised!(
+      {PublicKey, name: :same_key, pem: TestKick.pem(), api_url: key_server(TestKick.pem(), 0)}
+    )
+
+    start_consumer(:consumer_same, :same_key)
+
+    ref =
+      Broadway.test_message(
+        :consumer_same,
+        TestKick.message("channel.followed", @follow, key: :other)
+      )
+
+    assert_receive {:configure, ^ref, [on_failure: :reject]}, 2_000
+    assert_receive {:ack, ^ref, [], [_]}, 2_000
+  end
 end
 
 defmodule KickTracker.Events.ConsumerRabbitTest do

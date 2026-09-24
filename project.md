@@ -514,8 +514,16 @@ app side only the Broadway producer and its config change.
   exchange without affecting this one.
 - **Dead letters:** exchange `kick.events.dlx` → queue `kick_tracker.events.dead`.
   A message goes there after the quorum queue's `x-delivery-limit` (e.g. 10)
-  or when the app rejects it as undecodable or wrongly signed. Dead letters are
-  inspected and replayed by hand, never dropped silently.
+  or when the app rejects it: undecodable, wrongly signed (after checking
+  again with a freshly fetched key), or refused by the database for a
+  reason in the message itself (a constraint, a value Postgres can't
+  hold). A database that can't take writes for a while (connection lost,
+  SQLSTATE classes 08, 53, 57 and 58, serialization failures and
+  deadlocks, a read-only transaction during a failover, a lock timeout)
+  is waited out with the messages unacknowledged, and a key fetch that
+  doesn't finish in time requeues the message: neither sends a good event
+  to the dead-letter queue. Dead letters are inspected and replayed by
+  hand, never dropped silently.
 - **Publisher confirms** on the receiver side: a receiver answers Kick 200
   only after RabbitMQ confirms the message, or after it is written to the
   local spool.
