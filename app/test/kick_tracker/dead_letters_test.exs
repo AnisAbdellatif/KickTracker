@@ -88,4 +88,88 @@ defmodule KickTracker.DeadLettersTest do
     assert DeadLetters.list() == {:ok, []}
     assert TestBroker.depth("kick_tracker.events") == 0
   end
+
+  # Straight into the dead-letter queue through its exchange.
+  defp publish_dead!(payloads) do
+    dead_before = TestBroker.depth("kick_tracker.events.dead")
+    {:ok, conn} = AMQP.Connection.open(TestBroker.admin_url())
+    {:ok, chan} = AMQP.Channel.open(conn)
+    :ok = AMQP.Confirm.select(chan)
+
+    for {payload, opts} <- payloads,
+        do: :ok = AMQP.Basic.publish(chan, "kick.events.dlx", "channel.followed", payload, opts)
+
+    true = AMQP.Confirm.wait_for_confirms(chan, {5, :second})
+    AMQP.Connection.close(conn)
+
+    wait_until(fn ->
+      TestBroker.depth("kick_tracker.events.dead") >= dead_before + length(payloads)
+    end)
+  end
+
+  test "a message without a message id is named by its key" do
+    publish_dead!([{"garbage", []}])
+    assert {:ok, [m]} = DeadLetters.list()
+    assert m.message_id == nil and m.key == DeadLetters.key(nil, "garbage")
+    assert DeadLetters.discard(m.key) == :ok
+    assert DeadLetters.list() == {:ok, []}
+  end
+
+  test "copies of one message are listed once and acted on together" do
+    one = {~s({"a":1}), [message_id: "dup"]}
+    publish_dead!([one, one, {~s({"b":2}), [message_id: "other"]}])
+
+    assert {:ok, [%{message_id: "dup", copies: 2}, %{message_id: "other", copies: 1}]} =
+             DeadLetters.list()
+
+    assert :ok = DeadLetters.replay("dup")
+    assert TestBroker.depth("kick_tracker.events") == 1
+    assert {:ok, [%{message_id: "other"}]} = DeadLetters.list()
+  end
+
+  test "two different messages under one id are ambiguous until named by key" do
+    publish_dead!([{"x", [message_id: "same"]}, {"y", [message_id: "same"]}])
+    assert DeadLetters.discard("same") == {:error, :ambiguous}
+    assert :ok = DeadLetters.discard(DeadLetters.key("same", "y"))
+    assert {:ok, [%{payload: "x"}]} = DeadLetters.list()
+  end
+
+  test "a message past the first page listed can still be acted on" do
+    publish_dead!(for i <- 1..205, do: {"m#{i}", [message_id: "m#{i}"]})
+    assert {:ok, listed} = DeadLetters.list(500)
+    assert length(listed) == 200
+    refute Enum.any?(listed, &(&1.message_id == "m205"))
+
+    assert :ok = DeadLetters.discard("m205")
+    assert DeadLetters.count() == {:ok, 204}
+  end
+
+  describe "a message naming someone removed on request" do
+    setup tags do
+      KickTracker.DataCase.setup_sandbox(tags)
+    end
+
+    test "is shown redacted and can't be replayed, only discarded" do
+      KickTracker.Removals.record(:user, 424_242)
+
+      body =
+        Jason.encode!(%{
+          "follower" => %{"user_id" => 424_242, "username" => "someone"},
+          "broadcaster" => %{"user_id" => 1, "username" => "somestreamer"}
+        })
+
+      envelope = Jason.encode!(%{"message_id" => "erased-1", "body" => body})
+      publish_dead!([{envelope, [message_id: "erased-1"]}])
+
+      assert {:ok, [m]} = DeadLetters.list()
+      assert m.erased == [424_242]
+      refute m.envelope["body"] =~ "someone"
+      assert m.envelope["body"] =~ "somestreamer"
+
+      assert DeadLetters.replay("erased-1") == {:error, :erased}
+      assert TestBroker.depth("kick_tracker.events") == 0
+      assert :ok = DeadLetters.discard("erased-1")
+      assert DeadLetters.list() == {:ok, []}
+    end
+  end
 end
