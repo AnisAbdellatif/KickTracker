@@ -30,7 +30,7 @@ continuity of collection come before everything else.
 - Commit at coherent milestones. Keep commits focused, with a short imperative subject line.
 - Never commit secrets (`.env`, keys, credentials, `prod.secret.exs`, the Kick client
   secret, RabbitMQ or database passwords). Secrets are encrypted with sops + age (§19.3).
-- Never commit `decisions.md` (§3 below) or **un-anonymized recordings** (§6 below).
+- Never commit **un-anonymized recordings** (§6 below).
 - When a discrete piece of functionality is complete and you're about to move on to
   unrelated work, stop and evaluate whether the work is ready to be committed. Do not
   silently keep working across multiple unrelated changes — this keeps commits scoped to
@@ -38,9 +38,9 @@ continuity of collection come before everything else.
 
 ## 3. Decision log (`decisions.md`)
 
-This project keeps a local decision log at `decisions.md` in the repo root, organized by
-topic rather than chronologically. It is intentionally git-excluded (`.git/info/exclude`)
-and must never be committed.
+This project keeps a decision log at `decisions.md` in the repo root, organized by
+topic rather than chronologically. It is tracked in git and public with the repo, so the
+same rules apply as for any other file: no real usernames or channel names, no secrets.
 
 `project.md` is the shared design; `decisions.md` is the running record of why. When a
 logged decision changes the design, update `project.md` too, in the same piece of work.
