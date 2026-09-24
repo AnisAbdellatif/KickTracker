@@ -196,12 +196,12 @@ jobs:
       - name: Server configured?
         id: server
         env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
+          HOST: ${{ secrets.DEPLOY_HOST || vars.DEPLOY_HOST }}
         run: |
           if [ -n "$HOST" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::Not deployed: set the production environment's DEPLOY_* secrets (deploy/README.md)."
+            echo "::notice::Not deployed: set DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS (deploy/README.md)."
           fi
       - name: SSH key
         if: steps.server.outputs.ready == 'true'
@@ -213,7 +213,8 @@ jobs:
       - name: Release
         if: steps.server.outputs.ready == 'true'
         env:
-          TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+          # Host and user: secrets or plain variables, either works.
+          TARGET: ${{ secrets.DEPLOY_USER || vars.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST || vars.DEPLOY_HOST }}
           # The checkout on the server: repository variable DEPLOY_DIR.
           DIR: ${{ vars.DEPLOY_DIR || '/srv/kick_tracker' }}
         # This commit's images, even if main has moved on since: the run

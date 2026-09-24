@@ -5,8 +5,8 @@
 # chosen pair one at a time (web, collectors standby first, receivers), so
 # the site, collection and webhook intake never stop.
 #
-# Needs the repository secrets DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY and
-# DEPLOY_KNOWN_HOSTS (the server's host key line), and the stack in
+# Needs the secrets DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS (the server's host
+# key line), DEPLOY_HOST and DEPLOY_USER (secrets or variables), and the stack in
 # the checkout named by the repository variable DEPLOY_DIR (default
 # /srv/kick_tracker) on the server (deploy/README.md). `shadow`
 # deploys the shadow collector (compose.shadow.yml) to DEPLOY_SHADOW_HOST
@@ -45,7 +45,8 @@ jobs:
         env:
           ROLE: ${{ inputs.role }}
           TAG: ${{ inputs.tag }}
-          TARGET: ${{ secrets.DEPLOY_USER }}@${{ inputs.role == 'shadow' && secrets.DEPLOY_SHADOW_HOST || secrets.DEPLOY_HOST }}
+          # Hosts and user: secrets or plain variables, either works.
+          TARGET: ${{ secrets.DEPLOY_USER || vars.DEPLOY_USER }}@${{ inputs.role == 'shadow' && (secrets.DEPLOY_SHADOW_HOST || vars.DEPLOY_SHADOW_HOST) || (secrets.DEPLOY_HOST || vars.DEPLOY_HOST) }}
           DIR: ${{ vars.DEPLOY_DIR || '/srv/kick_tracker' }}
         run: |
           # The tag is typed by hand: only a sha or a plain tag goes into the

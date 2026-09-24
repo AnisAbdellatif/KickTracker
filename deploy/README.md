@@ -97,10 +97,12 @@ running the previous version.
 
 It needs, once:
 
-- in GitHub, the `production` environment's secrets `DEPLOY_HOST`,
-  `DEPLOY_USER`, `DEPLOY_SSH_KEY` (a key only for deploying, its public
-  half in that user's `~/.ssh/authorized_keys`) and `DEPLOY_KNOWN_HOSTS`
-  (`ssh-keyscan <host>`). Without them the job skips with a notice;
+- in GitHub (Settings, Secrets and variables, Actions; the repository's
+  or the `production` environment's): the secrets `DEPLOY_SSH_KEY` (a key
+  only for deploying, its public half in that user's
+  `~/.ssh/authorized_keys`) and `DEPLOY_KNOWN_HOSTS` (`ssh-keyscan
+  <host>`), and `DEPLOY_HOST` and `DEPLOY_USER`, as secrets or variables.
+  Without them the job skips with a notice;
 - the repository variable `DEPLOY_DIR` if the checkout isn't in
   `/srv/kick_tracker` (e.g. `/opt/kick_tracker`); the paths in this file
   and in the cron lines of `backup/` and `ops/` are then that directory;
