@@ -1092,8 +1092,10 @@ real life.
 
 ### 17.1 Recording real payloads (once, lightly)
 
-A small recorder (`sim/recorder`, a `mix` task) run by hand against the real
-Kick, on one or two channels, for a limited time:
+A set of `mix` tasks in `sim/` (`record.api`, `record.v2`, `record.pusher`,
+`record.subscribe`, `record.webhooks`, then `fixtures.anonymize`), run by hand
+against the real Kick, on one or two channels, for a limited time. The
+runbook is `sim/README.md`. They record:
 
 - **Public API:** `/livestreams`, `/channels`, the token endpoint, and error
   responses (401, 404, 429 if seen).
@@ -1104,9 +1106,14 @@ Kick, on one or two channels, for a limited time:
 - **Pusher:** raw frames from a chatroom: connection, subscription, pings,
   chat messages, and raids / hosts / anything else that shows up.
 
-Stored under `fixtures/` in the repo, **anonymized** (user ids, usernames,
-avatars and message text replaced consistently, so the same person stays the
-same fake person across files). Signed webhook fixtures keep their original
+Raw recordings go to `sim/recordings/` (git-ignored); tokens, `Authorization`
+and v2's `playback_url` are redacted before anything is written. They reach
+`fixtures/` only through `mix fixtures.anonymize`: user and channel ids,
+usernames and slugs, avatars and every URL, and free text (chat, titles,
+bios) are replaced consistently, so the same person stays the same fake
+person across files and runs (the mapping stays in `sim/recordings/`). It
+reports every text field it kept without a rule, by path only, for review
+before committing. Signed webhook fixtures keep their original
 body next to the anonymized one, since re-signing is impossible without
 Kick's key; signature tests use the originals, and those files stay out of
 the public repo if it ever becomes public.
