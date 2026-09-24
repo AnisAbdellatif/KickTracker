@@ -7,6 +7,63 @@ the parser tests can be built from real payloads (`project.md` §17).
 The recorder is the **only** code allowed to call the real Kick before
 phase 5 (`AGENTS.md` §6). Keep runs short and on one or two channels.
 
+## The fake Kick
+
+```bash
+mix sim
+```
+
+Serves, on one port, what the real Kick spreads over three hosts: the token
+endpoint, `/public/v1/*` (channels, livestreams, public key, webhook
+subscriptions), `/api/v2/channels/{slug}`, and webhook delivery signed with
+its own key. Point the code under test at it:
+
+```
+KICK_API_URL=http://127.0.0.1:4050
+KICK_ID_URL=http://127.0.0.1:4050
+KICK_V2_URL=http://127.0.0.1:4050/api/v2
+```
+
+Useful options:
+
+```bash
+mix sim --port 4050 --scenario scenarios/busy.exs --webhook-url http://localhost:4040/
+mix sim --from 2026-01-01T00:00:00Z --speed 60    # a simulated hour a minute
+```
+
+What it simulates: channels with a size and a weekly schedule, viewer
+curves that ramp up, plateau and decline, title and category changes
+partway through a stream, follower growth, and chat volume with a pool of
+chatters who come back. **Viewer counts change once a minute**, like Kick's
+own, so polling faster sees repeats, exactly as in the real thing.
+
+Everything is a function of simulated time and the channel's seed, so the
+same moment always gives the same answer: the simulator can be restarted,
+asked about the past, or run fast without keeping any history.
+
+A scenario file is an `.exs` script ending in a keyword list:
+
+```elixir
+[
+  seed: 7,
+  channels: [
+    [slug: "bigstreamer", peak_viewers: 20_000,
+     schedule: %{days: [1, 2, 3, 4, 5], start_hour: 19, duration_min: 300}],
+    [slug: "smallstreamer", peak_viewers: 40, schedule: :always],
+    [slug: "quietstreamer", schedule: :never]
+  ],
+  faults: [drop_webhooks: 0.05, duplicate_webhooks: 0.02]
+]
+```
+
+Without `--scenario` it runs `Sim.Scenarios.default/0`: a big weekday
+channel, a mid-sized daily one, a small weekend one, and one that never
+goes live.
+
+**Not built yet:** the Pusher websocket, channel processes that fire
+webhooks as streams start and end, follows/subs/gifts/Kicks events, the
+control API and CLI, and bulk history.
+
 ## Setup
 
 ```bash
