@@ -5,6 +5,9 @@
 //                 JSON, never LiveView assigns: §13.5)
 //   data-values   inline data instead of data-src (sparklines)
 //   data-opts     labels and which columns to draw (never ECharts options)
+//   data-refresh  seconds: fetch data-src again this often, for a chart
+//                 whose range ends now (a rolling period, a live stream);
+//                 paused while the page is hidden, caught up on return
 //
 // A LiveView appends live points with push_event("chart:append", {id, t, values}).
 // Inside the element's <figure>, buttons with data-chart-action="table" or
@@ -61,15 +64,35 @@ export const Chart = {
       this.resize = new ResizeObserver(() => this.chart && this.chart.resize())
       this.resize.observe(this.el)
       this.fetch()
+      this.schedule()
     })
+
+    this.onVisible = () => {
+      if (!document.hidden && this.refreshMs && Date.now() - (this.fetchedAt || 0) >= this.refreshMs) this.fetch({quiet: true})
+    }
+    document.addEventListener("visibilitychange", this.onVisible)
   },
 
   updated() {
-    // A new data-src (the period changed): fetch again.
+    // A new data-src (the period changed) or new inline values: draw again.
     if (this.el.dataset.src && this.el.dataset.src !== this.src) this.fetch()
+    else if (this.el.dataset.values && this.el.dataset.values !== this.values) this.fetch()
+    // A stream that ended stops refreshing; one that started, starts.
+    if (Number(this.el.dataset.refresh || 0) * 1000 !== (this.refreshMs || 0)) this.schedule()
+  },
+
+  // Fetch again every data-refresh seconds, while the page is visible.
+  schedule() {
+    clearInterval(this.timer)
+    this.refreshMs = Number(this.el.dataset.refresh || 0) * 1000
+    if (this.refreshMs && this.el.dataset.src) {
+      this.timer = setInterval(() => document.hidden || this.fetch({quiet: true}), this.refreshMs)
+    }
   },
 
   destroyed() {
+    clearInterval(this.timer)
+    document.removeEventListener("visibilitychange", this.onVisible)
     this.figure && this.figure.removeEventListener("click", this.onAction)
     this.figure && this.figure.removeEventListener("change", this.onWindow)
     this.themeObserver && this.themeObserver.disconnect()
@@ -77,28 +100,37 @@ export const Chart = {
     this.chart && this.chart.dispose()
   },
 
-  fetch() {
+  // A quiet fetch is a refresh: no loading state, and on failure the chart
+  // keeps what it has (the next refresh tries again).
+  fetch({quiet = false} = {}) {
     if (this.el.dataset.values) {
-      this.data = {values: JSON.parse(this.el.dataset.values)}
+      this.values = this.el.dataset.values
+      this.data = {values: JSON.parse(this.values)}
       return this.render()
     }
-    this.src = this.el.dataset.src
-    this.el.classList.add("chart-loading")
-    fetch(this.src, {headers: {accept: "application/json"}})
+    const src = (this.src = this.el.dataset.src)
+    if (!quiet) this.el.classList.add("chart-loading")
+    fetch(src, {headers: {accept: "application/json"}})
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((data) => {
+        // The period changed while this was on its way: a newer fetch draws.
+        if (src !== this.src) return
+        this.fetchedAt = Date.now()
+        const chatters = this.data && this.data.chatters
         this.data = data
-        this.el.classList.remove("chart-loading")
+        if (chatters) this.data.chatters = chatters
+        this.el.classList.remove("chart-loading", "chart-error")
         this.render()
-        if (this.el.dataset.chattersSrc) this.loadChatters(this.opts.window || 5)
+        if (this.el.dataset.chattersSrc) this.loadChatters(this.chattersWindow || this.opts.window || 5)
       })
       .catch(() => {
         this.el.classList.remove("chart-loading")
-        this.el.classList.add("chart-error")
+        if (!quiet) this.el.classList.add("chart-error")
       })
   },
 
   loadChatters(window) {
+    this.chattersWindow = window
     const url = new URL(this.el.dataset.chattersSrc, location.href)
     url.searchParams.set("window", window)
     fetch(url).then((r) => r.json()).then((c) => {

@@ -74,6 +74,14 @@ defmodule KickTrackerWeb.Period do
 
   defp time(_), do: :error
 
+  @doc """
+  How often a chart of this period fetches its data again, in seconds: a
+  preset period ends now and moves; a custom range is fixed.
+  """
+  @spec refresh(t()) :: pos_integer() | nil
+  def refresh(%__MODULE__{key: "custom"}), do: nil
+  def refresh(%__MODULE__{}), do: 60
+
   @doc "The query params that reproduce a period."
   @spec to_params(t()) :: map()
   def to_params(%__MODULE__{key: "custom"} = p),

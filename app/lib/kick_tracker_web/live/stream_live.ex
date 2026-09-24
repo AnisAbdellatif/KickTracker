@@ -157,6 +157,7 @@ defmodule KickTrackerWeb.StreamLive do
           <.chart
             id="stream-chart"
             kind="stream"
+            refresh={if(is_nil(@stream.ended_at), do: 60)}
             src={"/data/v1/streams/#{@stream.id}"}
             chatters_src={"/data/v1/streams/#{@stream.id}/chatters"}
             opts={%{window: 5, labels: labels()}}

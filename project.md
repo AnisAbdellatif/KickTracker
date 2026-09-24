@@ -1227,6 +1227,12 @@ needed after that.
   readings are pushed to the chart hook with `push_event` (append a point),
   at most every 60s. Chart data is **never kept in LiveView assigns**, so a
   connected visitor costs a few KB, not a copy of the series.
+- **Charts left open keep up:** a chart whose range ends now (a preset
+  period, a live stream) fetches its `/data/v1` URL again every 60s
+  (`data-refresh`), while the page is visible, keeping the reader's zoom;
+  a custom range or an ended stream doesn't move and isn't fetched again.
+  The home page's sparklines are recomputed with each minute's broadcast
+  (cached a minute for everyone).
 - **Home page:** one aggregated `"live"` broadcast every 60s with all live
   channels' current viewers, not one per channel.
 - **Query cache** (`KickTracker.Cache`, ETS) in the `web` role for expensive aggregates
