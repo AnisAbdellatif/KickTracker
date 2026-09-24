@@ -42,6 +42,34 @@ defmodule KickTrackerWeb.Admin.AdminPagesTest do
     assert html =~ "must be a number"
   end
 
+  test "settings are saved all or none, and ranges are checked", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/admin/settings")
+    before = Audit.recent()
+
+    # A good price with a share above 1: neither is stored, nothing audited.
+    html =
+      view
+      |> form("#settings-form", settings: %{"sub_price_usd" => "9.99", "sub_share" => "1.5"})
+      |> render_submit()
+
+    assert html =~ "must be between 0 and 1"
+    assert Settings.get("sub_price_usd") == 4.99
+    assert Settings.get("sub_share") == 0.95
+    assert Audit.recent() == before
+
+    assert {:error, "kick_value_usd", _} =
+             Settings.put_all(%{"sub_share" => "0.5", "kick_value_usd" => "-1"}, nil)
+
+    assert {:error, "sub_price_usd", "must be a number"} =
+             Settings.put_all(%{"sub_price_usd" => %{"x" => "1"}}, nil)
+
+    assert {:error, "must be between 0 and 1000"} = Settings.put("sub_price_usd", "5000")
+    assert Settings.get("sub_share") == 0.95
+
+    assert {:ok, %{"sub_share" => 1.0}} = Settings.put_all(%{"sub_share" => "1"}, nil)
+    assert [%{action: "settings.update", details: %{"sub_share" => 1.0}} | _] = Audit.recent()
+  end
+
   test "groups are created, filled and made public", %{conn: conn} do
     c = channel!(slug: "somestreamer")
     {:ok, view, _} = live(conn, ~p"/admin/groups")
@@ -93,8 +121,21 @@ defmodule KickTrackerWeb.Admin.AdminPagesTest do
     ])
 
     {:ok, view, _} = live(conn, ~p"/admin/privacy")
+    view |> form("#find-user", %{q: "nobody_here"}) |> render_submit()
     html = view |> form("#find-user", %{q: "Someone"}) |> render_submit()
     assert html =~ "777"
+
+    # The search is audited without what was searched for, found or not.
+    assert [
+             %{
+               action: "privacy.find",
+               target: nil,
+               details: %{"by" => "username", "found" => true}
+             },
+             %{action: "privacy.find", target: nil, details: %{"found" => false}}
+           ] = Audit.recent(2)
+
+    refute inspect(Audit.recent()) =~ ~r/someone|nobody_here/i
 
     view |> form("#delete-user", %{confirm: "778"}) |> render_submit()
     refute_enqueued(worker: KickTracker.Workers.Privacy)
@@ -119,12 +160,37 @@ defmodule KickTrackerWeb.Admin.AdminPagesTest do
 
     {:ok, view, html} = live(conn, ~p"/admin/dead-letters")
     assert html =~ "dead-1"
-    view |> element("#dl-dead-1 button[phx-click=ask_discard]") |> render_click()
-    view |> form("#discard-dead-1", %{message_id: "dead-1", reason: "garbage"}) |> render_submit()
+    key = KickTracker.DeadLetters.key("dead-1", "{}")
+    view |> element("#dl-#{key} button[phx-click=ask_discard]") |> render_click()
+    view |> form("#discard-#{key}", %{reason: "garbage"}) |> render_submit()
 
-    assert [%{action: "dead_letter.discard", details: %{"reason" => "garbage"}} | _] =
-             Audit.recent()
+    assert [
+             %{
+               action: "dead_letter.discard",
+               target: "dead-1",
+               details: %{"reason" => "garbage", "key" => ^key}
+             }
+             | _
+           ] = Audit.recent()
 
+    assert TestBroker.depth("kick_tracker.events.dead") == 0
+  end
+
+  test "a dead letter without a message id can be replayed", %{conn: conn} do
+    TestBroker.purge()
+    on_exit(&TestBroker.purge/0)
+    {:ok, amqp} = AMQP.Connection.open(TestBroker.admin_url())
+    {:ok, chan} = AMQP.Channel.open(amqp)
+    AMQP.Basic.publish(chan, "kick.events.dlx", "channel.followed", "no id here")
+    AMQP.Connection.close(amqp)
+    Process.sleep(100)
+
+    {:ok, view, html} = live(conn, ~p"/admin/dead-letters")
+    assert html =~ "no message id"
+    key = KickTracker.DeadLetters.key(nil, "no id here")
+    view |> element("#dl-#{key} button[phx-click=replay]") |> render_click()
+
+    assert [%{action: "dead_letter.replay", target: ^key} | _] = Audit.recent()
     assert TestBroker.depth("kick_tracker.events.dead") == 0
   end
 
