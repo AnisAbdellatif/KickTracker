@@ -46,7 +46,8 @@ On a fresh VPS with Docker, `sops` and `age`:
 6. Start everything: `docker compose -f compose.single.yml up -d`.
 7. Take the first base backup (`./backup/base-backup.sh`) and install the
    cron lines from `backup/base-backup.sh`, `backup/restore-test.sh` and
-   `ops/check-host.sh`.
+   `ops/check-host.sh` in the deploy user's crontab (`crontab -e`: the
+   decrypted secrets are readable by that user only).
 8. Invite the first admin and open the link from an allowed network:
 
        docker compose -f compose.single.yml exec web-a /app/bin/invite you@example.org
@@ -183,9 +184,17 @@ data only matters until the main side has filled its gaps.
 - `backup/base-backup.sh`, daily: a full base backup and pruning (keeps 7).
 - `backup/restore-test.sh`, weekly: restores the latest backup into a
   scratch container, replays the WAL, checks row counts against the live
-  database and that recent streams' figures agree with their samples.
-  A failure is sent to `ALERT_WEBHOOK_URL`; success pings
-  `RESTORE_HEARTBEAT_URL`.
+  database (the stack's `db`, through `docker compose exec`, when it runs
+  on the same host; or `LIVE_DATABASE_URL`) and that recent streams'
+  figures agree with their samples.
+- Both run from the deploy user's crontab (the cron lines are at the top
+  of each script) and need nothing from cron's environment: they read
+  `secrets/db.env` (WAL-G's storage, `POSTGRES_USER`/`POSTGRES_DB`,
+  `BACKUP_HEARTBEAT_URL`, `RESTORE_HEARTBEAT_URL`) and the alert settings
+  of `secrets/collector.env` (or `app.env`). Any failure, expected or not,
+  is sent to `ALERT_WEBHOOK_URL` and/or Telegram; each success pings its
+  heartbeat URL, so a job that stops running is noticed too.
+  `ops/check-host.sh` reads its settings the same way.
 - Also keep: `deploy/` (in git), the RabbitMQ definitions (regenerated from
   secrets), and the age private keys (offline). Receiver spools are
   short-lived and not backed up.
