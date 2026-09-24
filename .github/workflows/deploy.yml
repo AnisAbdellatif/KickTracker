@@ -1,4 +1,6 @@
-# Deploy one role at a time (project.md §19.1, §15.3), by hand: runs
+# Deploy by hand (project.md §19.1, §15.3); every merge to main is deployed
+# on its own by CI, so this is for rollbacks (a tag) and single roles.
+# `all` runs deploy/release.sh; a role runs
 # deploy/deploy.sh on the server, which migrates first, then updates the
 # chosen pair one at a time (web, collectors standby first, receivers), so
 # the site, collection and webhook intake never stop.
@@ -17,7 +19,7 @@ on:
         description: What to deploy
         required: true
         type: choice
-        options: [web, collector, receivers, migrate-only, shadow]
+        options: [all, web, collector, receivers, migrate-only, shadow]
       tag:
         description: Image tag (empty for the latest main; a commit sha from main to roll back)
         required: false
@@ -47,4 +49,6 @@ jobs:
           # The tag is typed by hand: only a sha or a plain tag goes into the
           # command. Empty: deploy.sh takes the build of the commit it pulls.
           [[ -z "$TAG" || "$TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad tag: $TAG" >&2; exit 1; }
-          ssh "$TARGET" "cd /srv/kick_tracker && git pull --ff-only && ROLE=$ROLE TAG=$TAG IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,} deploy/deploy.sh"
+          script=deploy/deploy.sh
+          [ "$ROLE" = all ] && script=deploy/release.sh
+          ssh "$TARGET" "cd /srv/kick_tracker && git pull --ff-only && ROLE=$ROLE TAG=$TAG IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,} $script"

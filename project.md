@@ -1446,8 +1446,10 @@ change to the app beyond producer config.
 - Redeploy the web nodes one at a time too: Caddy health-checks both
   every 2s, keeps a visitor on one (by address) and retries a request on
   the other when one is being replaced.
-- Every deploy runs `deploy/deploy.sh` (the Deploy workflow over SSH, or
-  by hand), and the whole path is rehearsed on a development machine
+- Every merge to `main` is deployed by CI once its checks pass and its
+  images are built (`deploy/release.sh` over SSH: every role in turn, with
+  `deploy/deploy.sh`); the Deploy workflow is for rollbacks and single
+  roles. The whole path is rehearsed on a development machine
   with `deploy/rehearsal/rehearse.sh` (the production stack under load,
   upgraded step by step, with what each step costs measured).
 - Redeploy collectors the standby first, waiting for it to be healthy, then
