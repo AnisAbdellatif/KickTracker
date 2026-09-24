@@ -16,7 +16,7 @@ defmodule KickTrackerWeb.Admin.AdminsLive do
   defp load(socket), do: assign(socket, admins: Admins.list(), invites: Admins.list_invites())
 
   @impl true
-  def handle_event("invite", %{"invite" => %{"email" => email}}, socket) do
+  def handle_event("invite", %{"invite" => %{"email" => email}}, socket) when is_binary(email) do
     admin = socket.assigns.current_admin
 
     case Admins.invite(admin, email) do
@@ -25,13 +25,18 @@ defmodule KickTrackerWeb.Admin.AdminsLive do
 
         {:noreply,
          socket
-         |> assign(link: url(~p"/admin/invite/#{token}"), form: to_form(%{}, as: "invite"))
+         |> assign(
+           link: url(~p"/admin/invite?#{[token: token]}"),
+           form: to_form(%{}, as: "invite")
+         )
          |> load()}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset, as: "invite"))}
     end
   end
+
+  def handle_event("invite", _params, socket), do: {:noreply, socket}
 
   def handle_event("revoke", %{"id" => id}, socket) do
     Admins.revoke_invite(String.to_integer(id))

@@ -10,8 +10,8 @@ defmodule KickTrackerWeb.Admin.InviteLive do
   alias KickTracker.Admins.TOTP
 
   @impl true
-  def mount(%{"token" => token}, _session, socket) do
-    invite = Admins.get_invite(token)
+  def mount(params, _session, socket) do
+    invite = Admins.get_invite(params["token"])
 
     # The secret is made once, on the connected mount, so the one shown is
     # the one kept.
@@ -24,9 +24,20 @@ defmodule KickTrackerWeb.Admin.InviteLive do
   end
 
   @impl true
-  def handle_event("save", %{"admin" => params}, socket) do
-    %{invite: invite, secret: secret} = socket.assigns
+  def handle_event("save", %{"admin" => %{} = params}, socket) do
+    case socket.assigns do
+      # Only the connected page has a secret; nothing to accept without one.
+      %{invite: %{} = invite, secret: secret} when is_binary(secret) ->
+        accept(socket, invite, secret, params)
 
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("save", _params, socket), do: {:noreply, socket}
+
+  defp accept(socket, invite, secret, params) do
     case Admins.accept_invite(invite, secret, params) do
       {:ok, admin} ->
         Audit.log(admin, "admin.accept_invite", admin.email)

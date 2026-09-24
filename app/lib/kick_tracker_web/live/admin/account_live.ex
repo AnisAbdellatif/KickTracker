@@ -11,10 +11,10 @@ defmodule KickTrackerWeb.Admin.AccountLive do
   end
 
   @impl true
-  def handle_event("save", %{"password" => params}, socket) do
+  def handle_event("save", %{"password" => %{} = params}, socket) do
     admin = socket.assigns.current_admin
 
-    case Admins.change_password(admin, params["current_password"] || "", params) do
+    case Admins.change_password(admin, params["current_password"], params) do
       {:ok, _admin} ->
         Audit.log(admin, "admin.change_password", admin.email)
 
@@ -27,6 +27,8 @@ defmodule KickTrackerWeb.Admin.AccountLive do
         {:noreply, assign(socket, form: to_form(changeset, as: "password"))}
     end
   end
+
+  def handle_event("save", _params, socket), do: {:noreply, socket}
 
   @impl true
   def render(assigns) do

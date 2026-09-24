@@ -45,6 +45,10 @@ defmodule KickTrackerWeb.ConnCase do
   @doc "Logs an admin in on a test conn."
   def log_in_admin(conn, admin) do
     token = KickTracker.Admins.create_session_token(admin)
-    Plug.Test.init_test_session(conn, admin_token: token)
+
+    Plug.Test.init_test_session(conn,
+      admin_token: token,
+      live_socket_id: KickTracker.Admins.live_socket_id(token)
+    )
   end
 end
