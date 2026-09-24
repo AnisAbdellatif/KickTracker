@@ -47,7 +47,7 @@ defmodule Mix.Tasks.KickTracker.Bulk do
     totals =
       KickTracker.Bulk.run(scenario, from, to,
         chat: Keyword.get(opts, :chat, true),
-        log: &Mix.shell().info/1
+        log: fn line -> Mix.shell().info(line) end
       )
 
     Mix.shell().info(
