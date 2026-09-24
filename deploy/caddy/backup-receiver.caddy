@@ -1,0 +1,29 @@
+# The stage 2 backup receiver's Caddy (compose.backup-receiver.yml,
+# project.md §15.2). INGRESS_HOST comes from secrets/stack.env.
+#
+# The ingress host is proxied by Cloudflare, whose load balancer sends it to
+# the main VPS while that is healthy: an ACME HTTP-01 or TLS-ALPN challenge
+# for it never reaches this machine, so no public certificate can be
+# obtained here. A Cloudflare Origin CA certificate for the host (trusted by
+# Cloudflare only, which is the only client here; SSL mode "Full (strict)")
+# is used instead: deploy/README.md, "The backup receiver".
+{
+	# No ACME here, and no HTTP listener to redirect from.
+	auto_https disable_redirects
+}
+
+{$INGRESS_HOST} {
+	tls /etc/caddy/origin-cert.pem /etc/caddy/origin-key.pem
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	reverse_proxy receiver:4060 {
+		health_uri /health
+		health_interval 3s
+		health_timeout 2s
+	}
+}

@@ -82,7 +82,14 @@ services:
     image: rabbitmq:4-management
     restart: unless-stopped
     hostname: rabbitmq
-    ports: ["127.0.0.1:15672:15672"] # management UI: over SSH tunnel only
+    ports:
+      - "127.0.0.1:15672:15672" # management UI: over SSH tunnel only
+      # AMQP for the stage 2 backup receiver (compose.backup-receiver.yml):
+      # on the private network's address only (loopback until one is set),
+      # never a public one. It carries the receiver user's password in
+      # plain AMQP, so only over WireGuard/Tailscale (README.md, "The
+      # backup receiver").
+      - "${PRIVATE_IP:-127.0.0.1}:5672:5672"
     volumes:
       - rabbitmq:/var/lib/rabbitmq
       # Generated from secrets by rabbitmq/make-prod-definitions.sh, never committed.

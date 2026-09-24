@@ -1421,9 +1421,12 @@ app deploys never touch webhook intake.
 
 **Stage 2: backup receiver on a second VPS.**
 Same receiver image on another provider or region, with its own spool,
-publishing to RabbitMQ over a private network (WireGuard or Tailscale). The
+publishing to RabbitMQ over a private network (WireGuard or Tailscale; the
+main VPS publishes AMQP on its private address only). The
 webhook hostname is routed by **Cloudflare Load Balancing** (health-checked
-failover between the two machines). Covers the main VPS or Caddy going down:
+failover between the two machines); the backup machine serves it with a
+Cloudflare Origin CA certificate, since an ACME challenge for a host routed
+to the main VPS never reaches it. Covers the main VPS or Caddy going down:
 events are received and spooled on the backup until RabbitMQ is back. The
 same machine runs the **shadow collector** (§10.5), so polls and chat are
 collected through the outage too and backfilled after it.
