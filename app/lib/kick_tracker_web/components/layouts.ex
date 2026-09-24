@@ -33,7 +33,22 @@ defmodule KickTrackerWeb.Layouts do
         <.link navigate={~p"/"} class="text-base font-semibold tracking-tight">{site_name()}</.link>
         <div class="flex flex-1 items-center gap-3 text-sm">
           <.link navigate={~p"/"} class="opacity-80 hover:opacity-100">{gettext("Live")}</.link>
+          <.link navigate={~p"/compare"} class="opacity-80 hover:opacity-100">
+            {gettext("Compare")}
+          </.link>
+          <.link navigate={~p"/about/methodology"} class="opacity-80 hover:opacity-100">
+            {gettext("Methodology")}
+          </.link>
         </div>
+        <form action={~p"/search"} method="get" class="hidden sm:block" role="search">
+          <input
+            type="search"
+            name="q"
+            placeholder={gettext("Find a channel")}
+            class="input input-sm w-44"
+            aria-label={gettext("Find a channel")}
+          />
+        </form>
         <.theme_toggle />
       </nav>
     </header>
@@ -43,6 +58,9 @@ defmodule KickTrackerWeb.Layouts do
     <footer class="mx-auto max-w-7xl px-4 pb-8 pt-4 text-xs opacity-60 sm:px-6">
       <div class="flex flex-wrap gap-x-4 gap-y-1">
         <span>{gettext("Not affiliated with Kick.")}</span>
+        <.link navigate={~p"/about/methodology"}>{gettext("Methodology")}</.link>
+        <.link navigate={~p"/about/privacy"}>{gettext("Privacy")}</.link>
+        <.link navigate={~p"/about/removal"}>{gettext("Removal requests")}</.link>
       </div>
     </footer>
     <.flash_group flash={@flash} />

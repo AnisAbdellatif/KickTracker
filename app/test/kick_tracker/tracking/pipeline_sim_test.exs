@@ -27,6 +27,15 @@ defmodule KickTracker.Tracking.PipelineSimTest do
     %{live: live, off: off}
   end
 
+  test "each poll sends one aggregated live broadcast with the live channels' viewers",
+       %{live: live, off: off} do
+    Phoenix.PubSub.subscribe(KickTracker.PubSub, KickTracker.Tracking.Poller.live_topic())
+    poll()
+    assert_receive {:live, %{viewers: viewers}}
+    assert is_integer(viewers[live.id])
+    refute Map.has_key?(viewers, off.id)
+  end
+
   test "an unknown slug can't be added", _ do
     assert Channels.add("nosuchstreamer") == {:error, :not_found}
   end

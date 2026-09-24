@@ -1,0 +1,17 @@
+<Layouts.app flash={@flash} wide={false}>
+  <article class="space-y-4 text-sm leading-relaxed">
+    <h1 class="text-2xl font-semibold">{gettext("Removal requests")}</h1>
+    <p>
+      {gettext(
+        "If you stream on Kick and don't want your channel here, write to %{contact} from an address we can connect to the channel (or send the request from the channel itself, for instance in its bio or a chat message we can see). We stop tracking it and remove its pages.",
+        contact: contact()
+      )}
+    </p>
+    <p>
+      {gettext("If you're in a channel's audience and want your data removed, see")} <.link
+        navigate={~p"/about/privacy"}
+        class="link"
+      >{gettext("privacy")}</.link>.
+    </p>
+  </article>
+</Layouts.app>

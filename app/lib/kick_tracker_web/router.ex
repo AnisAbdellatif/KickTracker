@@ -18,10 +18,37 @@ defmodule KickTrackerWeb.Router do
     plug :accepts, ["json"]
   end
 
+  ## Public site (project.md §13.2)
+
   scope "/", KickTrackerWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    get "/about/methodology", AboutController, :methodology
+    get "/about/privacy", AboutController, :privacy
+    get "/about/removal", AboutController, :removal
+    get "/search", AboutController, :search
+
+    live_session :public do
+      live "/", HomeLive
+      live "/compare", CompareLive
+      live "/category/:slug", CategoryLive
+      live "/c/:slug", ChannelLive, :overview
+      live "/c/:slug/streams", ChannelLive, :streams
+      live "/c/:slug/chat", ChannelLive, :chat
+      live "/c/:slug/support", ChannelLive, :support
+      live "/c/:slug/categories", ChannelLive, :categories
+      live "/c/:slug/streams/:id", StreamLive
+    end
+  end
+
+  # History as cacheable JSON (§13.5), versioned from the start.
+  scope "/data/v1", KickTrackerWeb.Data do
+    pipe_through :api
+
+    get "/channels/:slug/:series", ChannelController, :show
+    get "/streams/:id", StreamController, :show
+    get "/streams/:id/chatters", StreamController, :chatters
+    get "/compare", CompareController, :show
   end
 
   ## Admin (project.md §13.8)

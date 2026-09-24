@@ -77,6 +77,9 @@ config :kick_tracker, :amqp_url, setting.("AMQP_URL")
 
 # The public name (never Kick's, project.md §18.3).
 config :kick_tracker, :site_name, System.get_env("SITE_NAME", "Stream Tracker")
+
+# Where privacy and removal requests go (project.md §18.3).
+config :kick_tracker, :contact_email, System.get_env("CONTACT_EMAIL")
 config :kick_tracker, :amqp_queue, System.get_env("AMQP_QUEUE", "kick_tracker.events")
 
 # RabbitMQ's management API, for queue depths on the health page: a

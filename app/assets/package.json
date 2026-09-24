@@ -1,0 +1,8 @@
+{
+  "name": "kick_tracker_assets",
+  "private": true,
+  "description": "Front-end dependencies of the site; esbuild bundles them (see config/config.exs).",
+  "dependencies": {
+    "echarts": "^6.0.0"
+  }
+}

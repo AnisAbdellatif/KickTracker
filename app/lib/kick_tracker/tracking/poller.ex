@@ -73,28 +73,52 @@ defmodule KickTracker.Tracking.Poller do
   end
 
   defp poll_livestreams(channels) do
-    for batch <- Enum.chunk_every(channels, @batch) do
-      ids = Enum.map(batch, & &1.kick_user_id)
-      result = API.livestreams(ids)
-      at = now()
-
-      case result do
-        {:ok, live} when is_list(live) ->
-          by_user = Map.new(live, &{&1["broadcaster_user_id"], &1})
-
-          for channel <- batch, pid = ChannelServer.whereis(channel.kick_user_id) do
-            send(pid, {:reading, Map.get(by_user, channel.kick_user_id, :offline), at})
-          end
-
-          Coverage.mark(Enum.map(batch, & &1.id), "api", true, at, @coverage_gap_s)
-
-        other ->
-          Logger.warning("livestreams poll failed: #{inspect(other)}")
-          Coverage.mark(Enum.map(batch, & &1.id), "api", false, at, @coverage_gap_s)
+    live =
+      for batch <- Enum.chunk_every(channels, @batch) do
+        poll_batch(batch)
       end
-    end
+
+    # One aggregated message for the home page (project.md §13.5), not one
+    # per channel: every channel seen live in this poll and its viewers.
+    # A batch that failed contributes nothing (unknown, not offline).
+    Phoenix.PubSub.broadcast(
+      KickTracker.PubSub,
+      live_topic(),
+      {:live, %{at: now(), viewers: live |> List.flatten() |> Map.new()}}
+    )
 
     :ok
+  end
+
+  @doc "The PubSub topic of the aggregated live broadcast."
+  def live_topic, do: "live"
+
+  defp poll_batch(batch) do
+    ids = Enum.map(batch, & &1.kick_user_id)
+    result = API.livestreams(ids)
+    at = now()
+
+    case result do
+      {:ok, live} when is_list(live) ->
+        by_user = Map.new(live, &{&1["broadcaster_user_id"], &1})
+
+        for channel <- batch, pid = ChannelServer.whereis(channel.kick_user_id) do
+          send(pid, {:reading, Map.get(by_user, channel.kick_user_id, :offline), at})
+        end
+
+        Coverage.mark(Enum.map(batch, & &1.id), "api", true, at, @coverage_gap_s)
+
+        for channel <- batch,
+            %{"viewer_count" => viewers} when is_integer(viewers) <- [
+              by_user[channel.kick_user_id]
+            ],
+            do: {channel.id, viewers}
+
+      other ->
+        Logger.warning("livestreams poll failed: #{inspect(other)}")
+        Coverage.mark(Enum.map(batch, & &1.id), "api", false, at, @coverage_gap_s)
+        []
+    end
   end
 
   defp poll_channels(channels) do

@@ -103,9 +103,21 @@ Keeps per-visitor memory tiny (no chart data in assigns) and lets Caddy/Cloudfla
 
 ## Charts
 
-**Current:** Apache ECharts, one LiveView hook, a fixed set of chart kinds in JS; the server sends data and a kind, never options. (updated 2026-09-24 04:04)
+**Current:** Apache ECharts 6, installed from npm into `app/assets` (package.json), imported modularly (only line, bar, pie and heatmap and the components used) and loaded by dynamic `import()` from the one `Chart` hook, so esbuild splits it into its own chunk (esbuild now runs with `--splitting --format=esm`, and `app.js` is a module script). Chart kinds: `timeseries`, `stream`, `bars`, `share`, `heatmap`, `sparkline`; the server sends data, a kind and labels/columns, never options. Table view and CSV export in the hook, from the same JSON. Colorblind-safe Okabe–Ito palette. (updated 2026-09-24 07:00)
 
-Needs shaded bands (category segments, no-data), event markers (raids, gifts), linked zoom across panels, heatmaps and dense series in one library. Chart.js (earlier pick) needs plugins for most of that; uPlot is faster but too narrow.
+Needs shaded bands (category segments, no-data), event markers (raids, gifts), linked zoom across panels, heatmaps and dense series in one library. Chart.js (earlier pick) needs plugins for most of that; uPlot is faster but too narrow. The full ECharts bundle was 2.8 MB unminified; modular imports bring the chart chunk to about 670 KB minified, loaded only on pages with charts. `stream` was added to the planned kinds: the stream page's three stacked panels sharing one zoom are one ECharts instance, which a generic `timeseries` couldn't express without sending options.
+
+## Public Site Data
+
+**Current:** Charts read `/data/v1` JSON (columns: `t` in unix seconds plus one array per value; `gaps` from coverage), with an ETag and `Cache-Control` of a day for ranges ended more than two days ago and 30s otherwise. The resolution is picked by the pure `Series.Resolution` from the span (raw ≤ 12h, 5 min ≤ 7d, hourly ≤ 90d, daily beyond, in the channel's timezone); `res` may only ask for fewer points. Hourly and daily series read `hourly_stats`. Chat counts are 0 only where chat coverage says we were listening; empty viewer buckets are null. Expensive aggregates go through `KickTracker.Cache` (ETS, TTL 60s for periods reaching into the last two days, an hour otherwise). New vs returning chatters per stream is computed by the rollup into `stream_stats.new_chatters`. (updated 2026-09-24 07:00)
+
+Cachex was planned for the query cache; a 60-line ETS table with a TTL and a sweep covers what we need without a new dependency. Computing new chatters at read time took 2.7 s for a big channel's month (it had to find every chatter's first stream) and timed out a test; per stream in the rollup it is about 0.2 s once. Daily buckets exceed 2 000 points after about five and a half years; weekly buckets are left for then. Pages reproduce from their URL: `period=24h|7d|30d|90d|1y|all` or `from`/`to`.
+
+## Stream Corrections
+
+**Current:** `stream_overrides` (exclude, merge, split; revocable, never deleted) layered over the raw streams; `excluded_streams` is a view of active exclusions that every public figure filters on (KPIs, records, categories, notable moments), and excluded streams stay listed, marked. (updated 2026-09-24 07:00)
+
+Raw facts are append-only (AGENTS.md §7), so a correction can only be a row on top. A view keeps the filter in one place for SQL. Hourly rollups leave out an excluded stream's viewer samples, so channel totals and leaderboards agree with the stream list; follows, chat and support during it still count toward the channel (they happened), and changing an override rebuilds the rollups of the stream's hours.
 
 ## Admin
 

@@ -1,0 +1,20 @@
+<Layouts.app flash={@flash} wide={false}>
+  <h1 class="text-2xl font-semibold">{gettext("Find a channel")}</h1>
+  <form action={~p"/search"} method="get" class="mt-3 flex gap-2" role="search">
+    <input
+      type="search"
+      name="q"
+      value={@q}
+      class="input input-sm w-64"
+      aria-label={gettext("Channel")}
+      autofocus
+    />
+    <button class="btn btn-sm">{gettext("Search")}</button>
+  </form>
+  <ul id="results" class="mt-4 space-y-1">
+    <li :for={c <- @results}><.link navigate={~p"/c/#{c.slug}"} class="link">{c.slug}</.link></li>
+  </ul>
+  <p :if={@q != "" and @results == []} class="mt-4 text-sm opacity-60">
+    {gettext("No tracked channel matches.")}
+  </p>
+</Layouts.app>

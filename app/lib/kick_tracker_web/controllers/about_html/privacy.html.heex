@@ -1,0 +1,53 @@
+<Layouts.app flash={@flash} wide={false}>
+  <article class="space-y-4 text-sm leading-relaxed">
+    <h1 class="text-2xl font-semibold">{gettext("Privacy")}</h1>
+    <p class="opacity-70">
+      {gettext("Draft: to be reviewed before this site collects real data.")}
+    </p>
+
+    <h2 class="text-lg font-semibold">{gettext("What we store")}</h2>
+    <ul class="list-disc ps-5 space-y-1">
+      <li>
+        {gettext(
+          "About tracked channels: public statistics (viewers, streams, titles, categories, follower totals, subscriptions, gifted subscriptions, Kicks, raids)."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "About people in a channel's audience: their public Kick user id and username, and when they chatted, followed, subscribed, gifted or sent Kicks. Never the text of a chat message."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "Who chatted in which minute is deleted after 90 days. Per-stream counts are kept."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "About visitors to this site: no accounts, no tracking cookies, no analytics. Server logs hold IP addresses briefly for security."
+        )}
+      </li>
+    </ul>
+
+    <h2 class="text-lg font-semibold">{gettext("Why")}</h2>
+    <p>
+      {gettext(
+        "Our legal basis is legitimate interest: publishing statistics about public live streams, built only from public information, with the least personal data that makes them possible."
+      )}
+    </p>
+
+    <h2 class="text-lg font-semibold">{gettext("Your rights")}</h2>
+    <p>
+      {gettext(
+        "You can ask what we hold about your Kick account, and ask us to delete it: your username, the per-person rows, and the raw event records naming you. Aggregate counts that no longer identify you stay. Write to %{contact} with your Kick username.",
+        contact: contact()
+      )}
+    </p>
+    <p>
+      {gettext("Streamers can ask for their channel to be removed:")} <.link
+        navigate={~p"/about/removal"}
+        class="link"
+      >{gettext("removal requests")}</.link>.
+    </p>
+  </article>
+</Layouts.app>

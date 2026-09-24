@@ -73,7 +73,7 @@ defmodule KickTracker.Rollups do
   end
 
   defp counts(channel_id, stream_id, from, until) do
-    %{rows: [[follows, subs, resubs, gifted, kicks, chatters, messages]]} =
+    %{rows: [[follows, subs, resubs, gifted, kicks, chatters, messages, new_chatters]]} =
       Repo.query!(
         """
         SELECT
@@ -88,7 +88,11 @@ defmodule KickTracker.Rollups do
           (SELECT coalesce(sum(quantity), 0) FROM support_events
             WHERE channel_id = $1 AND kind = 'kicks' AND occurred_at >= $3 AND occurred_at <= $4),
           (SELECT count(*) FROM chat_stream_users WHERE stream_id = $2),
-          (SELECT coalesce(sum(messages), 0) FROM chat_stream_users WHERE stream_id = $2)
+          (SELECT coalesce(sum(messages), 0) FROM chat_stream_users WHERE stream_id = $2),
+          -- chatters with no earlier stream of this channel
+          (SELECT count(*) FROM chat_stream_users u WHERE u.stream_id = $2 AND NOT EXISTS (
+             SELECT 1 FROM chat_stream_users u2 JOIN streams s2 ON s2.id = u2.stream_id
+             WHERE u2.user_id = u.user_id AND s2.channel_id = $1 AND s2.started_at < $3))
         """,
         [channel_id, stream_id, from, until]
       )
@@ -100,6 +104,7 @@ defmodule KickTracker.Rollups do
       gifted_subs: to_int(gifted),
       kicks: to_int(kicks),
       unique_chatters: chatters,
+      new_chatters: new_chatters,
       messages: to_int(messages)
     }
   end
@@ -150,6 +155,8 @@ defmodule KickTracker.Rollups do
           -- previous one
           WHERE v.observed_at >= $1::timestamptz - make_interval(secs => $3::int)
             AND v.observed_at < $2
+            -- an excluded stream (a correction) counts in no viewer figure
+            AND v.stream_id NOT IN (SELECT stream_id FROM excluded_streams)
         ),
         parts AS (
           SELECT channel_id, date_trunc('hour', observed_at, 'UTC') AS hour,

@@ -581,7 +581,7 @@ another queue with its own Broadway producer.
 | Charts | **Apache ECharts** through one LiveView hook, loaded only where needed | Bands, markers, linked zoom, heatmaps, sampling in one library (§13.7). |
 | Styling | **Tailwind** (Phoenix default), logical properties, dark + light themes | RTL-ready, one set of tokens for UI and charts. |
 | Admin auth | Session tokens on phx.gen.auth's model, PBKDF2 (OTP `:crypto`) + TOTP (RFC 6238), no public sign-up | Admins invite admins. |
-| Caching | **Cachex** in `web`; HTTP caching of `/data/v1` JSON at Caddy / Cloudflare | History never changes; serve it once. |
+| Caching | A small ETS cache (`KickTracker.Cache`) in `web`; HTTP caching of `/data/v1` JSON (ETag, `Cache-Control`) at Caddy / Cloudflare | History never changes; serve it once. |
 | i18n | **Gettext**, English first | Translation-ready (Arabic, French later). |
 | Observability | **Telemetry + Phoenix LiveDashboard**, **Oban Web**, RabbitMQ management UI, admin health page | Process counts, memory, per-channel health, queue depth, job failures. |
 | Hosting | **Docker Compose** on a VPS + **Caddy** for HTTPS | Each role and the receiver are separate services. |
@@ -618,7 +618,7 @@ web
 KickTrackerWeb.Supervisor
 ├─ KickTracker.Repo
 ├─ Phoenix.PubSub                  (+ libcluster)
-├─ Cachex                          query cache for aggregates
+├─ KickTracker.Cache               query cache for aggregates (ETS, TTL)
 └─ KickTrackerWeb.Endpoint         public site, /admin, /data/v1; read-only against
                                    collected data, writes admin tables (§13.8)
 ```
@@ -748,8 +748,8 @@ kick_tracker/
 │  │     └─ admin_auth.ex               # admin sessions, on_mount
 │  ├─ assets/js/
 │  │  ├─ hooks/chart.js                 # the one ECharts hook
-│  │  └─ charts/                        # chart kinds: timeseries, bars, share,
-│  │                                    #   heatmap, sparkline; theme tokens
+│  │  └─ charts/                        # chart kinds: timeseries, stream, bars,
+│  │                                    #   share, heatmap, sparkline; theme tokens
 │  ├─ priv/repo/migrations/          # incl. hypertables, continuous aggregates
 │  ├─ test/
 │  ├─ config/                        # runtime.exs: ROLE, KICK_*, DATABASE_URL, AMQP_URL
@@ -953,8 +953,10 @@ channel_events     (id, channel_id, occurred_at,
 - `stream_segments` (view): periods of constant title, category, language.
 - `stream_stats` (cache, rebuildable): airtime, avg and peak viewers, hours
   watched, followers at start and end and the gain, gross follows, unique
-  chatters, messages, subs, resubs, gifted subs, Kicks. Unknown is null,
-  never 0.
+  chatters, new chatters (no earlier stream of the channel), messages, subs,
+  resubs, gifted subs, Kicks. Unknown is null, never 0.
+- `excluded_streams` (view): streams an admin excluded (`stream_overrides`),
+  left out of every figure and marked where listed.
 - `hourly_stats` by **UTC hour** (cache, rebuildable, a hypertable):
   samples, avg and peak viewers, hours watched, chat minutes and messages,
   last follower total, follows, subs, gifted subs, Kicks. Daily, weekday and
@@ -1048,28 +1050,35 @@ The server chooses the bucket from the requested range, so no series exceeds
 |---|---|---|---|
 | One stream (≤ ~12h) | raw 60s samples | per minute | `viewer_samples`, `chat_minutes` |
 | ≤ 7 days | 5-min buckets | 5-min buckets | `viewer_samples` (time_bucket) |
-| ≤ 90 days | hourly | hourly | continuous aggregates |
-| Longer | daily (channel timezone) | daily | from hourly aggregates |
+| ≤ 90 days | hourly | hourly | `hourly_stats` |
+| Longer | daily (channel timezone) | daily | `hourly_stats` |
 
 Each bucket carries **avg and max** (and min where useful), drawn as a line
 with a peak band, so downsampling never hides a peak. Buckets without data
-are sent as `null` (a break), never 0.
+are sent as `null` (a break), never 0. Chat counts are 0 only where chat
+coverage says we were listening, `null` where we weren't. Daily buckets stay
+under 2 000 points for about five years of history; weekly buckets will be
+needed after that.
 
 ### 13.5 Data delivery
 
 - **History over cacheable JSON:** charts fetch
-  `GET /data/channels/:id/viewers?from=…&to=…&res=…` and similar endpoints.
+  `GET /data/v1/channels/:slug/viewers?from=…&to=…&res=…` (also `chat`,
+  `support`, `followers`, `heatmap`, `categories`), `/data/v1/streams/:id`
+  (the stream page), `/data/v1/streams/:id/chatters?window=5` and
+  `/data/v1/compare?c=a,b&metric=…`. `res` can only ask for fewer points.
   Compact column format (`{"t":[…unix seconds…],"avg":[…],"max":[…]}`).
-  Responses for closed periods get long `Cache-Control` and an ETag, so
-  Caddy or Cloudflare can serve repeat visitors without touching the app.
-  Ranges that include "now" get a short TTL (e.g. 30s).
+  Responses get an ETag and a `Cache-Control`, so Caddy or Cloudflare can
+  serve repeat visitors without touching the app: a day for ranges ending
+  more than two days ago, 30s for ranges reaching into the last two days
+  (rollups and late events can still change them).
 - **Live over LiveView:** the page subscribes to `"channel:<id>"`; new
   readings are pushed to the chart hook with `push_event` (append a point),
   at most every 60s. Chart data is **never kept in LiveView assigns**, so a
   connected visitor costs a few KB, not a copy of the series.
 - **Home page:** one aggregated `"live"` broadcast every 60s with all live
   channels' current viewers, not one per channel.
-- **Query cache** (Cachex) in the `web` role for expensive aggregates
+- **Query cache** (`KickTracker.Cache`, ETS) in the `web` role for expensive aggregates
   (leaderboards, 30-day cards), keyed by query and period: minutes for
   periods including today, long for closed periods.
 - The JSON endpoints are the seed of a **public read API** later; they are
@@ -1100,7 +1109,8 @@ code splitting). It covers every chart kind we need with one API:
 - built-in `lttb` sampling and canvas rendering for dense series.
 
 Wrapped in **one LiveView hook** and a small set of **chart kinds** written
-once in JS (`timeseries`, `bars`, `share`, `heatmap`, `sparkline`). The
+once in JS (`timeseries`, `stream`, `bars`, `share`, `heatmap`, `sparkline`;
+`stream` is the stream page's stacked panels). The
 server sends data and a kind, never ECharts options, so every chart of a
 kind looks and behaves the same and the payload stays small.
 

@@ -46,6 +46,40 @@ defmodule KickTracker.Fixtures do
   def totp_now(secret),
     do: KickTracker.Admins.TOTP.code(secret, KickTracker.Admins.TOTP.step_at(DateTime.utc_now()))
 
+  @doc "A stream, closed when `ended_at` is given."
+  def stream!(channel, started_at, ended_at \\ nil) do
+    %{rows: [[id]]} =
+      Repo.query!(
+        "INSERT INTO streams (channel_id, started_at, ended_at, end_source) VALUES ($1, $2, $3, $4) RETURNING id",
+        [channel.id, started_at, ended_at, ended_at && "event"]
+      )
+
+    id
+  end
+
+  @doc "Viewer samples `{at, viewers}` for a stream."
+  def samples!(channel, stream_id, samples, category_id \\ nil) do
+    rows =
+      for {at, v} <- samples do
+        %{
+          channel_id: channel.id,
+          observed_at: at,
+          stream_id: stream_id,
+          viewers: v,
+          category_id: category_id
+        }
+      end
+
+    Repo.insert_all("viewer_samples", rows)
+  end
+
+  @doc "A closed coverage period."
+  def covered!(channel, source, from_at, to_at, ok \\ true) do
+    Repo.insert_all("coverage", [
+      %{channel_id: channel.id, source: source, from_at: from_at, to_at: to_at, ok: ok}
+    ])
+  end
+
   @doc "All rows of a table as maps, ordered by the given columns."
   def rows(table, order_by) do
     %{columns: cols, rows: rows} =

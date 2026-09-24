@@ -86,6 +86,7 @@ defmodule KickTrackerWeb do
       import Phoenix.HTML
       # Core UI components
       import KickTrackerWeb.CoreComponents
+      import KickTrackerWeb.SiteComponents
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS

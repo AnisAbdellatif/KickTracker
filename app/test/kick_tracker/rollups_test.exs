@@ -26,6 +26,30 @@ defmodule KickTracker.RollupsTest do
     id
   end
 
+  test "new chatters are those with no earlier stream in the channel" do
+    c = channel!()
+    other = channel!()
+    s1 = stream_with_samples(c, at(0), [], at(3600))
+    s2 = stream_with_samples(c, at(86_400), [], at(90_000))
+    # Chatting elsewhere doesn't make someone a returning chatter here.
+    o1 = stream_with_samples(other, at(-3600), [], at(-60))
+
+    rows = [{s1, 1}, {s1, 2}, {s2, 2}, {s2, 3}, {o1, 3}]
+
+    Repo.insert_all(
+      "chat_stream_users",
+      for(
+        {sid, u} <- rows,
+        do: %{stream_id: sid, user_id: u, messages: 1, first_at: at(0), last_at: at(0)}
+      )
+    )
+
+    Enum.each([s1, s2], &Rollups.stream_stats/1)
+
+    assert [%{stream_id: ^s1, new_chatters: 2}, %{stream_id: ^s2, new_chatters: 1}] =
+             rows("stream_stats", ["stream_id"]) |> Enum.filter(&(&1.channel_id == c.id))
+  end
+
   test "a stream's figures, from every raw table" do
     c = channel!()
     samples = [{at(60), 100}, {at(120), 300}, {at(250), 200}]
