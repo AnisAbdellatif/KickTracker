@@ -14,6 +14,9 @@ defmodule KickTracker.DeadLettersTest do
   # A message dead-lettered the way the consumer does it: rejected from the
   # main queue without requeue.
   defp dead_letter!(message_id, routing_key \\ "channel.followed") do
+    # Dead-lettering into a quorum queue lands a moment later: wait for this
+    # message, not just any.
+    dead_before = TestBroker.depth("kick_tracker.events.dead")
     {:ok, conn} = AMQP.Connection.open(TestBroker.admin_url())
     {:ok, chan} = AMQP.Channel.open(conn)
     :ok = AMQP.Confirm.select(chan)
@@ -29,7 +32,7 @@ defmodule KickTracker.DeadLettersTest do
     {:ok, _payload, meta} = wait_get(chan, "kick_tracker.events")
     :ok = AMQP.Basic.reject(chan, meta.delivery_tag, requeue: false)
     AMQP.Connection.close(conn)
-    wait_until(fn -> TestBroker.depth("kick_tracker.events.dead") >= 1 end)
+    wait_until(fn -> TestBroker.depth("kick_tracker.events.dead") > dead_before end)
   end
 
   defp wait_get(chan, queue, tries \\ 50) do
@@ -63,7 +66,10 @@ defmodule KickTracker.DeadLettersTest do
              a.reason == "rejected"
 
     assert b.event_type == "kicks.gifted" and b.envelope == %{"message_id" => "msg-2"}
+    # Right after a listing, everything is back: counted, and can be acted on.
     assert DeadLetters.count() == {:ok, 2}
+    assert :ok = DeadLetters.discard("msg-2")
+    assert {:ok, [%{message_id: "msg-1"}]} = DeadLetters.list()
   end
 
   test "a replayed message goes back to the main queue and leaves the dead ones" do

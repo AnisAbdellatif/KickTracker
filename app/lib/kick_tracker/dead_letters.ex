@@ -9,6 +9,10 @@ defmodule KickTracker.DeadLetters do
   Talks to RabbitMQ as the `ops` user (`DEAD_LETTERS_AMQP_URL`): read on
   the dead-letter queue, write on the exchange, nothing else. Listing
   takes messages without acknowledging them and puts them all back.
+
+  The queue is a quorum queue, where putting messages back lands a moment
+  later; every call waits (up to 2s) until they are back before it
+  returns, so a count, a list or a replay right after sees them.
   """
 
   @exchange "kick.events"
@@ -36,8 +40,10 @@ defmodule KickTracker.DeadLetters do
   @spec list(pos_integer()) :: {:ok, [message()]} | {:error, term()}
   def list(limit \\ 50) do
     with_channel(fn chan ->
+      before = ready(chan)
       {messages, tags} = take(chan, min(limit, @max))
       requeue(chan, tags)
+      settle(chan, before)
       Enum.reverse(messages)
     end)
   end
@@ -46,8 +52,7 @@ defmodule KickTracker.DeadLetters do
   @spec count() :: {:ok, non_neg_integer()} | {:error, term()}
   def count do
     with_channel(fn chan ->
-      {:ok, %{message_count: n}} = AMQP.Queue.declare(chan, queue(), passive: true)
-      n
+      ready(chan)
     end)
   end
 
@@ -85,17 +90,20 @@ defmodule KickTracker.DeadLetters do
   defp act(message_id, fun) do
     result =
       with_channel(fn chan ->
+        before = ready(chan)
         {messages, tags} = take(chan, @max)
 
         case Enum.find(messages, &(&1.message_id == message_id)) do
           nil ->
             requeue(chan, tags)
+            settle(chan, before)
             {:error, :not_found}
 
           m ->
             outcome = fun.(chan, m)
             if outcome == :ok, do: AMQP.Basic.ack(chan, m.tag)
             requeue(chan, List.delete(tags, m.tag) ++ if(outcome == :ok, do: [], else: [m.tag]))
+            settle(chan, if(outcome == :ok, do: before - 1, else: before))
             outcome
         end
       end)
@@ -119,6 +127,23 @@ defmodule KickTracker.DeadLetters do
   end
 
   defp requeue(chan, tags), do: Enum.each(tags, &AMQP.Basic.nack(chan, &1, requeue: true))
+
+  # Messages ready in the queue (not counting any taken and not yet back).
+  defp ready(chan) do
+    {:ok, %{message_count: n}} = AMQP.Queue.declare(chan, queue(), passive: true)
+    n
+  end
+
+  # Waits until the messages put back are ready again (at least
+  # `expected`: more may have been dead-lettered meanwhile), for up to 2s.
+  defp settle(chan, expected, tries \\ 100) do
+    if ready(chan) < expected and tries > 0 do
+      Process.sleep(20)
+      settle(chan, expected, tries - 1)
+    end
+
+    :ok
+  end
 
   defp message(payload, meta) do
     death = first_death(meta.headers)
