@@ -107,7 +107,8 @@ defmodule KickTracker.Alerts.RulesTest do
         heartbeat_at: ago(5),
         journal_depth: 0,
         journal_oldest_at: nil,
-        journal_buried: 0
+        journal_buried: 0,
+        quarantined: []
       },
       Map.new(attrs)
     )
@@ -145,6 +146,14 @@ defmodule KickTracker.Alerts.RulesTest do
       )
 
     assert keys(s) == ["journal_behind:a", "journal_buried:b"]
+  end
+
+  test "the collectors: a channel whose processes kept crashing is an alert" do
+    q = [%{channel_id: 42, failures: 3, since: ago(120)}]
+
+    s = snapshot([], collectors: [collector("a", state: "leader", quarantined: q)])
+
+    assert keys(s) == ["quarantined:a"]
   end
 
   test "the shadow: seen recently is fine; unseen for 15 minutes is an alert, apart from the collectors" do

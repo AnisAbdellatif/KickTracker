@@ -92,6 +92,22 @@ defmodule KickTrackerWeb.Admin.HealthLive do
             </tr>
           </tbody>
         </table>
+        <div
+          :for={{c, q} <- quarantined(@collectors)}
+          id={"quarantined-#{c.id}-#{q.channel_id}"}
+          class="alert alert-warning mt-3 text-sm"
+        >
+          <.icon name="hero-exclamation-triangle-micro" class="size-4" />
+          <span>
+            {gettext(
+              "%{channel} kept crashing on %{collector} (%{failures} times in a row) and waits to be restarted.",
+              channel: channel_name(@rows, q.channel_id),
+              collector: c.id,
+              failures: q.failures
+            )}
+            <span :if={q.since}>{gettext("Since")} <.time at={q.since} />.</span>
+          </span>
+        </div>
         <details :if={@terms != []} class="mt-3 text-sm">
           <summary class="cursor-pointer opacity-70">{gettext("Recent handoffs")}</summary>
           <ul class="mt-2 space-y-1">
@@ -304,6 +320,16 @@ defmodule KickTrackerWeb.Admin.HealthLive do
       s < 5400 -> gettext("%{n}m ago", n: div(s, 60))
       s < 172_800 -> gettext("%{n}h ago", n: div(s, 3600))
       true -> gettext("%{n}d ago", n: div(s, 86_400))
+    end
+  end
+
+  defp quarantined(collectors),
+    do: for(c <- collectors, q <- c[:quarantined] || [], do: {c, q})
+
+  defp channel_name(rows, id) do
+    case Enum.find(rows, &(&1.channel.id == id)) do
+      nil -> gettext("channel %{id}", id: id)
+      row -> row.channel.slug
     end
   end
 
