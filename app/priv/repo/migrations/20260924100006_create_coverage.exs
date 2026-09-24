@@ -8,8 +8,8 @@ defmodule KickTracker.Repo.Migrations.CreateCoverage do
     create table(:coverage) do
       add :channel_id, references(:channels, on_delete: :restrict)
       add :source, :text, null: false
-      add :from_at, :utc_datetime_usec, null: false
-      add :to_at, :utc_datetime_usec
+      add :from_at, :timestamptz, null: false
+      add :to_at, :timestamptz
       add :ok, :boolean, null: false
     end
 

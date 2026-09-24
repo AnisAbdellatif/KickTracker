@@ -9,7 +9,7 @@ defmodule KickTracker.Repo.Migrations.CreateViewerSamples do
     create table(:viewer_samples, primary_key: false) do
       # TimescaleDB requires the time column in every unique key.
       add :channel_id, references(:channels, on_delete: :restrict), null: false, primary_key: true
-      add :observed_at, :utc_datetime_usec, null: false, primary_key: true
+      add :observed_at, :timestamptz, null: false, primary_key: true
       add :stream_id, references(:streams, on_delete: :restrict), null: false
       add :viewers, :integer, null: false
       add :category_id, :bigint

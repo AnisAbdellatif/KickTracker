@@ -113,10 +113,14 @@ defmodule Sim.Control do
     with {:ok, channel} <- fetch(scenario, slug),
          {:ok, _window} <- live!(channel, now),
          :ok <- text!(content) do
+      sender_id = sender_id || someone(channel, now)
+
+      # The sender is part of the id: two people can send the same text in
+      # the same millisecond, and they are two messages.
       message = %{
-        id: Payloads.uuid({:manual_chat, channel.seed, now, content}),
+        id: Payloads.uuid({:manual_chat, channel.seed, now, sender_id, content}),
         at: now,
-        sender_id: sender_id || someone(channel, now),
+        sender_id: sender_id,
         content: content,
         reply_to: nil
       }

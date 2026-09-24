@@ -119,8 +119,9 @@ Follow the phase order in §20. Don't build ahead of the current phase without a
 - Recordings are **anonymized** before they enter `fixtures/` (ids, usernames, avatars,
   message text replaced consistently). Original signed webhook bodies, kept only for
   signature tests, stay out of any public repo.
-- From v2 we read `followers_count` only. Nothing else from that response is stored or
-  logged (it contains a signed `playback_url`).
+- From v2 we read `followers_count`, and `chatroom.id` (needed to join the channel's chat,
+  and available nowhere else). Nothing else from that response is stored or logged (it
+  contains a signed `playback_url`); both are extracted in `Kick.V2` and the rest dropped.
 
 ## 7. Data invariants (non-negotiable)
 

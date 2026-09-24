@@ -146,8 +146,9 @@ KickPlus uses). The only source of the **total follower count**
   IPs: **test from the VPS before relying on it**.
 - Light use only: one channel per request, every 15 min while live and once a
   day offline (§3).
-- Read `followers_count` and discard the rest. The response also carries a
-  `playback_url` with a signed token; it is never stored.
+- Read `followers_count`, and `chatroom.id` (the only source of the id chat
+  needs), and discard the rest. The response also carries a
+  `playback_url` with a signed token; it is never stored or logged.
 - Isolated in its own module so it can be replaced. Failures are gaps, never
   zeros; `channel.followed` keeps counting gross follows meanwhile.
 - Observed (2026-09-24): 200 with `followers_count` from a home machine; the
@@ -267,7 +268,15 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
   relied on.
 - **Confirmed on real data**: the start event, the end event and the API
   poll all reported the identical `started_at` string for the same stream.
-- The safety-net poll opens or closes streams whose webhooks were missed.
+- The 60s poll opens or closes streams whose webhooks were missed.
+- The rules (`Metrics.Sessionizer`, pure, property-tested for arrival
+  order): Kick's end event always wins, and a stream it closed never
+  reopens (the API lists a stream for ~20s after it ends). Without it, a
+  stream ends at its **latest live evidence**, which only ever moves later.
+  A newer `started_at` closes the previous stream. A poll must miss the
+  channel for **90s** after the last evidence before it counts as offline
+  (the API lags; a start event can come before the API lists the stream).
+  A stream closed from polling that is seen live again reopens.
 
 ### 3.4 Chat windows are chosen at read time
 
@@ -629,19 +638,22 @@ KickTrackerWeb.Supervisor
   and the 5-minute poll repairs anything else.
 
 **Poller** (one process)
-- Every **60s**: `GET /livestreams` for the channels currently live, 50 per
-  request, and sends each `ChannelServer` its reading: `{:reading, data, at}`.
-- Every **5 min**: `GET /channels` for all tracked channels, as a safety net
-  for missed live/offline and metadata events.
+- Every **60s**: `GET /livestreams` for **every** tracked channel, 50 per
+  request, and sends each `ChannelServer` its reading: `{:reading, data, at}`,
+  or `:offline` when a request that succeeded didn't list it. Polling all
+  channels (not only the live ones) notices a missed start within a minute,
+  at one request per 50 channels.
+- Every **5 min**: `GET /channels` for subscriber totals and slug renames.
 - If a request fails, it sends nothing. A missing reading is a gap, never
-  "offline" and never zero.
+  "offline" and never zero. Each batch's outcome goes to `coverage`.
 
 **ChannelServer** (one per channel)
 - Holds live/offline, the open stream, the current title and category, and
   this minute's chatters (`user_id -> messages`).
-- On a status event or a poll that disagrees with its state: opens or closes
-  the stream (keyed on `(channel_id, started_at)`), asks for a follower reading at
-  start and end, and tells the `Poller` to include or drop it.
+- Feeds status events and readings to the pure `Sessionizer`, which decides
+  when a stream opens, closes or reopens (keyed on `(channel_id,
+  started_at)`, rules in §3.3), and writes what it decides; asks for a
+  follower reading at start and end.
 - On a reading: writes a viewer sample carrying the current category.
 - On a metadata event or a changed title/category in a reading: writes a
   stream change.
@@ -654,8 +666,12 @@ KickTrackerWeb.Supervisor
 - Broadcasts readings and events on `"channel:<id>"` for LiveView pages.
 
 **ChatSocket** (one per channel)
-- Connects to Pusher, subscribes to `chatrooms.<id>.v2`, answers pings.
-- Sends `{:chat, sender_id, at}` and raid/host events to its `ChannelServer`.
+- Connects to Pusher, subscribes to `chatrooms.<id>.v2` and, once known,
+  `channel.<kick channel id>`; answers pings, pings after the activity
+  timeout, reconnects if no pong comes. Waits until the chatroom id is known
+  (from v2).
+- Sends `{:chat, message}` (sender, id, time) to its `ChannelServer`, and
+  the names of events it doesn't know (raids and hosts, until recorded).
   No message text is kept.
 - Reconnects with exponential backoff (1s up to 30s) and reports connected /
   disconnected so chat coverage is recorded.
@@ -667,9 +683,10 @@ KickTrackerWeb.Supervisor
   per offline channel, and on demand at stream start and end. Spread out, one
   channel per job.
 - `SubscriptionSync`: makes Kick's webhook subscriptions match the tracked
-  channel list, pointing at the ingress URL; subscribes new channels, removes
-  dropped ones, and **restores subscriptions Kick cancelled** after a long
-  failure.
+  channel list (the seven event types we read); subscribes new channels,
+  removes dropped ones and duplicates, and **restores subscriptions Kick
+  cancelled** after a long failure. Where deliveries go (the ingress URL)
+  is set once in the Kick app's settings, not per subscription.
 - `ProcessEvent`: retries status/metadata events still unprocessed after a
   while.
 - Rollup refreshes, retention and compression policies.
@@ -833,8 +850,10 @@ a stream's per-minute detail is gone, but its per-minute counts
   It is built by comparing each `livestream.metadata.updated` snapshot with
   the previous one (the event carries every field, not only the changed
   one); `occurred_at` is the delivery's `Kick-Event-Message-Timestamp`. The
-  poll's title and category fill in changes whose events were missed.
-  Titles in `livestream.status.updated` are not used for changes.
+  poll's title and category fill in changes whose events were missed; the
+  API lags Kick, so a poll counts a difference only when it sees it twice
+  in a row and not within two minutes of an event, dated at the first
+  sighting (`Metrics.Changes`). Titles in `livestream.status.updated` are not used for changes.
 - `stream_segments` is derived from it: stretches where title, category and
   language don't change. "Time per category" and "viewers after the switch
   to GTA" are simple queries on it.
@@ -863,9 +882,12 @@ webhook_events     (message_id PK, subscription_id, event_type, event_version,
                    -- raw bytes, not jsonb, and sent_at the header's own
                    -- string: together they're the signed text, and jsonb
                    -- would reformat it
-coverage           (id, channel_id NULL, source: api | chat | ingress | followers,
-                    from_at, to_at NULL, ok)
-                   -- our own gaps, so every stat can say how complete it is
+coverage           (id, channel_id NULL, source: api | subscribers | chat |
+                    ingress | followers, from_at, to_at, ok)
+                   -- our own gaps, so every stat can say how complete it
+                   -- is. Periods are always closed (extended by each
+                   -- outcome), so a dead collector claims nothing; time
+                   -- no period covers is a gap
 
 -- streams (normal tables)
 streams            (id, channel_id, started_at, ended_at NULL,
@@ -874,7 +896,10 @@ streams            (id, channel_id, started_at, ended_at NULL,
                    -- ended_at >= started_at; an end always says how it
                    -- was learnt
 stream_changes     (id, stream_id, occurred_at, field: title | category |
-                    language | tags | mature, old_value, new_value)
+                    language | mature, old_value, new_value,
+                    source: event | poll,
+                    UNIQUE (stream_id, field, occurred_at))
+                   -- a stream's first values have no old_value
 
 -- time series (hypertables, compressed, segmented by channel_id)
 viewer_samples     (channel_id, observed_at, stream_id, viewers, category_id,
@@ -895,20 +920,27 @@ chat_minute_users  (channel_id, minute, user_id, messages,
 -- per-stream and event facts (normal tables)
 chat_stream_users  (stream_id, user_id, messages, first_at, last_at,
                     PRIMARY KEY (stream_id, user_id))
-follows            (message_id PK, channel_id, stream_id NULL,
-                    occurred_at, user_id)
-support_events     (message_id PK, channel_id, stream_id NULL, occurred_at,
+follows            (message_id PK, channel_id, occurred_at, user_id)
+support_events     (message_id PK, channel_id, occurred_at,
                     kind: sub | resub | gift | kicks,
                     user_id NULL,            -- subscriber / gifter / sender
                     quantity,                -- giftees, months, or Kicks amount
-                    tier, payload jsonb)
-channel_events     (id, channel_id, stream_id NULL, occurred_at,
+                    tier, payload jsonb)     -- giftee ids, expiry, gift type;
+                                             -- never message text or usernames
+channel_events     (id, channel_id, occurred_at,
                     kind: raid_in | raid_out | host | ...,
-                    other_channel_id NULL, viewers NULL, payload jsonb)
+                    other_channel NULL, viewers NULL, dedup_key, payload jsonb,
+                    UNIQUE (channel_id, dedup_key))
+                   -- created; filled once raid/host event names are
+                   -- recorded (§16). Unknown chat-feed events are logged
+                   -- by name only meanwhile
 ```
 
-- `stream_id` is null for things that happen while offline (follows, subs,
-  Kicks).
+- Follows and support events carry **no stream id**: which stream they
+  belong to is read from `occurred_at` against the streams' ranges. A
+  follow stored before its stream's start event arrives is then still
+  counted for that stream, whatever the arrival order. `channel_events`
+  works the same way.
 - `payload jsonb` keeps raw data so new fields need no migration.
 - `follows` and `support_events` can be rebuilt from `webhook_events`.
 - Unique keys on hypertables include the time column (a TimescaleDB rule).
@@ -920,11 +952,22 @@ channel_events     (id, channel_id, stream_id NULL, occurred_at,
 
 - `stream_segments` (view): periods of constant title, category, language.
 - `stream_stats` (cache, rebuildable): airtime, avg and peak viewers, hours
-  watched, follower gain, gross follows, unique chatters, messages, subs,
-  gifted subs, Kicks.
-- Continuous aggregates by **UTC hour**: viewers (avg, peak, hours watched),
-  chat (messages), followers (last value), support totals. Daily, weekday and
-  30-day figures are built from them in the channel's timezone.
+  watched, followers at start and end and the gain, gross follows, unique
+  chatters, messages, subs, resubs, gifted subs, Kicks. Unknown is null,
+  never 0.
+- `hourly_stats` by **UTC hour** (cache, rebuildable, a hypertable):
+  samples, avg and peak viewers, hours watched, chat minutes and messages,
+  last follower total, follows, subs, gifted subs, Kicks. Daily, weekday and
+  30-day figures are built from it in the channel's timezone.
+- Both are recomputed by a job (last 3 hours every 5 minutes, last 2 days
+  nightly) and by `mix kick_tracker.rebuild` for any range.
+- **Not continuous aggregates**, as first planned: hours watched weights
+  each sample by the time since the previous one (capped at 75s), which
+  needs a window function a continuous aggregate can't run, and TimescaleDB
+  Toolkit (time-weighted averages) isn't in the community image. One job-
+  maintained table keeps a single definition: `KickTracker.Metrics` is the
+  reference, the SQL is tested to agree with it, and hourly hours watched
+  add up exactly to the stream's.
 
 ### 12.7 Retention and privacy
 
@@ -1489,8 +1532,22 @@ Tests are written alongside every step (§17.3), not as a step of their own.
     `SubscriptionSync`.
 11. `FollowerPoll` (v2), `follows`, support events.
 12. `ChatSocket`, the three chat tables, raids and hosts.
-13. `Metrics`; `stream_stats`; continuous aggregates.
-13b. Bulk mode: months of history written straight into the raw tables.
+13. `Metrics`; `stream_stats`; hourly rollups (job-maintained, see §12.6).
+13b. Bulk mode: months of history written straight into the raw tables
+    (`mix kick_tracker.bulk`, dev only; 14 days of the default scenario,
+    2.4M chat messages, in about a minute).
+
+**Phase 2 built** (2026-09-24). A live run with every piece as its own
+process (fake Kick → receiver → RabbitMQ → collector → TimescaleDB): a
+stream's start and metadata events opened it and logged its first values,
+samples every 60s carried the category, chat minutes were attributed to
+it, and follows, a gift and Kicks became rows. With the collector stopped,
+a whole stream (start, events, end) was sent: the events waited in
+RabbitMQ and were all handled after the restart, the stream recorded with
+Kick's exact end, nothing dead-lettered. The run found two bugs the tests
+couldn't: the consumer refused its AMQP URL under `mix run` (a lazily
+loaded module), and a fresh collector waited up to 15 minutes before
+subscribing to webhooks.
 
 **Phase 3: admin core**
 

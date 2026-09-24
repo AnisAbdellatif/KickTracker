@@ -16,14 +16,14 @@ defmodule KickTracker.Repo.Migrations.CreateWebhookEvents do
       # text, so the body is raw bytes (jsonb would reorder and reformat it)
       # and `sent_at` the header's own string. `occurred_at` is it parsed.
       add :sent_at, :text, null: false
-      add :occurred_at, :utc_datetime_usec, null: false
+      add :occurred_at, :timestamptz, null: false
       add :signature, :text, null: false
       add :body, :binary, null: false
 
-      add :received_at, :utc_datetime_usec, null: false
+      add :received_at, :timestamptz, null: false
       add :receiver, :text, null: false
-      add :stored_at, :utc_datetime_usec, null: false, default: fragment("now()")
-      add :processed_at, :utc_datetime_usec
+      add :stored_at, :timestamptz, null: false, default: fragment("now()")
+      add :processed_at, :timestamptz
     end
 
     create index(:webhook_events, [:event_type, :occurred_at])

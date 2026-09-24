@@ -10,10 +10,10 @@ defmodule KickTracker.Repo.Migrations.CreateChannels do
       add :chatroom_id, :bigint
       add :slug, :text, null: false
       add :timezone, :text, null: false, default: "Etc/UTC"
-      add :tracked_since, :utc_datetime_usec, null: false, default: fragment("now()")
+      add :tracked_since, :timestamptz, null: false, default: fragment("now()")
       add :active, :boolean, null: false, default: true
 
-      timestamps(type: :utc_datetime_usec)
+      timestamps(type: :timestamptz)
     end
 
     create unique_index(:channels, [:kick_user_id])

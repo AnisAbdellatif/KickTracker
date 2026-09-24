@@ -22,6 +22,10 @@ config :kick_tracker, KickTrackerWeb.Endpoint,
   secret_key_base: "/IY2tmNvOHo3ZPfEq4djjij3Vly1dhgFauiGijcYUMLnESWNBe5pJg4nOceqZKXs",
   server: false
 
+# Tests start the collection processes they need themselves.
+config :kick_tracker, :collect, false
+config :kick_tracker, Oban, testing: :manual
+
 # In test we don't send emails
 config :kick_tracker, KickTracker.Mailer, adapter: Swoosh.Adapters.Test
 

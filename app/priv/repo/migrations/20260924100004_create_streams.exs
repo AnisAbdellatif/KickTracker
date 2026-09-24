@@ -7,8 +7,8 @@ defmodule KickTracker.Repo.Migrations.CreateStreams do
   def change do
     create table(:streams) do
       add :channel_id, references(:channels, on_delete: :restrict), null: false
-      add :started_at, :utc_datetime_usec, null: false
-      add :ended_at, :utc_datetime_usec
+      add :started_at, :timestamptz, null: false
+      add :ended_at, :timestamptz
       # How the end was learnt: Kick's end event, or the safety-net poll.
       add :end_source, :text
       # v2's id, when known; never relied on.
