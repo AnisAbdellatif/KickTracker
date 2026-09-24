@@ -16,6 +16,12 @@ import Config
 #
 # Alternatively, you can use `mix phx.gen.release` to generate a `bin/server`
 # script that automatically sets the env var above.
+
+# A variable set to nothing (`HEARTBEAT_URL=` in an env file, left for
+# later) means "not set": otherwise an empty URL is used as one, and an
+# empty number fails to parse.
+for {name, ""} <- System.get_env(), do: System.delete_env(name)
+
 if System.get_env("PHX_SERVER") do
   config :kick_tracker, KickTrackerWeb.Endpoint, server: true
 end
@@ -121,7 +127,6 @@ config :kick_tracker, :collector,
   status_port:
     (case System.get_env("COLLECTOR_STATUS_PORT") do
        nil -> if config_env() == :test, do: nil, else: 4101
-       "" -> nil
        port -> String.to_integer(port)
      end)
 

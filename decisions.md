@@ -362,3 +362,9 @@ A zero would read as "nobody watched" when it means "nothing was measured", the 
 **Current:** 0 record → 1 fake Kick → 2 pipeline → 3 admin core → 4 public site → 5 backups, alerts, legal, then real collection → 6 CI/CD, data quality, security. (updated 2026-09-24 04:04)
 
 Owner's ordering: operations and legal after core works but before real collection; hardening last.
+
+## Configuration
+
+**Current:** Every setting comes from the environment, and a variable set to nothing counts as not set: `config/runtime.exs` (app and receiver) removes empty variables before reading any. (updated 2026-09-24 22:05)
+
+The env file examples keep optional settings as empty lines (`HEARTBEAT_URL=`) so they're easy to fill in later, and Docker passes them as empty strings. Read as values, an empty heartbeat or alert URL was called and failed ("scheme is required"), an empty shadow database URL was connected to and failed (no database), and an empty number (`BACKFILL_DAYS=`) failed to parse at boot. Treating empty as unset everywhere, once, was preferred over checking for `""` at each setting, which the next setting added would forget. The one setting that gave empty a meaning of its own (`COLLECTOR_STATUS_PORT=`, off) lost it; nothing used it, and the container healthcheck already read empty as the default port.

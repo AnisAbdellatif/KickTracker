@@ -22,6 +22,9 @@ git-ignored and live only on the server.
    `../../.sops.yaml` (replacing the placeholder).
 2. Copy each `*.example` to its name without `.example`, fill it in, and
    encrypt it: `sops --encrypt app.env > app.sops.env`.
+   A setting left empty (`HEARTBEAT_URL=`) counts as not set. `app.env`
+   and `collector.env` each need the Kick credentials and `PUSHER_URL`:
+   the collectors are what talk to Kick.
 3. Commit only the `*.sops.env` files.
 
 ## On the server
