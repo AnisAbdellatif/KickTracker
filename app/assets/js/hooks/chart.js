@@ -3,11 +3,16 @@
 //   data-kind     one of the chart kinds (charts/index.js)
 //   data-src      a /data/v1 URL returning the series (history is cacheable
 //                 JSON, never LiveView assigns: §13.5)
-//   data-values   inline data instead of data-src (sparklines)
+//   data-values   inline data instead of data-src
 //   data-opts     labels and which columns to draw (never ECharts options)
 //   data-refresh  seconds: fetch data-src again this often, for a chart
 //                 whose range ends now (a rolling period, a live stream);
 //                 paused while the page is hidden, caught up on return
+//   data-error    the (translated) text shown when the data can't be loaded
+//
+// Only the latest request draws: a response to an older one (the period
+// changed again meanwhile, or a slow refresh) is dropped. An open table
+// view is rebuilt whenever the data changes.
 //
 // A LiveView appends live points with push_event("chart:append", {id, t, values}).
 // Inside the element's <figure>, buttons with data-chart-action="table" or
@@ -74,11 +79,18 @@ export const Chart = {
   },
 
   updated() {
-    // A new data-src (the period changed) or new inline values: draw again.
-    if (this.el.dataset.src && this.el.dataset.src !== this.src) this.fetch()
+    // A new data-src (the period changed; a sparkline's minute moved) or
+    // new inline values: draw again. A sparkline moves quietly.
+    if (this.el.dataset.src && this.el.dataset.src !== this.src) this.fetch({quiet: !!this.data && this.el.dataset.kind === "sparkline"})
     else if (this.el.dataset.values && this.el.dataset.values !== this.values) this.fetch()
-    // A stream that ended stops refreshing; one that started, starts.
-    if (Number(this.el.dataset.refresh || 0) * 1000 !== (this.refreshMs || 0)) this.schedule()
+    // A stream that ended stops refreshing (after one last fetch, which
+    // draws its end); one that started, starts.
+    const refreshMs = Number(this.el.dataset.refresh || 0) * 1000
+    if (refreshMs !== (this.refreshMs || 0)) {
+      const stopped = this.refreshMs && !refreshMs
+      this.schedule()
+      if (stopped && this.el.dataset.src) this.fetch({quiet: true})
+    }
   },
 
   // Fetch again every data-refresh seconds, while the page is visible.
@@ -109,12 +121,13 @@ export const Chart = {
       return this.render()
     }
     const src = (this.src = this.el.dataset.src)
+    const seq = (this.seq = (this.seq || 0) + 1)
     if (!quiet) this.el.classList.add("chart-loading")
     fetch(src, {headers: {accept: "application/json"}})
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((data) => {
-        // The period changed while this was on its way: a newer fetch draws.
-        if (src !== this.src) return
+        // A newer request was made while this was on its way: it draws.
+        if (seq !== this.seq) return
         this.fetchedAt = Date.now()
         const chatters = this.data && this.data.chatters
         this.data = data
@@ -124,19 +137,29 @@ export const Chart = {
         if (this.el.dataset.chattersSrc) this.loadChatters(this.chattersWindow || this.opts.window || 5)
       })
       .catch(() => {
+        if (seq !== this.seq) return
         this.el.classList.remove("chart-loading")
         if (!quiet) this.el.classList.add("chart-error")
       })
   },
 
+  // Active chatters in the chosen window. Before the chart's own data has
+  // arrived, the window is only remembered: fetch() loads it afterwards.
   loadChatters(window) {
     this.chattersWindow = window
+    if (!this.data || !this.el.dataset.chattersSrc) return
     const url = new URL(this.el.dataset.chattersSrc, location.href)
     url.searchParams.set("window", window)
-    fetch(url).then((r) => r.json()).then((c) => {
-      this.data.chatters = c
-      this.render()
-    })
+    const seq = (this.chattersSeq = (this.chattersSeq || 0) + 1)
+    fetch(url, {headers: {accept: "application/json"}})
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((c) => {
+        if (seq !== this.chattersSeq || !this.data) return
+        this.data.chatters = c
+        this.render()
+      })
+      // The chatters line stays as it was; the next refresh tries again.
+      .catch(() => {})
   },
 
   render() {
@@ -148,6 +171,7 @@ export const Chart = {
         option.dataZoom = option.dataZoom.map((z) => ({...z, startValue: window[0], endValue: window[1]}))
       }
       this.chart.setOption(option, true)
+      if (this.tableEl) this.fillTable()
     })
   },
 
@@ -168,9 +192,6 @@ export const Chart = {
     if (d.t.length && d.t[d.t.length - 1] >= t) return
     d.t.push(t)
     for (const [k, v] of Object.entries(values)) (d[k] ||= []).push(v)
-    if (this.data.stream) {
-      this.data.stream.ended_at = null
-    }
     this.render()
   },
 
@@ -186,21 +207,27 @@ export const Chart = {
       btn.setAttribute("aria-pressed", "false")
       return
     }
-    const {cols, rows} = this.rows()
-    const fmtCell = (c, i) => (i === 0 && cols[0] === "time" && typeof c === "number" ? new Date(c * 1000).toLocaleString() : c == null ? "–" : typeof c === "number" ? c.toLocaleString() : c)
     const wrap = document.createElement("div")
     wrap.className = "chart-table overflow-auto h-full text-xs"
+    this.canvas.style.display = "none"
+    this.el.appendChild(wrap)
+    this.tableEl = wrap
+    this.fillTable()
+    btn.setAttribute("aria-pressed", "true")
+  },
+
+  // The table view, from the data as it is now (again after each fetch or
+  // live point, so it never shows stale rows).
+  fillTable() {
+    const {cols, rows} = this.rows()
+    const fmtCell = (c, i) => (i === 0 && cols[0] === "time" && typeof c === "number" ? new Date(c * 1000).toLocaleString() : c == null ? "–" : typeof c === "number" ? c.toLocaleString() : c)
     const table = document.createElement("table")
     table.className = "table table-xs"
     table.innerHTML = `<thead><tr>${cols.map((c) => `<th>${escape(c)}</th>`).join("")}</tr></thead>`
     const body = document.createElement("tbody")
     body.innerHTML = rows.slice(0, 5000).map((r) => `<tr>${r.map((c, i) => `<td>${escape(fmtCell(c, i))}</td>`).join("")}</tr>`).join("")
     table.appendChild(body)
-    wrap.appendChild(table)
-    this.canvas.style.display = "none"
-    this.el.appendChild(wrap)
-    this.tableEl = wrap
-    btn.setAttribute("aria-pressed", "true")
+    this.tableEl.replaceChildren(table)
   },
 
   downloadCsv() {

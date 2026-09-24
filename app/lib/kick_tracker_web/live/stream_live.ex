@@ -5,8 +5,11 @@ defmodule KickTrackerWeb.StreamLive do
   axis), stat cards, the change timeline, top chatters and supporters.
 
   While the stream is live, each new reading is pushed to the chart hook
-  (`chart:append`) and the cards update; the chart's history is never
-  kept in the LiveView's assigns (§13.5).
+  (`chart:append`) and the cards (a few numbers) are read again at most
+  once a minute; the chart's history is never kept in the LiveView's
+  assigns (§13.5). The channel's readings carry no stream id, so once
+  this stream has ended the page stops listening: a later stream's
+  readings never reach this one's chart.
   """
 
   use KickTrackerWeb, :live_view
@@ -28,9 +31,13 @@ defmodule KickTrackerWeb.StreamLive do
 
       {:ok,
        socket
-       |> assign(channel: channel, stream: stream, now_viewers: nil)
+       |> assign(channel: channel, stream: stream, now_viewers: nil, stats_at: DateTime.utc_now())
        |> assign(
-         page_title: "#{channel.slug} · #{Calendar.strftime(stream.started_at, "%Y-%m-%d")}"
+         page_title: "#{channel.slug} · #{Calendar.strftime(stream.started_at, "%Y-%m-%d")}",
+         page_description:
+           gettext("A stream of %{channel}: viewers, chat and support minute by minute.",
+             channel: channel.slug
+           )
        )
        |> load()}
     else
@@ -60,25 +67,65 @@ defmodule KickTrackerWeb.StreamLive do
     |> Enum.sort_by(& &1.at, DateTime)
   end
 
+  @stats_every_s 55
+
   @impl true
   def handle_info({:viewers, %{at: at, viewers: v}}, socket) do
-    {:noreply,
-     socket
-     |> assign(now_viewers: v)
-     |> push_event("chart:append", %{
-       id: "stream-chart",
-       t: DateTime.to_unix(at),
-       values: %{avg: v, max: v}
-     })}
+    if is_nil(socket.assigns.stream.ended_at) do
+      {:noreply,
+       socket
+       |> assign(now_viewers: v)
+       |> refresh_stats(at)
+       |> push_event("chart:append", %{
+         id: "stream-chart",
+         t: DateTime.to_unix(at),
+         values: %{avg: v, max: v}
+       })}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:changes, _}, socket), do: {:noreply, load(socket)}
 
-  def handle_info({:stream_ended, _, _}, socket) do
-    {:noreply, socket |> assign(stream: Reports.stream(socket.assigns.stream.id)) |> load()}
-  end
+  # This stream ended, or another one started (which means this one is
+  # over): read it again, and stop listening once it is closed.
+  def handle_info({event, _, _}, socket) when event == :stream_ended, do: reread(socket)
+  def handle_info({:stream_started, _}, socket), do: reread(socket)
 
   def handle_info(_other, socket), do: {:noreply, socket}
+
+  defp reread(socket) do
+    stream = Reports.stream(socket.assigns.stream.id) || socket.assigns.stream
+
+    if stream.ended_at,
+      do:
+        Phoenix.PubSub.unsubscribe(
+          KickTracker.PubSub,
+          ChannelServer.topic(socket.assigns.channel.id)
+        )
+
+    {:noreply, socket |> assign(stream: stream) |> load()}
+  end
+
+  # The cards while live: small scalars, read again at most once a minute
+  # of readings.
+  defp refresh_stats(socket, at) do
+    if DateTime.diff(at, socket.assigns.stats_at) >= @stats_every_s do
+      case Reports.stream(socket.assigns.stream.id) do
+        nil ->
+          socket
+
+        stream ->
+          assign(socket,
+            stream: %{socket.assigns.stream | stats: stream.stats},
+            stats_at: at
+          )
+      end
+    else
+      socket
+    end
+  end
 
   @impl true
   def render(assigns) do
@@ -95,7 +142,7 @@ defmodule KickTrackerWeb.StreamLive do
           >
             <.avatar name={@channel.slug} class="size-5 text-[0.65rem]" />{@channel.slug}
           </.link>
-          <.icon name="hero-chevron-right-micro" class="size-4 opacity-50" />
+          <.icon name="hero-chevron-right-micro" class="size-4 opacity-50 rtl:rotate-180" />
           <.link navigate={~p"/c/#{@channel.slug}/streams"} class="hover:text-base-content">
             {gettext("Streams")}
           </.link>
@@ -128,6 +175,7 @@ defmodule KickTrackerWeb.StreamLive do
           <button
             id="tz-switch"
             phx-hook="TzSwitch"
+            phx-update="ignore"
             type="button"
             class="btn btn-ghost btn-sm aria-pressed:btn-active"
             aria-pressed="false"
@@ -167,7 +215,9 @@ defmodule KickTrackerWeb.StreamLive do
               <label class="flex items-center gap-1 text-xs">
                 {gettext("Active chatters over")}
                 <select data-chart-window class="select select-xs w-20" aria-label={gettext("Window")}>
-                  <option :for={w <- [5, 10, 15]} value={w} selected={w == 5}>{w} min</option>
+                  <option :for={w <- [5, 10, 15]} value={w} selected={w == 5}>
+                    {gettext("%{n} min", n: w)}
+                  </option>
                 </select>
               </label>
             </:controls>
@@ -213,7 +263,7 @@ defmodule KickTrackerWeb.StreamLive do
                   <span :if={p.gifts > 0}><.num value={p.gifts} />
                   <span class="text-xs opacity-60">{gettext("gifted")}</span></span>
                   <span :if={p.kicks > 0}><.num value={p.kicks} />
-                  <span class="text-xs opacity-60">Kicks</span></span>
+                  <span class="text-xs opacity-60">{gettext("Kicks")}</span></span>
                   <span :if={p.subs > 0 and p.gifts == 0 and p.kicks == 0} class="text-xs opacity-60">{gettext(
                     "subscribed"
                   )}</span>
@@ -235,7 +285,12 @@ defmodule KickTrackerWeb.StreamLive do
       subs: gettext("Subs"),
       gifts: gettext("Gifted subs"),
       gifted: gettext("gifted subs"),
-      flagged: gettext("flagged reading, not counted as a peak")
+      flagged: gettext("flagged reading, not counted as a peak"),
+      kicks: gettext("Kicks"),
+      kinds: event_labels(),
+      event: event_label(nil),
+      title: gettext("Title"),
+      category: gettext("Category")
     }
   end
 end

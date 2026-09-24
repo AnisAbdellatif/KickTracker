@@ -15,6 +15,7 @@ defmodule KickTrackerWeb.SiteComponents do
     statics: KickTrackerWeb.static_paths()
 
   alias KickTrackerWeb.Period
+  alias Phoenix.LiveView.JS
 
   @doc "A number, formatted in the browser (compact forms only where asked, exact on hover)."
   attr :value, :any, required: true
@@ -80,29 +81,95 @@ defmodule KickTrackerWeb.SiteComponents do
     end
   end
 
-  @doc "The period picker; keeps the other query params."
+  @doc """
+  The period picker; keeps the other query params. "custom" opens two
+  date inputs (days in `tz`, the channel's timezone on a channel's pages)
+  that the page turns into `from`/`to` with a `"custom_range"` event
+  (`KickTrackerWeb.PageParams.custom_range/3`).
+  """
   attr :period, Period, required: true
   attr :path, :string, required: true
   attr :params, :map, default: %{}
+  attr :tz, :string, default: "Etc/UTC"
 
   def period_picker(assigns) do
+    custom? = assigns.period.key == "custom"
+
+    {from, to} =
+      if custom?,
+        do: KickTrackerWeb.PageParams.dates(assigns.period, assigns.tz),
+        else: {nil, nil}
+
+    assigns = assign(assigns, custom?: custom?, from: from, to: to)
+
     ~H"""
-    <nav class="segmented" aria-label={gettext("Period")}>
-      <.link
-        :for={key <- Period.presets()}
-        patch={@path <> "?" <> URI.encode_query(Map.merge(Map.drop(@params, ["from", "to"]), %{"period" => key}))}
-        class={["segmented-item", @period.key == key && "is-active"]}
-        aria-current={@period.key == key && "true"}
+    <div class="flex flex-wrap items-center gap-2">
+      <nav class="segmented" aria-label={gettext("Period")}>
+        <.link
+          :for={key <- Period.presets()}
+          patch={@path <> "?" <> URI.encode_query(Map.merge(Map.drop(@params, ["from", "to"]), %{"period" => key}))}
+          class={["segmented-item", @period.key == key && "is-active"]}
+          aria-current={@period.key == key && "true"}
+        >
+          {preset_label(key)}
+        </.link>
+        <button
+          id="custom-range-toggle"
+          type="button"
+          class={["segmented-item", @custom? && "is-active"]}
+          aria-controls="custom-range"
+          aria-expanded={to_string(@custom?)}
+          phx-click={
+            JS.toggle(to: "#custom-range", display: "flex")
+            |> JS.toggle_attribute({"aria-expanded", "true", "false"})
+          }
+        >
+          {gettext("custom")}
+        </button>
+      </nav>
+      <form
+        id="custom-range"
+        phx-submit="custom_range"
+        class={["items-center gap-1.5 text-xs", if(@custom?, do: "flex", else: "hidden")]}
+        title={gettext("Days in %{tz} time", tz: @tz)}
       >
-        {preset_label(key)}
-      </.link>
-      <span :if={@period.key == "custom"} class="segmented-item is-active">{gettext("custom")}</span>
-    </nav>
+        <input
+          type="date"
+          name="from"
+          value={@from}
+          required
+          class="input input-xs w-36"
+          aria-label={gettext("First day")}
+        />
+        <span aria-hidden="true">–</span>
+        <input
+          type="date"
+          name="to"
+          value={@to}
+          required
+          class="input input-xs w-36"
+          aria-label={gettext("Last day")}
+        />
+        <button class="btn btn-xs">{gettext("Apply")}</button>
+      </form>
+    </div>
     """
   end
 
   defp preset_label("all"), do: gettext("all")
   defp preset_label(key), do: key
+
+  @doc "What a raid or host event is called (`channel_events.kind`, project.md §12.5)."
+  def event_label("raid_in"), do: gettext("Raid in")
+  def event_label("raid_out"), do: gettext("Raid out")
+  def event_label("host"), do: gettext("Host")
+  def event_label("host_in"), do: gettext("Hosted by")
+  def event_label("host_out"), do: gettext("Hosting")
+  def event_label(_), do: gettext("Event")
+
+  @doc "Labels for every event kind, for charts that name them (§13.6)."
+  def event_labels,
+    do: Map.new(~w(raid_in raid_out host host_in host_out), &{&1, event_label(&1)})
 
   @doc "A KPI card with the change against the previous period."
   attr :label, :string, required: true
@@ -154,7 +221,7 @@ defmodule KickTrackerWeb.SiteComponents do
         "mt-1 flex items-center gap-1 whitespace-nowrap text-xs tabular-nums",
         @dir == :up && "text-success",
         @dir == :down && "text-error",
-        @dir == :flat && "text-base-content/50"
+        @dir == :flat && "text-base-content/70"
       ]}
       title={gettext("Change against the previous period of the same length")}
     >
@@ -163,7 +230,7 @@ defmodule KickTrackerWeb.SiteComponents do
       <.icon :if={@dir == :flat} name="hero-minus-micro" class="size-4" />
       <span :if={@dir != :flat}>{:erlang.float_to_binary(abs(@pct), decimals: 1)}%</span>
       <span :if={@dir == :flat}>{gettext("no change")}</span>
-      <span class="hidden text-base-content/50 sm:inline">{gettext("vs previous")}</span>
+      <span class="hidden text-base-content/70 sm:inline">{gettext("vs previous")}</span>
     </div>
     <div :if={!@dir and !is_nil(@previous)} class="mt-1 text-xs">&nbsp;</div>
     """
@@ -245,6 +312,7 @@ defmodule KickTrackerWeb.SiteComponents do
         data-chatters-src={@chatters_src}
         data-refresh={@refresh}
         data-filename={@id}
+        data-error={gettext("Couldn't load this chart.")}
         class={["relative", @class]}
       >
       </div>

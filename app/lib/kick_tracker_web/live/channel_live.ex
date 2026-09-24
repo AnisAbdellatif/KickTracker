@@ -13,7 +13,7 @@ defmodule KickTrackerWeb.ChannelLive do
 
   alias KickTracker.{Cache, Reports, Series, Settings}
   alias KickTracker.Tracking.ChannelServer
-  alias KickTrackerWeb.Period
+  alias KickTrackerWeb.{PageParams, Period}
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
@@ -36,6 +36,7 @@ defmodule KickTrackerWeb.ChannelLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
+    params = PageParams.clean(params)
     channel = socket.assigns.channel
     # A renamed channel's old slug lands on the current one.
     if params["slug"] != channel.slug do
@@ -52,6 +53,12 @@ defmodule KickTrackerWeb.ChannelLive do
         |> assign(period: period, params: params, query: data_query(period, params))
         |> assign(refresh: Period.refresh(period))
         |> assign(page_title: title(channel, socket.assigns.live_action))
+        |> assign(
+          page_description:
+            gettext("Viewers, streams, chat and support of %{channel}, tracked over time.",
+              channel: channel.slug
+            )
+        )
         |> load(socket.assigns.live_action)
 
       {:noreply, socket}
@@ -145,14 +152,14 @@ defmodule KickTrackerWeb.ChannelLive do
   defp sortable(%DateTime{} = d), do: DateTime.to_unix(d)
   defp sortable(v), do: v
 
-  defp parse_int(nil), do: nil
-
-  defp parse_int(s) do
+  defp parse_int(s) when is_binary(s) do
     case Integer.parse(s) do
       {n, ""} -> n
       _ -> nil
     end
   end
+
+  defp parse_int(_), do: nil
 
   ## Live
 
@@ -244,7 +251,10 @@ defmodule KickTrackerWeb.ChannelLive do
                 navigate={~p"/c/#{@channel.slug}/streams/#{@live.stream_id}"}
                 class="inline-flex items-center gap-0.5 font-medium text-primary hover:underline"
               >
-                {gettext("Current stream")}<.icon name="hero-arrow-right-micro" class="size-4" />
+                {gettext("Current stream")}<.icon
+                  name="hero-arrow-right-micro"
+                  class="size-4 rtl:rotate-180"
+                />
               </.link>
               <span>
                 {gettext("Tracked since")} <.time at={@channel.tracked_since} fmt="date" />
@@ -254,6 +264,7 @@ defmodule KickTrackerWeb.ChannelLive do
           <button
             id="tz-switch"
             phx-hook="TzSwitch"
+            phx-update="ignore"
             type="button"
             class="btn btn-ghost btn-sm aria-pressed:btn-active"
             aria-pressed="false"
@@ -279,6 +290,7 @@ defmodule KickTrackerWeb.ChannelLive do
               period={@period}
               path={page_path(@channel, @live_action, %{})}
               params={@params}
+              tz={@channel.timezone}
             />
           </div>
         </div>
@@ -370,6 +382,7 @@ defmodule KickTrackerWeb.ChannelLive do
         kind="heatmap"
         title={gettext("When they stream (avg viewers, %{tz})", tz: @channel.timezone)}
         src={"/data/v1/channels/#{@channel.slug}/heatmap?#{@query}"}
+        opts={%{unit: gettext("avg viewers")}}
         class="h-64"
       />
       <.chart
@@ -378,7 +391,13 @@ defmodule KickTrackerWeb.ChannelLive do
         kind="share"
         title={gettext("Hours watched by category")}
         src={"/data/v1/channels/#{@channel.slug}/categories?#{@query}"}
-        opts={%{label: gettext("Category"), valueLabel: gettext("Hours watched")}}
+        opts={
+          %{
+            label: gettext("Category"),
+            valueLabel: gettext("Hours watched"),
+            otherLabel: gettext("Other")
+          }
+        }
         class="h-64"
       />
       <section class="card-surface p-4">
@@ -578,7 +597,13 @@ defmodule KickTrackerWeb.ChannelLive do
         kind="share"
         title={gettext("Hours watched by category")}
         src={"/data/v1/channels/#{@channel.slug}/categories?#{@query}"}
-        opts={%{label: gettext("Category"), valueLabel: gettext("Hours watched")}}
+        opts={
+          %{
+            label: gettext("Category"),
+            valueLabel: gettext("Hours watched"),
+            otherLabel: gettext("Other")
+          }
+        }
         class="h-72"
       />
       <div class="card-surface overflow-x-auto lg:col-span-2">
@@ -667,7 +692,7 @@ defmodule KickTrackerWeb.ChannelLive do
           </tr>
         </thead>
         <tbody>
-          <tr :for={s <- @streams} id={"stream-#{s.id}"} class={s.excluded? && "opacity-50"}>
+          <tr :for={s <- @streams} id={"stream-#{s.id}"} class={s.excluded? && "opacity-70"}>
             <td>
               <.link
                 navigate={~p"/c/#{@channel.slug}/streams/#{s.id}"}
@@ -731,13 +756,27 @@ defmodule KickTrackerWeb.ChannelLive do
   end
 
   @impl true
-  def handle_event("filter", %{"category" => category}, socket) do
+  def handle_event("filter", %{"category" => category}, socket) when is_binary(category) do
     params =
       if category == "",
         do: Map.delete(socket.assigns.params, "category"),
         else: Map.put(socket.assigns.params, "category", category)
 
     {:noreply, push_patch(socket, to: page_path(socket.assigns.channel, :streams, params))}
+  end
+
+  # The custom range's days are the channel's (§13.6).
+  def handle_event("custom_range", form, socket) do
+    %{channel: channel, live_action: action, params: params} = socket.assigns
+
+    case PageParams.custom_range(form["from"], form["to"], channel.timezone) do
+      {:ok, range} ->
+        params = params |> Map.delete("period") |> Map.merge(range)
+        {:noreply, push_patch(socket, to: page_path(channel, action, params))}
+
+      {:error, message} ->
+        {:noreply, put_flash(socket, :error, message)}
+    end
   end
 
   defp per_hour(nil, _), do: nil

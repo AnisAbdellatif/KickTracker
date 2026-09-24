@@ -65,14 +65,17 @@ defmodule KickTrackerWeb.ChartRefreshTest do
     samples!(c, s, for(m <- 60..20//-1, do: {DateTime.add(now, -m * 60), 10}))
 
     {:ok, view, _} = live(conn, "/")
-    before = view |> element("#spark-#{c.id}") |> render()
-    refute before =~ ~r/data-values="[^"]*\b50\b/
+    [_, before] = Regex.run(~r/data-src="([^"]+)"/, view |> element("#spark-#{c.id}") |> render())
+    refute Enum.member?(json_response(get(conn, before), 200)["values"], 50)
 
-    # A reading arrives, and the minute's broadcast with it.
+    # A reading arrives, and the minute's broadcast with it: the card's
+    # URL moves to the new minute, whose answer has the reading.
     samples!(c, s, [{DateTime.add(now, -30), 50}])
     KickTracker.Cache.clear()
-    send(view.pid, {:live, %{at: now, viewers: %{c.id => 50}}})
+    send(view.pid, {:live, %{at: DateTime.add(now, 60), viewers: %{c.id => 50}}})
 
-    assert view |> element("#spark-#{c.id}") |> render() =~ ~r/data-values="[^"]*\b50\b/
+    [_, later] = Regex.run(~r/data-src="([^"]+)"/, view |> element("#spark-#{c.id}") |> render())
+    assert later != before
+    assert Enum.member?(json_response(get(conn, later), 200)["values"], 50)
   end
 end

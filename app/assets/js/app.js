@@ -27,10 +27,26 @@ import topbar from "../vendor/topbar"
 import {Chart} from "./hooks/chart"
 import {Format, TzSwitch, formatAll} from "./hooks/format"
 
+// Browser storage can be missing or throw on access (private windows,
+// blocked site data); LiveView then keeps what it needs in memory rather
+// than failing to start.
+function storage(name) {
+  try {
+    const s = window[name]
+    s.getItem("probe")
+    return s
+  } catch (_e) {
+    const m = new Map()
+    return {getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k)}
+  }
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
+  localStorage: storage("localStorage"),
+  sessionStorage: storage("sessionStorage"),
   hooks: {...colocatedHooks, Chart, Format, TzSwitch},
 })
 

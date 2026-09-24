@@ -63,6 +63,7 @@ defmodule KickTrackerWeb.Router do
     get "/streams/:id", StreamController, :show
     get "/streams/:id/chatters", StreamController, :chatters
     get "/compare", CompareController, :show
+    get "/sparklines/:slug", SparklineController, :show
   end
 
   ## Admin (project.md §13.8)
