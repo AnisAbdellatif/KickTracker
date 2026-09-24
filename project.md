@@ -146,6 +146,28 @@ KickPlus uses). The only source of the **total follower count**
   datacenter test is still open. The response repeats the channel id under
   `chatroom.chatable_id`.
 
+### 2.3b Other undocumented website endpoints (being probed)
+
+The community list fb-sean/kick-website-endpoints documents Kick's website
+API. Read-only candidates that could feed the tracker:
+
+| Endpoint | Could give |
+|---|---|
+| `api.kick.com/channels/:id/followers-count` | Follower total **without v2**; might avoid v2's Cloudflare risk |
+| `api.kick.com/private/v0/channels/:id/viewer-count` | Viewer count, maybe refreshed faster |
+| `kick.com/current-viewers?ids[]=` | Viewer counts for several streams at once |
+| `kick.com/api/v2/channels/{slug}/leaderboards` | Gift/sub leaderboards: history from before tracking |
+| `kick.com/api/v2/channels/{slug}/videos` (and `/latest`) | Past streams: airtime, titles, categories before tracking |
+| `kick.com/api/v2/channels/{slug}/clips` | Clips per channel |
+| `api.kick.com/private/v1/livestreams` | All live streams, for category rankings |
+
+Same status as v2: undocumented, may be outdated, may need auth or be
+blocked from servers, a grey area under Kick's terms; used only if isolated
+and optional. `mix record.probe` records each once to find out which work;
+nothing here enters the design until that recording says so. Endpoints
+needing a user login (moderation, payments, internal chatroom data) and
+personal profile data (`links`) are not probed.
+
 ### 2.4 Pusher websocket: chat, raids and hosts (unofficial)
 
 `wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false`,
@@ -1156,6 +1178,8 @@ Still open:
    whether and when it is delivered again. Decides how urgent stages 2 and 3
    are.
 2. **Does v2 answer from the VPS** (datacenter IP), not just from home?
+   And the undocumented endpoints (§2.3b): which answer, with or without our
+   token, from home and from the VPS (`mix record.probe`).
 3. **Pusher from a datacenter IP**, any limit on subscriptions per
    connection, and the exact raid/host event names.
 4. **Outgoing raids:** visible from the raiding channel's feed, or only in the
@@ -1172,7 +1196,8 @@ real life.
 ### 17.1 Recording real payloads (once, lightly)
 
 A set of `mix` tasks in `sim/` (`record.api`, `record.v2`, `record.pusher`,
-`record.subscribe`, `record.webhooks`, then `fixtures.anonymize`), run by hand
+`record.subscribe`, `record.webhooks`, `record.probe`, then
+`fixtures.anonymize`), run by hand
 against the real Kick, on one or two channels, for a limited time. The
 runbook is `sim/README.md`. They record:
 

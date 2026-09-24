@@ -39,6 +39,17 @@ defmodule Sim.Recorder.StoreTest do
       assert redacted["livestream"]["playback_url"] == "[redacted]"
     end
 
+    test "stream keys and publish tokens are redacted if a response ever carries them" do
+      body = ~s({"stream_key":"sk_live_x","publish_token":"pt","other":1})
+      redacted = Store.redact(%{"body" => body})["body"] |> Jason.decode!()
+
+      assert redacted == %{
+               "stream_key" => "[redacted]",
+               "publish_token" => "[redacted]",
+               "other" => 1
+             }
+    end
+
     test "bodies without secrets are kept byte for byte (webhook signatures depend on it)" do
       body = ~s({"b": 1,  "a":[ 2 ]}\n)
       assert Store.redact(%{"request" => %{"body" => body}})["request"]["body"] == body
