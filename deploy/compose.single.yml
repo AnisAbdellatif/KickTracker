@@ -68,13 +68,13 @@ services:
   # running on the host (the ports are set in deploy/.env if taken).
   receiver-1:
     <<: *receiver
-    environment: {RECEIVER_ID: "vps1/1"}
+    environment: {RECEIVER_ID: "vps1/1", PEER_HEALTH_URL: "http://receiver-2:4060/health"}
     volumes: [spool1:/data]
     ports: ["127.0.0.1:${RECEIVER_1_PORT:-4160}:4060"]
 
   receiver-2:
     <<: *receiver
-    environment: {RECEIVER_ID: "vps1/2"}
+    environment: {RECEIVER_ID: "vps1/2", PEER_HEALTH_URL: "http://receiver-1:4060/health"}
     volumes: [spool2:/data]
     ports: ["127.0.0.1:${RECEIVER_2_PORT:-4161}:4060"]
 
