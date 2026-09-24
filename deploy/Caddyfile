@@ -1,61 +1,9 @@
-# HTTPS for the site and the webhook ingress (project.md §15). Hosts and the
-# admin allowlist come from secrets/stack.env.
+# The bundled Caddy (compose profile "caddy"), for a VPS with no web server
+# of its own: HTTPS for the site and the webhook ingress (project.md §15).
+# Hosts and the admin allowlist come from secrets/stack.env; the sites
+# themselves are in caddy/sites.caddy, shared with a host's own Caddy.
 {
 	email {$ACME_EMAIL}
 }
 
-(security_headers) {
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "SAMEORIGIN"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		Permissions-Policy "camera=(), microphone=(), geolocation=()"
-		-Server
-	}
-}
-
-{$SITE_HOST} {
-	import security_headers
-	encode zstd gzip
-
-	# The admin, only from the allowed networks (§13.8, §19.3): a second
-	# layer on top of the login and TOTP. ADMIN_ALLOW is a space-separated
-	# list of CIDRs (a VPN or Tailscale range); by default nobody. (Admin
-	# LiveViews also need a session only an /admin page hands out.)
-	@admin_blocked {
-		path /admin /admin/*
-		not remote_ip {$ADMIN_ALLOW:127.0.0.1/32}
-	}
-	respond @admin_blocked 403
-
-	# Two web nodes. A visitor sticks to one (by address: rate limits are
-	# per node, and LiveView long-polling needs it); if it is down or
-	# being redeployed, the other answers, and a request that couldn't
-	# reach one is tried on the other.
-	reverse_proxy web-a:4100 web-b:4100 {
-		lb_policy ip_hash
-		lb_try_duration 10s
-		lb_try_interval 250ms
-		health_uri /healthz
-		health_interval 2s
-		health_timeout 2s
-		fail_duration 10s
-	}
-}
-
-# Kick delivers webhooks here. The first healthy receiver takes everything;
-# the other takes over within seconds (active health checks), so either can
-# be redeployed alone (§15.3).
-{$INGRESS_HOST} {
-	import security_headers
-
-	reverse_proxy receiver-1:4060 receiver-2:4060 {
-		lb_policy first
-		health_uri /health
-		health_interval 3s
-		health_timeout 2s
-		fail_duration 30s
-		lb_try_duration 10s
-	}
-}
+import /etc/caddy/sites.caddy {$SITE_HOST} {$INGRESS_HOST} web-a:4100 web-b:4100 receiver-1:4060 receiver-2:4060 {$ADMIN_ALLOW:127.0.0.1/32}

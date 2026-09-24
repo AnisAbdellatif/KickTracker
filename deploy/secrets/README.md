@@ -7,7 +7,7 @@ git-ignored and live only on the server.
 
 | File | Used by | Holds |
 |---|---|---|
-| `stack.env` | Caddy | `SITE_HOST`, `INGRESS_HOST`, `ACME_EMAIL`, `ADMIN_ALLOW` |
+| `stack.env` | The bundled Caddy, `ops/check-host.sh` | `SITE_HOST`, `INGRESS_HOST`, `ACME_EMAIL`, `ADMIN_ALLOW` (with the host's own Caddy, only the hosts are read) |
 | `app.env` | web, migrate | see `app.env.example` |
 | `collector.env` | both collectors | see `collector.env.example` (no web secrets) |
 | `shadow.env`, `shadow-db.env` | the shadow machine (`compose.shadow.yml`) | see their examples |

@@ -1,0 +1,66 @@
+# The site and the webhook ingress (project.md §15), imported both by the
+# bundled Caddy (../Caddyfile) and by a Caddy the host already runs
+# (README.md, "A Caddy already on the host"), so the two can't drift:
+#
+#   import <path>/sites.caddy <site host> <ingress host> <web-a> <web-b> <receiver-1> <receiver-2> <admin CIDR>...
+#
+# The upstreams are host:port: the containers by name for the bundled
+# Caddy, their loopback ports (compose.single.yml) for the host's.
+
+{args[0]} {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+	encode zstd gzip
+
+	# The admin, only from the allowed networks (§13.8, §19.3): a second
+	# layer on top of the login and TOTP (a VPN or Tailscale range). (Admin
+	# LiveViews also need a session only an /admin page hands out.)
+	@admin_blocked {
+		path /admin /admin/*
+		not remote_ip {args[6:]}
+	}
+	respond @admin_blocked 403
+
+	# Two web nodes. A visitor sticks to one (by address: rate limits are
+	# per node, and LiveView long-polling needs it); if it is down or
+	# being redeployed, the other answers, and a request that couldn't
+	# reach one is tried on the other.
+	reverse_proxy {args[2]} {args[3]} {
+		lb_policy ip_hash
+		lb_try_duration 10s
+		lb_try_interval 250ms
+		health_uri /healthz
+		health_interval 2s
+		health_timeout 2s
+		fail_duration 10s
+	}
+}
+
+# Kick delivers webhooks here. The first healthy receiver takes everything;
+# the other takes over within seconds (active health checks), so either can
+# be redeployed alone (§15.3).
+{args[1]} {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	reverse_proxy {args[4]} {args[5]} {
+		lb_policy first
+		health_uri /health
+		health_interval 3s
+		health_timeout 2s
+		fail_duration 30s
+		lb_try_duration 10s
+	}
+}
