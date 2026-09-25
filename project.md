@@ -1628,6 +1628,13 @@ change to the app beyond producer config.
   a development machine with `deploy/rehearsal/rehearse.sh` (the production
   stack under load, upgraded step by step, with what each step costs
   measured).
+- A release deploys **only what it changes**: a group (collectors, web,
+  receivers) is redeployed when something it runs (its image's build
+  context, its Kamal config, its secrets file; for the collectors, minus
+  what only web nodes run) differs between the build it runs and the
+  release. A web-only change leaves collection and the receivers alone,
+  so it can't cost a reading or a webhook; `deploy/release.sh --all`
+  deploys everything.
 - A collector deploy updates **only the standby**, waits for it to be
   healthy, then switches collection to it: the leader restarts in place,
   on the build it had, and its clean stop hands over within a second

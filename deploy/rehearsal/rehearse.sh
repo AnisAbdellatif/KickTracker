@@ -293,8 +293,8 @@ kill_leader() {
   docker start "$id"
 }
 
-# A whole release as deploy/release.sh does it (both Kamal configs), with
-# the smoke tests through Caddy that would roll it back.
+# A whole release as `deploy/release.sh --all` does it (both Kamal configs,
+# every group), with the smoke tests through Caddy that would roll it back.
 release() {
   SMOKE_URLS="$SITE/healthz" kitd deploy --version "$1"
   SMOKE_URLS="$SITE/healthz" kitd deploy -c deploy/kamal/receiver.yml --version "$1"

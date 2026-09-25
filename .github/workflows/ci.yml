@@ -144,10 +144,19 @@ jobs:
       - run: mix deps.get
       - run: mix dialyzer --format github
 
+  # Which groups deploy/release.sh deploys for a change (a fake kit, no server).
+  release:
+    name: Release script
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 deploy/release.sh deploy/release-test.sh
+      - run: deploy/release-test.sh
+
   images:
     name: Images
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [sim, receiver, app, dialyzer]
+    needs: [sim, receiver, app, dialyzer, release]
     runs-on: ubuntu-24.04
     permissions:
       contents: read

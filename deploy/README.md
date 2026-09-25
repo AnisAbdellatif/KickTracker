@@ -137,16 +137,29 @@ Merge to `main` and wait for CI to pass (its Images job builds, labels and
 attests the app, receiver and database images, tagged with the commit).
 Then, from your machine, in an up-to-date checkout of `main`:
 
+    deploy/release.sh --dry-run   # what would be deployed, and why
     deploy/release.sh
 
-That is two `kit deploy`s (deploy-kit, `.kamal/`): the app's Kamal config,
-then the receivers'. Before anything is replaced, the kit checks that
-you're on `main`, clean and pushed, that CI passed for this exact commit
-and that the images carry the CI workflow's attestation; then it brings
-the server's checkout up to the commit and decrypts its secrets there
-(`server-sync.sh`), and runs the migrations (`.kamal/steps/migrate`: the
-new image's `bin/migrate`, expand-then-contract only, `lock_timeout 5s`).
-Then, one group at a time (`.kamal/groups/`):
+Only the groups the release changes are deployed. For each group the
+script compares the build it runs (the active collector's, for the
+collectors) with this commit, over the paths that group runs: its image's
+build context, its Kamal config and its secrets file, and for the
+collectors minus what only web nodes run (the list is in the script). A
+web-only change deploys the web nodes and leaves collection and the
+receivers alone; tests and docs deploy nothing. `--all` deploys every
+group regardless. `deploy/release-test.sh` (run by CI) checks which
+groups each kind of change deploys; add to it when the lists change.
+
+That is up to two `kit deploy --group …`s (deploy-kit, `.kamal/`): the
+app's Kamal config, then the receivers'. Before anything is replaced, the
+kit checks that you're on `main`, clean and pushed, that CI passed for
+this exact commit and that the images carry the CI workflow's
+attestation; then it brings the server's checkout up to the commit and
+decrypts its secrets there (`server-sync.sh`), and, when the app's config
+is deployed, runs the migrations (`.kamal/steps/migrate`: the new image's
+`bin/migrate`, expand-then-contract only, `lock_timeout 5s`; a migration
+is app code, so it deploys the collectors and web both). Then, one group
+at a time (`.kamal/groups/`):
 
 - **collectors**: only the standby gets the new build (stopped first,
   never two containers on one journal), then the leader restarts in place
@@ -157,9 +170,9 @@ Then, one group at a time (`.kamal/groups/`):
   fails its new build goes back to its previous one.
 - **receivers**: `receiver_1`, then `receiver_2`, the same way.
 
-Last, the smoke tests (`KIT_SMOKE_URLS`) through Caddy: if they fail, the
-release is rolled back (web and receivers to their previous build, the
-collectors switched back). A step that fails stops the release; what
+Last, the smoke tests (`KIT_SMOKE_URLS`) through Caddy: if they fail, what
+the release deployed is rolled back (web and receivers to their previous
+build, each stopped first; the collectors switched back). A step that fails stops the release; what
 wasn't reached keeps running the previous build. Every outcome goes to the
 kit's notification channels.
 
