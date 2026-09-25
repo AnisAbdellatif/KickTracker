@@ -1,6 +1,6 @@
 // Bars (project.md §13.7): counts per bucket, stacked when asked, with a
 // 2px surface gap between stacked segments.
-import {baseOption, timeAxis, valueAxis, dayFormatter, zip, bar} from "./theme"
+import {baseOption, timeAxis, valueAxis, dayFormatter, zip, bar, columnColor} from "./theme"
 
 export function option(data, opts, t) {
   const o = baseOption(t)
@@ -9,8 +9,9 @@ export function option(data, opts, t) {
   o.yAxis = valueAxis(t, {min: 0})
   o.dataZoom = [{type: "inside", filterMode: "none"}]
   const cols = opts.columns || []
-  o.series = cols.map((c, i) => {
-    const s = bar(c.label, zip(data.t, data[c.key]), t.palette[i], {stack: c.stack})
+  const slot = {i: 0}
+  o.series = cols.map((c) => {
+    const s = bar(c.label, zip(data.t, data[c.key]), columnColor(t, c, slot), {stack: c.stack})
     if (c.stack) s.itemStyle = {...s.itemStyle, borderColor: t.surface, borderWidth: 1}
     return s
   })

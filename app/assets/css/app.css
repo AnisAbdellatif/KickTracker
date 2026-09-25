@@ -19,36 +19,37 @@
 }
 
 /* The site's two themes (project.md §13.7: dark and light from the same
-   tokens). Quiet neutral surfaces so the data is the loudest thing on the
-   page; one blue accent, which is also the first chart colour. */
+   tokens). Dark first: a near-black canvas, cards a clear step lighter, an
+   inset well a step lighter again. One interactive accent (primary); the
+   colour otherwise belongs to the data, one hue per metric (below). */
 @plugin "daisyui/packages/bundle/daisyui-theme" {
   name: "dark";
-  default: false;
+  default: true;
   prefersdark: true;
   color-scheme: "dark";
-  --color-base-100: #1a1a19;
-  --color-base-200: #141413;
-  --color-base-300: #2c2c2a;
-  --color-base-content: #f2f1ec;
-  --color-primary: #3987e5;
-  --color-primary-content: #ffffff;
-  --color-secondary: #383835;
-  --color-secondary-content: #f2f1ec;
-  --color-accent: #3987e5;
-  --color-accent-content: #ffffff;
-  --color-neutral: #2c2c2a;
-  --color-neutral-content: #f2f1ec;
-  --color-info: #3987e5;
-  --color-info-content: #ffffff;
-  --color-success: #0ca30c;
-  --color-success-content: #ffffff;
-  --color-warning: #fab219;
-  --color-warning-content: #1a1a19;
-  --color-error: #e66767;
-  --color-error-content: #1a1a19;
-  --radius-selector: 0.5rem;
-  --radius-field: 0.5rem;
-  --radius-box: 0.75rem;
+  --color-base-100: #17171c;
+  --color-base-200: #0c0c0f;
+  --color-base-300: #2c2c35;
+  --color-base-content: #f4f4f6;
+  --color-primary: #3fa2ff;
+  --color-primary-content: #04121f;
+  --color-secondary: #202027;
+  --color-secondary-content: #f4f4f6;
+  --color-accent: #3fa2ff;
+  --color-accent-content: #04121f;
+  --color-neutral: #202027;
+  --color-neutral-content: #f4f4f6;
+  --color-info: #3fa2ff;
+  --color-info-content: #04121f;
+  --color-success: #3ddc84;
+  --color-success-content: #04121f;
+  --color-warning: #ffd166;
+  --color-warning-content: #1a1300;
+  --color-error: #ff6b6b;
+  --color-error-content: #1a0505;
+  --radius-selector: 0.375rem;
+  --radius-field: 0.625rem;
+  --radius-box: 1rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
   --border: 1px;
@@ -58,32 +59,32 @@
 
 @plugin "daisyui/packages/bundle/daisyui-theme" {
   name: "light";
-  default: true;
+  default: false;
   prefersdark: false;
   color-scheme: "light";
-  --color-base-100: #fcfcfb;
-  --color-base-200: #f4f3f0;
-  --color-base-300: #e1e0d9;
-  --color-base-content: #0b0b0b;
-  --color-primary: #2a78d6;
+  --color-base-100: #ffffff;
+  --color-base-200: #eef0f4;
+  --color-base-300: #dcdfe6;
+  --color-base-content: #0c0c10;
+  --color-primary: #1668d0;
   --color-primary-content: #ffffff;
-  --color-secondary: #e1e0d9;
-  --color-secondary-content: #0b0b0b;
-  --color-accent: #2a78d6;
+  --color-secondary: #f6f7fa;
+  --color-secondary-content: #0c0c10;
+  --color-accent: #1668d0;
   --color-accent-content: #ffffff;
-  --color-neutral: #0b0b0b;
-  --color-neutral-content: #fcfcfb;
-  --color-info: #2a78d6;
+  --color-neutral: #0c0c10;
+  --color-neutral-content: #ffffff;
+  --color-info: #1668d0;
   --color-info-content: #ffffff;
-  --color-success: #006300;
+  --color-success: #11793b;
   --color-success-content: #ffffff;
-  --color-warning: #b86e00;
+  --color-warning: #935f00;
   --color-warning-content: #ffffff;
-  --color-error: #d03b3b;
+  --color-error: #c42b2b;
   --color-error-content: #ffffff;
-  --radius-selector: 0.5rem;
-  --radius-field: 0.5rem;
-  --radius-box: 0.75rem;
+  --radius-selector: 0.375rem;
+  --radius-field: 0.625rem;
+  --radius-box: 1rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
   --border: 1px;
@@ -91,33 +92,79 @@
   --noise: 0;
 }
 
-/* Chart tokens, read by assets/js/charts/theme.js: a colour-blind-checked
-   categorical palette in a fixed order (light and dark steps of the same
-   hues), one blue ramp for magnitudes, and the chrome around the data. */
-:root {
-  --viz-1: #2a78d6; --viz-2: #eb6834; --viz-3: #1baf7a; --viz-4: #eda100;
-  --viz-5: #e87ba4; --viz-6: #008300; --viz-7: #4a3aa7; --viz-8: #e34948;
-  --viz-seq: #cde2fb, #9ec5f4, #6da7ec, #3987e5, #256abf, #184f95, #0d366b;
-  --viz-surface: #fcfcfb;
-  --viz-ink: #0b0b0b;
-  --viz-ink-2: #52514e;
-  --viz-muted: #898781;
-  --viz-grid: #e1e0d9;
-  --viz-axis: #c3c2b7;
-  --viz-nodata: rgba(11, 11, 11, 0.05);
+/* Surfaces, text steps and the metric hues. Each metric keeps its hue
+   everywhere it appears: icon tile, stat card stripe, bars, chart line,
+   meter. Every metric hue holds 4.5:1 on base-100 and surface-raised in
+   both themes, so a figure may be set in it. `up`/`down` are only for
+   change against the previous period, `live` only for the LIVE pill. */
+:root, [data-theme="dark"] {
+  --surface-raised: #202027;
+  --surface-hover: #2a2a33;
+  --border-strong: #6c6c7a;
+  --ink-muted: #a3a3ae;
+  --ink-subtle: #8a8a96;
+  --metric-hw: #3fa2ff;        --metric-hw-soft: #3fa2ff26;
+  --metric-avg: #ffd166;       --metric-avg-soft: #ffd16624;
+  --metric-peak: #ff5c8f;      --metric-peak-soft: #ff5c8f26;
+  --metric-airtime: #e070e0;   --metric-airtime-soft: #e070e026;
+  --metric-followers: #c9b8ff; --metric-followers-soft: #c9b8ff26;
+  --metric-chat: #34d3b0;      --metric-chat-soft: #34d3b024;
+  --metric-subs: #ff8a3d;      --metric-subs-soft: #ff8a3d26;
+  --live: #e0213a;
+  --up-soft: #3ddc8424;
+  --down-soft: #ff6b6b24;
+  --shadow-card: 0 1px 0 0 #ffffff08 inset, 0 8px 24px -12px #000000cc;
+  --shadow-pop: 0 12px 32px -8px #000000e6;
 }
 
-[data-theme="dark"] {
-  --viz-1: #3987e5; --viz-2: #d95926; --viz-3: #199e70; --viz-4: #c98500;
-  --viz-5: #d55181; --viz-6: #008300; --viz-7: #9085e9; --viz-8: #e66767;
+[data-theme="light"] {
+  --surface-raised: #f6f7fa;
+  --surface-hover: #eceef3;
+  --border-strong: #8a8e9c;
+  --ink-muted: #555663;
+  --ink-subtle: #6b6c78;
+  --metric-hw: #1668d0;        --metric-hw-soft: #1668d01a;
+  --metric-avg: #996600;       --metric-avg-soft: #9966001a;
+  --metric-peak: #d0185a;      --metric-peak-soft: #d0185a1a;
+  --metric-airtime: #8f2fa0;   --metric-airtime-soft: #8f2fa01a;
+  --metric-followers: #5b3fd0; --metric-followers-soft: #5b3fd01a;
+  --metric-chat: #08785f;      --metric-chat-soft: #08785f1a;
+  --metric-subs: #992e00;      --metric-subs-soft: #992e001a;
+  --live: #d0182b;
+  --up-soft: #11793b1a;
+  --down-soft: #c42b2b1a;
+  --shadow-card: 0 1px 2px 0 #0c0c100f, 0 8px 24px -16px #0c0c1033;
+  --shadow-pop: 0 12px 32px -8px #0c0c1040;
+}
+
+/* Chart tokens, read by assets/js/charts/theme.js. The categorical palette
+   is the metric hues, ordered so neighbours differ in lightness as well as
+   hue; a series that is a metric takes that metric's hue instead
+   (`metric` on its column). One blue ramp for magnitudes. */
+:root, [data-theme="dark"] {
+  --viz-1: #3fa2ff; --viz-2: #ff8a3d; --viz-3: #34d3b0; --viz-4: #ffd166;
+  --viz-5: #c9b8ff; --viz-6: #ff5c8f; --viz-7: #e070e0; --viz-8: #a3a3ae;
   --viz-seq: #0d366b, #104281, #184f95, #256abf, #3987e5, #6da7ec, #b7d3f6;
-  --viz-surface: #1a1a19;
-  --viz-ink: #ffffff;
-  --viz-ink-2: #c3c2b7;
-  --viz-muted: #898781;
-  --viz-grid: #2c2c2a;
-  --viz-axis: #383835;
-  --viz-nodata: rgba(255, 255, 255, 0.05);
+  --viz-surface: #17171c;
+  --viz-ink: #f4f4f6;
+  --viz-ink-2: #a3a3ae;
+  --viz-muted: #8a8a96;
+  --viz-grid: #26262e;
+  --viz-axis: #3a3a44;
+  --viz-nodata: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="light"] {
+  --viz-1: #1668d0; --viz-2: #992e00; --viz-3: #08785f; --viz-4: #996600;
+  --viz-5: #5b3fd0; --viz-6: #d0185a; --viz-7: #8f2fa0; --viz-8: #6b6c78;
+  --viz-seq: #cde2fb, #9ec5f4, #6da7ec, #3987e5, #256abf, #184f95, #0d366b;
+  --viz-surface: #ffffff;
+  --viz-ink: #0c0c10;
+  --viz-ink-2: #555663;
+  --viz-muted: #6b6c78;
+  --viz-grid: #e6e8ee;
+  --viz-axis: #c9ccd5;
+  --viz-nodata: rgba(12, 12, 16, 0.05);
 }
 
 /* Add variants based on LiveView classes */
@@ -179,25 +226,98 @@ table, .tabular-nums { font-variant-numeric: tabular-nums; }
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 
-/* Surfaces: a card is the page's lighter layer on the base-200 canvas. */
+
+/* Surfaces: canvas (base-200) → card (base-100) → inset well
+   (surface-raised). Never a card on a card: use the well. */
 .card-surface {
   background: var(--color-base-100);
   border: 1px solid var(--color-base-300);
   border-radius: var(--radius-box);
+  box-shadow: var(--shadow-card);
 }
 a.card-surface, .card-surface.is-link { transition: border-color .15s, box-shadow .15s; }
 a.card-surface:hover, .card-surface.is-link:hover {
-  border-color: color-mix(in oklab, var(--color-base-content) 22%, transparent);
-  box-shadow: 0 2px 12px rgb(0 0 0 / .06);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-pop);
+}
+.inset-well { background: var(--surface-raised); border-radius: var(--radius-field); }
+.text-muted { color: var(--ink-muted); }
+.text-subtle { color: var(--ink-subtle); }
+
+/* Metric hues as classes: set --m and --m-soft for the pieces below. */
+.m-hw { --m: var(--metric-hw); --m-soft: var(--metric-hw-soft); }
+.m-avg { --m: var(--metric-avg); --m-soft: var(--metric-avg-soft); }
+.m-peak { --m: var(--metric-peak); --m-soft: var(--metric-peak-soft); }
+.m-airtime { --m: var(--metric-airtime); --m-soft: var(--metric-airtime-soft); }
+.m-followers { --m: var(--metric-followers); --m-soft: var(--metric-followers-soft); }
+.m-chat { --m: var(--metric-chat); --m-soft: var(--metric-chat-soft); }
+.m-subs { --m: var(--metric-subs); --m-soft: var(--metric-subs-soft); }
+.text-metric { color: var(--m); }
+
+/* Icon tile: the metric's glyph on its soft ground; neutral without one. */
+.icon-tile {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-field);
+  background: var(--m-soft, var(--surface-raised));
+  color: var(--m, var(--color-base-content));
+}
+.icon-tile.is-sm { width: 1.75rem; height: 1.75rem; border-radius: var(--radius-selector); }
+
+/* Stat card: a stripe in the metric's hue across the top. */
+.stat-card { position: relative; overflow: hidden; }
+.stat-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--m, var(--color-base-300));
 }
 
-/* A segmented control (period picker, metric switch). */
+/* Change against the previous period: arrow + percent in a soft pill. */
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .125rem .5rem .125rem .375rem;
+  border-radius: 999px;
+  font-size: .75rem;
+  line-height: 1rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.delta.is-up { color: var(--color-success); background: var(--up-soft); }
+.delta.is-down { color: var(--color-error); background: var(--down-soft); }
+.delta.is-flat { color: var(--ink-muted); background: var(--surface-raised); }
+
+/* The LIVE pill. */
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--live);
+  color: #ffffff;
+  font-size: .6875rem;
+  line-height: .875rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+/* A segmented control (period picker, metric switch): the selected
+   option is the page's one solid accent. */
 .segmented {
   display: inline-flex;
   gap: 2px;
-  padding: 2px;
+  padding: 3px;
   border-radius: var(--radius-field);
-  background: var(--color-base-200);
+  background: var(--surface-raised);
   border: 1px solid var(--color-base-300);
   max-width: 100%;
   overflow-x: auto;
@@ -205,57 +325,71 @@ a.card-surface:hover, .card-surface.is-link:hover {
 }
 .segmented-item {
   flex-shrink: 0;
-  padding: .25rem .6rem;
+  padding: .25rem .7rem;
   font-size: .75rem;
   line-height: 1.25rem;
-  border-radius: calc(var(--radius-field) - 2px);
-  color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+  font-weight: 600;
+  border-radius: var(--radius-selector);
+  color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .segmented-item:hover { color: var(--color-base-content); }
 .segmented-item.is-active {
-  background: var(--color-base-100);
-  color: var(--color-base-content);
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgb(0 0 0 / .08);
+  background: var(--color-primary);
+  color: var(--color-primary-content);
 }
-[data-theme="dark"] .segmented-item.is-active { background: var(--color-base-300); }
 
-/* Channel initials, tinted from the categorical palette. */
+/* Day bars: horizontal bars in a metric's hue. */
+.day-bar { height: .875rem; }
+.day-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 0 var(--radius-selector) var(--radius-selector) 0;
+  background: var(--m);
+}
+.day-bar > span:dir(rtl) { border-radius: var(--radius-selector) 0 0 var(--radius-selector); }
+
+/* Channel initials, on a tint of one metric hue with a ring in it. */
 .avatar-initial {
-  background: color-mix(in oklab, var(--avatar) 18%, var(--color-base-100));
-  color: color-mix(in oklab, var(--avatar) 75%, var(--color-base-content));
+  background: var(--m-soft);
+  color: var(--m);
+  box-shadow: inset 0 0 0 1.5px var(--m);
 }
-.avatar-1 { --avatar: var(--viz-1); }
-.avatar-2 { --avatar: var(--viz-2); }
-.avatar-3 { --avatar: var(--viz-3); }
-.avatar-4 { --avatar: var(--viz-4); }
-.avatar-5 { --avatar: var(--viz-5); }
-.avatar-6 { --avatar: var(--viz-6); }
-.avatar-7 { --avatar: var(--viz-7); }
-.avatar-8 { --avatar: var(--viz-8); }
+.avatar-1 { --m: var(--viz-1); --m-soft: color-mix(in oklab, var(--viz-1) 16%, var(--color-base-100)); }
+.avatar-2 { --m: var(--viz-2); --m-soft: color-mix(in oklab, var(--viz-2) 16%, var(--color-base-100)); }
+.avatar-3 { --m: var(--viz-3); --m-soft: color-mix(in oklab, var(--viz-3) 16%, var(--color-base-100)); }
+.avatar-4 { --m: var(--viz-4); --m-soft: color-mix(in oklab, var(--viz-4) 16%, var(--color-base-100)); }
+.avatar-5 { --m: var(--viz-5); --m-soft: color-mix(in oklab, var(--viz-5) 16%, var(--color-base-100)); }
+.avatar-6 { --m: var(--viz-6); --m-soft: color-mix(in oklab, var(--viz-6) 16%, var(--color-base-100)); }
+.avatar-7 { --m: var(--viz-7); --m-soft: color-mix(in oklab, var(--viz-7) 16%, var(--color-base-100)); }
+.avatar-8 { --m: var(--viz-8); --m-soft: color-mix(in oklab, var(--viz-8) 16%, var(--color-base-100)); }
 
-/* Inline bar behind a leaderboard value. */
+/* Inline bar behind a leaderboard value, in the ranking metric's hue. */
 .meter {
   height: 4px;
   border-radius: 2px;
-  background: color-mix(in oklab, var(--color-base-content) 8%, transparent);
+  background: var(--surface-hover);
   overflow: hidden;
 }
 .meter > span {
   display: block;
   height: 100%;
   border-radius: 2px;
-  background: var(--viz-1);
+  background: var(--m, var(--viz-1));
 }
 
-/* Tables: quiet headers, numbers that don't wrap. */
+/* Tables: a rounded header band, numbers that don't wrap. */
 .table thead th {
   font-size: .75rem;
-  font-weight: 500;
-  color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+  font-weight: 600;
+  color: var(--ink-muted);
+  background: var(--surface-raised);
   white-space: nowrap;
 }
+.table thead th:first-child { border-start-start-radius: var(--radius-field); border-end-start-radius: var(--radius-field); }
+.table thead th:last-child { border-start-end-radius: var(--radius-field); border-end-end-radius: var(--radius-field); }
 .table td.text-end { white-space: nowrap; }
 .table :where(thead tr, tbody tr:not(:last-child)) { border-color: var(--color-base-300); }
+.table thead tr { border-bottom: 0; }
+.table tbody tr:hover { background: var(--surface-hover); }

@@ -70,6 +70,22 @@ defmodule KickTracker.ReportsTest do
     assert Enum.at(Enum.at(map, 0), 20) == nil
   end
 
+  test "weekdays are the channel's, and airtime is split at its midnight", %{c: c} do
+    Repo.query!("UPDATE channels SET timezone = 'Africa/Tunis' WHERE id = $1", [c.id])
+    c = KickTracker.Channels.get!(c.id)
+    # 23:30 to 00:30 in Tunis, from Monday into Tuesday.
+    stream!(c, at(150), at(210))
+    days = Reports.weekdays(c, at(-60), at(1560))
+
+    assert Enum.map(days, & &1.weekday) == Enum.to_list(1..7)
+    [mon, tue, wed | _] = days
+    assert mon.avg_viewers == 100.0 and tue.avg_viewers == 300.0
+    assert_in_delta mon.hours_watched, 59 * 100 / 60, 0.01
+    assert mon.airtime_s == 3600 + 1800 and tue.airtime_s == 3600 + 1800
+    # No readings: unknown, not 0; no stream: no airtime.
+    assert wed.hours_watched == nil and wed.avg_viewers == nil and wed.airtime_s == 0
+  end
+
   test "slugs and search" do
     assert Reports.slugify("EA Sports FC 27") == "ea-sports-fc-27"
     assert Reports.slugify("Just Chatting") == "just-chatting"

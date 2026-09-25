@@ -1,7 +1,7 @@
 // Time series (project.md §13.7): a line per column, a peak band above an
 // average, bars, or one line per channel (compare). Gaps break the line
 // (nulls) and coverage gaps are shaded "no data"; never drawn as zero.
-import {baseOption, timeAxis, valueAxis, gapAreas, dayFormatter, zip, line, bar, alpha, fmt} from "./theme"
+import {baseOption, timeAxis, valueAxis, gapAreas, dayFormatter, zip, line, bar, alpha, fmt, columnColor} from "./theme"
 
 export function option(data, opts, t) {
   const o = baseOption(t)
@@ -21,13 +21,14 @@ export function option(data, opts, t) {
 
   const cols = opts.columns || [{key: "v", label: opts.label || "", style: "line"}]
   const main = cols.find((c) => c.style === "line")
-  let slot = 0
+  const slot = {i: 0}
+  const mainColor = main ? columnColor(t, main, {i: 0}) : t.palette[0]
 
   cols.forEach((c) => {
     if (c.style === "band" && main) {
       // The peak as a light band above the average, in the average's hue:
       // downsampling never hides a peak.
-      const color = t.palette[0]
+      const color = mainColor
       const lower = zip(data.t, data[main.key])
       const upper = data.t.map((x, j) => {
         const a = data[main.key][j], m = data[c.key][j]
@@ -41,9 +42,9 @@ export function option(data, opts, t) {
         // the tooltip shows the peak itself.
         tooltip: {valueFormatter: (_v, i) => fmt(data[c.key][i])}})
     } else if (c.style === "bar") {
-      o.series.push(bar(c.label, zip(data.t, data[c.key]), t.palette[slot++], {stack: c.stack}))
+      o.series.push(bar(c.label, zip(data.t, data[c.key]), columnColor(t, c, slot), {stack: c.stack}))
     } else {
-      const color = t.palette[slot++]
+      const color = columnColor(t, c, slot)
       o.series.push(line(c.label, zip(data.t, data[c.key]), color, {
         z: 3,
         areaStyle: c.style === "area" || cols.length === 1 ? {color: alpha(color, 0.1)} : undefined,

@@ -82,7 +82,11 @@ defmodule KickTrackerWeb.ChannelLive do
       kpis: kpis,
       coverage: Series.coverage(c, "api", p.from, p.to),
       stream_rows: Reports.streams(c, limit: 8),
-      records: Reports.records(c)
+      records: Reports.records(c),
+      weekdays:
+        Cache.fetch({:weekdays, c.id, p.from, p.to}, Cache.ttl_for(p.to), fn ->
+          Reports.weekdays(c, p.from, p.to)
+        end)
     )
   end
 
@@ -317,28 +321,33 @@ defmodule KickTrackerWeb.ChannelLive do
     <section id="kpis" class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       <.kpi
         label={gettext("Hours watched")}
+        metric={:hw}
         value={@kpis.now.hours_watched}
         previous={@kpis.before.hours_watched}
         hint={gettext("Σ viewers × time between readings, capped at 75s")}
       />
       <.kpi
         label={gettext("Average viewers")}
+        metric={:avg}
         value={@kpis.now.avg_viewers}
         previous={@kpis.before.avg_viewers}
       />
       <.kpi
         label={gettext("Peak viewers")}
+        metric={:peak}
         value={@kpis.now.peak_viewers}
         previous={@kpis.before.peak_viewers}
       />
       <.kpi
         label={gettext("Airtime")}
+        metric={:airtime}
         value={@kpis.now.airtime_s}
         previous={@kpis.before.airtime_s}
         kind={:duration}
       />
       <.kpi
         label={gettext("Follower gain")}
+        metric={:followers}
         value={@kpis.now.follower_gain}
         previous={@kpis.before.follower_gain}
         note={
@@ -350,6 +359,7 @@ defmodule KickTrackerWeb.ChannelLive do
       />
       <.kpi
         label={gettext("Unique chatters")}
+        metric={:chat}
         value={@kpis.now.unique_chatters}
         previous={@kpis.before.unique_chatters}
       />
@@ -362,11 +372,12 @@ defmodule KickTrackerWeb.ChannelLive do
           refresh={@refresh}
           kind="timeseries"
           title={gettext("Viewers")}
+          metric={:avg}
           src={"/data/v1/channels/#{@channel.slug}/viewers?#{@query}"}
           opts={
             %{
               columns: [
-                %{key: "avg", label: gettext("Average"), style: "line"},
+                %{key: "avg", label: gettext("Average"), style: "line", metric: "avg"},
                 %{key: "max", label: gettext("Peak"), style: "band"}
               ]
             }
@@ -383,8 +394,14 @@ defmodule KickTrackerWeb.ChannelLive do
         refresh={@refresh}
         kind="timeseries"
         title={gettext("Followers")}
+        metric={:followers}
         src={"/data/v1/channels/#{@channel.slug}/followers?#{@query}"}
-        opts={%{zero: false, columns: [%{key: "v", label: gettext("Followers"), style: "line"}]}}
+        opts={
+          %{
+            zero: false,
+            columns: [%{key: "v", label: gettext("Followers"), style: "line", metric: "followers"}]
+          }
+        }
         class="h-72"
       />
       <.chart
@@ -392,6 +409,7 @@ defmodule KickTrackerWeb.ChannelLive do
         refresh={@refresh}
         kind="heatmap"
         title={gettext("When they stream (avg viewers, %{tz})", tz: @channel.timezone)}
+        icon="hero-calendar-days"
         src={"/data/v1/channels/#{@channel.slug}/heatmap?#{@query}"}
         opts={%{unit: gettext("avg viewers")}}
         class="h-64"
@@ -401,6 +419,7 @@ defmodule KickTrackerWeb.ChannelLive do
         refresh={@refresh}
         kind="share"
         title={gettext("Hours watched by category")}
+        icon="hero-squares-2x2"
         src={"/data/v1/channels/#{@channel.slug}/categories?#{@query}"}
         opts={
           %{
@@ -411,45 +430,59 @@ defmodule KickTrackerWeb.ChannelLive do
         }
         class="h-64"
       />
-      <section class="card-surface p-4">
-        <h2 class="text-sm font-semibold">{gettext("Records")}</h2>
-        <dl class="mt-2 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-sm">
-          <%= if r = @records.peak do %>
-            <dt>{gettext("Highest peak")}</dt>
-            <dd>
-              <.link navigate={~p"/c/#{@channel.slug}/streams/#{r.stream_id}"} class="link"><.num value={
-                r.peak_viewers
-              } /></.link>
-            </dd>
-          <% end %>
-          <%= if r = @records.hours_watched do %>
-            <dt>{gettext("Most hours watched")}</dt>
-            <dd>
-              <.link navigate={~p"/c/#{@channel.slug}/streams/#{r.stream_id}"} class="link"><.num value={
-                r.hours_watched
-              } /></.link>
-            </dd>
-          <% end %>
-          <%= if r = @records.longest do %>
-            <dt>{gettext("Longest stream")}</dt>
-            <dd>
-              <.link navigate={~p"/c/#{@channel.slug}/streams/#{r.stream_id}"} class="link"><.duration seconds={
-                r.airtime_s
-              } /></.link>
-            </dd>
-          <% end %>
-        </dl>
-        <p :if={@records.peak == nil} class="text-sm opacity-60">{gettext("No streams yet.")}</p>
+      <section id="records" class="card-surface p-4 sm:p-5">
+        <h2 class="flex items-center gap-3 text-[0.9375rem] font-semibold">
+          <.icon_tile icon="hero-trophy" />{gettext("Records")}
+        </h2>
+        <div class="mt-3 grid gap-0.5">
+          <.record
+            :if={r = @records.peak}
+            metric={:peak}
+            label={gettext("Highest peak")}
+            to={~p"/c/#{@channel.slug}/streams/#{r.stream_id}"}
+            at={r.started_at}
+            tz={@channel.timezone}
+          >
+            <.num value={r.peak_viewers} />
+          </.record>
+          <.record
+            :if={r = @records.hours_watched}
+            metric={:hw}
+            label={gettext("Most hours watched")}
+            to={~p"/c/#{@channel.slug}/streams/#{r.stream_id}"}
+            at={r.started_at}
+            tz={@channel.timezone}
+          >
+            <.num value={r.hours_watched} compact />
+          </.record>
+          <.record
+            :if={r = @records.longest}
+            metric={:airtime}
+            label={gettext("Longest stream")}
+            to={~p"/c/#{@channel.slug}/streams/#{r.stream_id}"}
+            at={r.started_at}
+            tz={@channel.timezone}
+          >
+            <.duration seconds={r.airtime_s} />
+          </.record>
+        </div>
+        <p :if={@records.peak == nil} class="text-sm text-muted">{gettext("No streams yet.")}</p>
       </section>
     </div>
 
+    <.weekdays days={@weekdays} tz={@channel.timezone} />
+
     <section class="mt-6">
-      <div class="flex items-center">
+      <div class="flex items-center gap-3">
+        <.icon_tile metric={:airtime} />
         <h2 class="text-lg font-semibold tracking-tight">{gettext("Recent streams")}</h2>
         <span class="flex-1"></span>
-        <.link patch={page_path(@channel, :streams, Period.to_params(@period))} class="link text-sm">{gettext(
-          "All streams"
-        )}</.link>
+        <.link
+          patch={page_path(@channel, :streams, Period.to_params(@period))}
+          class="btn btn-sm btn-ghost border-base-300"
+        >
+          {gettext("All streams")}<.icon name="hero-arrow-right-micro" class="size-4 rtl:rotate-180" />
+        </.link>
       </div>
       <.stream_table streams={@stream_rows} channel={@channel} params={@params} sortable={false} />
     </section>
@@ -479,19 +512,27 @@ defmodule KickTrackerWeb.ChannelLive do
       <span>{gettext("No message text is ever stored: only who chatted, when, and how much.")}</span>
     </div>
     <section class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <.kpi label={gettext("Messages")} value={@kpis.now.messages} previous={@kpis.before.messages} />
+      <.kpi
+        label={gettext("Messages")}
+        metric={:chat}
+        value={@kpis.now.messages}
+        previous={@kpis.before.messages}
+      />
       <.kpi
         label={gettext("Unique chatters")}
+        metric={:chat}
         value={@kpis.now.unique_chatters}
         previous={@kpis.before.unique_chatters}
       />
       <.kpi
         label={gettext("Messages per hour live")}
+        metric={:chat}
         value={per_hour(@kpis.now.messages, @kpis.now.airtime_s)}
         previous={per_hour(@kpis.before.messages, @kpis.before.airtime_s)}
       />
       <.kpi
         label={gettext("Chatters per 100 viewers")}
+        metric={:chat}
         value={engagement(@kpis.now)}
         previous={engagement(@kpis.before)}
         hint={gettext("Unique chatters in the period ÷ average viewers × 100")}
@@ -503,8 +544,11 @@ defmodule KickTrackerWeb.ChannelLive do
         refresh={@refresh}
         kind="timeseries"
         title={gettext("Messages")}
+        metric={:chat}
         src={"/data/v1/channels/#{@channel.slug}/chat?#{@query}"}
-        opts={%{columns: [%{key: "messages", label: gettext("Messages"), style: "bar"}]}}
+        opts={
+          %{columns: [%{key: "messages", label: gettext("Messages"), style: "bar", metric: "chat"}]}
+        }
         class="h-72"
       >
         <:note>{gettext("Active chatters in a rolling window are on each stream's page.")}</:note>
@@ -552,21 +596,27 @@ defmodule KickTrackerWeb.ChannelLive do
       </span>
     </div>
     <section id="support-kpis" class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
-      <.kpi label={gettext("New subs")} value={known(@support.subs, @ingress)} />
-      <.kpi label={gettext("Renewals")} value={known(@support.resubs, @ingress)} />
-      <.kpi label={gettext("Gifted subs")} value={known(@support.gifted_subs, @ingress)} />
-      <.kpi label={gettext("Kicks")} value={known(@support.kicks, @ingress)} />
-      <div class="card-surface p-4">
-        <div class="flex items-center gap-1 text-xs opacity-70">
-          {gettext("Revenue")} <.estimate />
+      <.kpi label={gettext("New subs")} metric={:subs} value={known(@support.subs, @ingress)} />
+      <.kpi label={gettext("Renewals")} metric={:subs} value={known(@support.resubs, @ingress)} />
+      <.kpi
+        label={gettext("Gifted subs")}
+        metric={:subs}
+        value={known(@support.gifted_subs, @ingress)}
+      />
+      <.kpi label={gettext("Kicks")} metric={:subs} value={known(@support.kicks, @ingress)} />
+      <div class="card-surface stat-card m-subs p-4 sm:px-5">
+        <div class="flex items-center gap-2">
+          <.icon_tile metric={:subs} icon="hero-banknotes" size={:sm} />
+          <span class="text-[0.8125rem] font-medium text-muted">{gettext("Revenue")}</span>
+          <.estimate />
         </div>
-        <div class="mt-1 text-xl font-semibold">
+        <div class="mt-3 text-2xl font-bold tracking-tight tabular-nums sm:text-[1.75rem] sm:leading-8">
           $<.num
             value={known(Float.round(@support.estimated_revenue_usd, 0), @ingress)}
             compact
           />
         </div>
-        <div class="text-xs opacity-60">
+        <div class="mt-2 text-xs text-muted">
           {gettext("subs at $%{p}, %{s}% share; a Kick at $%{k}",
             p: @support.assumptions["sub_price_usd"],
             s: round(@support.assumptions["sub_share"] * 100),
@@ -581,11 +631,12 @@ defmodule KickTrackerWeb.ChannelLive do
         refresh={@refresh}
         kind="bars"
         title={gettext("Support")}
+        metric={:subs}
         src={"/data/v1/channels/#{@channel.slug}/support?#{@query}"}
         opts={
           %{
             columns: [
-              %{key: "subs", label: gettext("Subs"), stack: "s"},
+              %{key: "subs", label: gettext("Subs"), stack: "s", metric: "subs"},
               %{key: "gifts", label: gettext("Gifted subs"), stack: "s"}
             ]
           }
@@ -618,6 +669,7 @@ defmodule KickTrackerWeb.ChannelLive do
         refresh={@refresh}
         kind="share"
         title={gettext("Hours watched by category")}
+        icon="hero-squares-2x2"
         src={"/data/v1/channels/#{@channel.slug}/categories?#{@query}"}
         opts={
           %{
@@ -680,6 +732,105 @@ defmodule KickTrackerWeb.ChannelLive do
     </div>
     """
   end
+
+  attr :metric, :atom, required: true
+  attr :label, :string, required: true
+  attr :to, :string, required: true
+  attr :at, :any, required: true
+  attr :tz, :string, required: true
+  slot :inner_block, required: true
+
+  defp record(assigns) do
+    ~H"""
+    <.link
+      navigate={@to}
+      class="flex items-center gap-3 rounded-field px-2 py-2 transition-colors hover:bg-[var(--surface-hover)]"
+    >
+      <.icon_tile metric={@metric} size={:sm} />
+      <span class="min-w-0 flex-1">
+        <span class="block truncate text-sm text-muted">{@label}</span>
+        <span class="block text-xs text-subtle"><.time at={@at} fmt="date" tz={@tz} /></span>
+      </span>
+      <span class="text-base font-bold tabular-nums">{render_slot(@inner_block)}</span>
+    </.link>
+    """
+  end
+
+  attr :days, :list, required: true
+  attr :tz, :string, required: true
+
+  # Weekday bars: hours watched, average viewers and airtime, each against
+  # its own busiest weekday. An unknown figure has no bar and shows "–".
+  defp weekdays(assigns) do
+    ~H"""
+    <section id="weekdays" class="card-surface mt-4 p-4 sm:p-5">
+      <h2 class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.9375rem] font-semibold">
+        <.icon_tile icon="hero-calendar-days" />{gettext("Days of the week")}
+        <span class="text-xs font-normal text-muted">
+          {gettext("totals over the period, in %{tz} time", tz: @tz)}
+        </span>
+      </h2>
+      <div class="mt-4 grid gap-3 md:grid-cols-3">
+        <.day_bars
+          metric={:hw}
+          title={gettext("Hours watched")}
+          days={@days}
+          key={:hours_watched}
+        />
+        <.day_bars metric={:avg} title={gettext("Average viewers")} days={@days} key={:avg_viewers} />
+        <.day_bars metric={:airtime} title={gettext("Airtime")} days={@days} key={:airtime_s} />
+      </div>
+    </section>
+    """
+  end
+
+  attr :metric, :atom, required: true
+  attr :title, :string, required: true
+  attr :days, :list, required: true
+  attr :key, :atom, required: true
+
+  defp day_bars(assigns) do
+    max =
+      assigns.days
+      |> Enum.map(&Map.get(&1, assigns.key))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.max(fn -> nil end)
+
+    assigns = assign(assigns, max: max)
+
+    ~H"""
+    <div class={["inset-well p-4", "m-#{@metric}"]}>
+      <h3 class="mb-3 text-[0.8125rem] font-semibold text-muted">{@title}</h3>
+      <div
+        :for={d <- @days}
+        class="grid h-6 grid-cols-[2.25rem_1fr_auto] items-center gap-2 text-[0.8125rem]"
+      >
+        <span class="font-medium text-muted">{weekday_label(d.weekday)}</span>
+        <span class="day-bar">
+          <span
+            :if={is_number(Map.get(d, @key)) and is_number(@max) and @max > 0}
+            style={"width: #{Float.round(Map.get(d, @key) / @max * 100, 1)}%"}
+          ></span>
+        </span>
+        <span class="min-w-12 text-end font-semibold tabular-nums">
+          <%= if @key == :airtime_s do %>
+            <.duration seconds={Map.get(d, @key)} />
+          <% else %>
+            <.num value={Map.get(d, @key)} compact />
+          <% end %>
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  defp weekday_label(1), do: gettext("Mon")
+  defp weekday_label(2), do: gettext("Tue")
+  defp weekday_label(3), do: gettext("Wed")
+  defp weekday_label(4), do: gettext("Thu")
+  defp weekday_label(5), do: gettext("Fri")
+  defp weekday_label(6), do: gettext("Sat")
+  defp weekday_label(7), do: gettext("Sun")
 
   attr :streams, :list
   attr :channel, :map

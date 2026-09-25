@@ -334,4 +334,17 @@ defmodule KickTrackerWeb.PublicUITest do
     assert html =~ ~r/<div class="[^"]*overflow-x-auto[^"]*">\s*<table id="overlap"/
     assert html =~ ~r/<div class="[^"]*overflow-x-auto[^"]*">\s*<table id="compare-table"/
   end
+
+  test "a channel's overview colours each figure by its metric and shows its weekdays", %{
+    conn: conn
+  } do
+    {:ok, view, _} = live(conn, "/c/somestreamer")
+    assert has_element?(view, "#kpis .stat-card.m-hw")
+    assert has_element?(view, "#kpis .stat-card.m-followers")
+    # A channel with no readings: seven weekdays, every figure unknown or no airtime.
+    assert has_element?(view, "#weekdays .m-avg")
+    html = view |> element("#weekdays") |> render()
+    assert length(Regex.scan(~r/Mon|Tue|Wed|Thu|Fri|Sat|Sun/, html)) == 21
+    refute html =~ "style=\"width"
+  end
 end

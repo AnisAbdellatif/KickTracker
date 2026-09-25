@@ -197,7 +197,7 @@ defmodule KickTrackerWeb.HomeLive do
                     </div>
                   </div>
                   <div class="text-end">
-                    <div class="text-xl font-semibold leading-tight tracking-tight">
+                    <div class="m-hw text-metric text-xl font-bold leading-tight tracking-tight tabular-nums">
                       <.num value={l.viewers} />
                     </div>
                     <div class="text-[0.7rem] text-base-content/60">{gettext("viewers")}</div>
@@ -217,7 +217,7 @@ defmodule KickTrackerWeb.HomeLive do
                   data-kind="sparkline"
                   data-src={~p"/data/v1/sparklines/#{l.slug}?at=#{@spark_at}"}
                   data-error={gettext("Couldn't load this chart.")}
-                  class="relative mt-3 h-12"
+                  class="inset-well relative mt-3 h-14"
                 >
                 </div>
                 <div class="mt-1 flex justify-between text-[0.65rem] text-base-content/70">
@@ -230,6 +230,7 @@ defmodule KickTrackerWeb.HomeLive do
 
         <section class="mt-12">
           <div class="flex flex-wrap items-center gap-3">
+            <.icon_tile metric={board_metric(@metric)} />
             <h2 class="text-xl font-semibold tracking-tight">{gettext("Leaderboard")}</h2>
             <span class="flex-1"></span>
             <.period_picker period={@period} path="/" params={@params} />
@@ -292,7 +293,7 @@ defmodule KickTrackerWeb.HomeLive do
                       <.avatar name={r.slug} class="size-7 text-xs" />
                       <span class="truncate">{r.slug}</span>
                     </.link>
-                    <div class="meter ms-9.5 mt-1.5 max-w-48">
+                    <div class={["meter ms-9.5 mt-1.5 max-w-48", "m-#{board_metric(@metric)}"]}>
                       <span style={"width: #{share(metric_value(r, @metric), @board_max)}%"}></span>
                     </div>
                   </td>
@@ -318,14 +319,16 @@ defmodule KickTrackerWeb.HomeLive do
         </section>
 
         <section :if={@notable != []} class="mt-12">
-          <h2 class="text-xl font-semibold tracking-tight">{gettext("Notable moments")}</h2>
+          <h2 class="flex items-center gap-3 text-xl font-semibold tracking-tight">
+            <.icon_tile icon="hero-sparkles" />{gettext("Notable moments")}
+          </h2>
           <ul id="notable" class="mt-4 grid gap-3 sm:grid-cols-2">
             <li :for={n <- @notable} class="card-surface flex gap-3 p-4 text-sm">
               <span class={[
-                "flex size-9 shrink-0 items-center justify-center rounded-full",
-                n.kind == "record" && "bg-warning/15 text-warning",
-                n.kind == "gifts" && "bg-success/15 text-success",
-                n.kind not in ["record", "gifts"] && "bg-primary/15 text-primary"
+                "icon-tile",
+                n.kind == "record" && "m-peak",
+                n.kind == "gifts" && "m-subs",
+                n.kind not in ["record", "gifts"] && "m-hw"
               ]}>
                 <.icon :if={n.kind == "record"} name="hero-trophy-micro" class="size-4" />
                 <.icon :if={n.kind == "gifts"} name="hero-gift-micro" class="size-4" />
@@ -375,4 +378,11 @@ defmodule KickTrackerWeb.HomeLive do
     </Layouts.app>
     """
   end
+
+  # The hue of the metric a leaderboard ranks by.
+  defp board_metric("hours_watched"), do: :hw
+  defp board_metric("avg_viewers"), do: :avg
+  defp board_metric("peak_viewers"), do: :peak
+  defp board_metric("follower_gain"), do: :followers
+  defp board_metric("kicks"), do: :subs
 end
