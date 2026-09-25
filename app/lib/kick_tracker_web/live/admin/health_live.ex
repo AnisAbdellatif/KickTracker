@@ -65,6 +65,8 @@ defmodule KickTrackerWeb.Admin.HealthLive do
           <thead>
             <tr>
               <th>{gettext("Collector")}</th><th>{gettext("Role")}</th><th>
+                {gettext("Build")}
+              </th><th>
                 {gettext("Last heard")}
               </th><th>{gettext("Writes waiting")}</th><th>{gettext("Set aside")}</th>
             </tr>
@@ -77,6 +79,14 @@ defmodule KickTrackerWeb.Admin.HealthLive do
                   "badge badge-xs",
                   collector_badge(c, @now)
                 ]}>{collector_role(c, @now)}</span>
+              </td>
+              <td class="font-mono" title={c[:build]}>
+                {short_build(c[:build])}
+                <span
+                  :if={c[:build] && KickTracker.build() && c[:build] != KickTracker.build()}
+                  class="text-xs text-base-content/70"
+                  title={gettext("Not the build this page runs on")}
+                >{gettext("(other build)")}</span>
               </td>
               <td>{ago(c.heartbeat_at, @now)}</td>
               <td class="tabular-nums">
@@ -92,6 +102,10 @@ defmodule KickTrackerWeb.Admin.HealthLive do
             </tr>
           </tbody>
         </table>
+        <p :if={KickTracker.build()} id="web-build" class="mt-2 text-xs text-base-content/70">
+          {gettext("This page is served by build")}
+          <span class="font-mono" title={KickTracker.build()}>{short_build(KickTracker.build())}</span>.
+        </p>
         <div
           :for={{c, q} <- quarantined(@collectors)}
           id={"quarantined-#{c.id}-#{q.channel_id}"}
@@ -322,6 +336,11 @@ defmodule KickTrackerWeb.Admin.HealthLive do
       true -> gettext("%{n}d ago", n: div(s, 86_400))
     end
   end
+
+  # A commit, shortened as git does; unknown for images built before
+  # BUILD_SHA was set.
+  defp short_build(nil), do: "–"
+  defp short_build(sha), do: String.slice(sha, 0, 7)
 
   defp quarantined(collectors),
     do: for(c <- collectors, q <- c[:quarantined] || [], do: {c, q})

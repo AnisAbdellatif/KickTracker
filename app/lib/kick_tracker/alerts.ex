@@ -155,6 +155,8 @@ defmodule KickTracker.Alerts do
         journal_depth: journal["depth"] || 0,
         journal_oldest_at: parse_time(journal["oldest_at"]),
         journal_buried: journal["buried"] || 0,
+        # Unknown for a collector whose image predates BUILD_SHA.
+        build: status["build"],
         quarantined:
           for(
             q <- status["quarantined"] || [],

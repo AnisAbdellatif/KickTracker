@@ -70,7 +70,8 @@ defmodule KickTracker.Collector do
           {id, q} <- s[:quarantined_channels] || %{},
           do: %{channel_id: id, failures: q.failures, since: q.since}
         ),
-      version: to_string(Application.spec(:kick_tracker, :vsn))
+      version: to_string(Application.spec(:kick_tracker, :vsn)),
+      build: KickTracker.build()
     }
   end
 

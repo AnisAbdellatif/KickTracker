@@ -39,6 +39,10 @@ RUN useradd --system --home /app app && chown app /app \
     && mkdir /transfers /journal && chown app /transfers /journal
 COPY --from=build --chown=app /app/_build/prod/rel/kick_tracker ./
 USER app
+# The commit this image was built from (CI passes it): which build each
+# node runs, shown on the admin health page.
+ARG BUILD_SHA=""
+ENV BUILD_SHA=${BUILD_SHA}
 EXPOSE 4100
 # A collector answers on its own status port (is it collecting, or
 # standing by and checking?); the site on /healthz.
