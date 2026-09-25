@@ -4,11 +4,29 @@ How the pieces in this folder fit together (project.md §15, §18, §19).
 Development infrastructure is `compose.dev.yml`; everything else here is
 production.
 
+The main VPS runs two kinds of containers:
+
+- **the app's** (two web nodes, two collectors, two webhook receivers),
+  deployed with [deploy-kit](https://github.com/AnisAbdellatif/deploy-kit)
+  and [Kamal](https://kamal-deploy.org) from your machine
+  (`release.sh`), each pair one at a time;
+- **the infrastructure's** (TimescaleDB, RabbitMQ, the bundled Caddy),
+  with compose (`compose.single.yml`), rarely touched.
+
+Both are on one Docker network, `kamal`. CI builds, labels and attests the
+images; it deploys nothing and holds no key to the server.
+
 | File | What |
 |---|---|
-| `compose.single.yml` | Stage 1: the whole stack on one VPS |
+| `release.sh` | **A release**, from your machine: `kit deploy` of the app, then of the receivers |
+| `kamal/app.yml`, `kamal/receiver.yml` | Kamal's configs: the app image (web, collectors) and the receiver image |
+| `kamal/*.rehearsal.yml` | What the rehearsal changes (`-d rehearsal`) |
+| `kamal/registry-password` | The read-only GHCR token Kamal logs the server in with |
+| `server-sync.sh` | Run on the server before each deploy: checkout up to the commit, secrets decrypted |
+| `../.kamal/` | deploy-kit: its settings (`kit.env`), the groups (`groups/`), the project's steps (`steps/`), the vendored kit (`kit/`) |
+| `compose.single.yml` | Stage 1 infrastructure: database, queue, bundled Caddy |
 | `compose.backup-receiver.yml` | Stage 2: a backup receiver on a second VPS |
-| `compose.shadow.yml` | Stage 2: the shadow collector on the second VPS (§10.5) |
+| `compose.shadow.yml`, `deploy.sh` | Stage 2: the shadow collector on the second VPS (§10.5), deployed with `ROLE=shadow ./deploy.sh` there |
 | `shadow/readers.sql` | Read-only users for the primary / shadow pair |
 | `Caddyfile` | The bundled Caddy (profile `caddy`): HTTPS, from `caddy/sites.caddy` |
 | `caddy/sites.caddy` | The sites: the admin allowlist, the web pair, the receivers' failover; imported by the bundled Caddy or the host's own |
@@ -18,52 +36,62 @@ production.
 | `ops/check-host.sh` | Disk and certificate checks |
 | `ops/common.sh` | Shared by the cron scripts: reading the secrets, alerts, heartbeats |
 | `rabbitmq/` | Topology and users; `make-prod-definitions.sh` for production |
-| `secrets/` | sops-encrypted env files (see its README) |
+| `secrets/` | sops-encrypted env files, and `decrypt.sh` (see its README) |
+| `rehearsal/` | The whole deploy path, rehearsed on a development machine under load |
 
 ## First deployment
 
-On a fresh VPS with Docker, `sops` and `age`:
+On a fresh VPS with Docker, `sops` and `age` (deploy-kit's host setup
+does Docker, the deploy user, SSH hardening and the firewall:
+`.kamal/kit/bin/kit host remote root@<host> …`):
 
 1. As the user that will deploy (in the `docker` group), give the server
-   read access to GitHub and clone the repository to `/srv/kick_tracker`,
-   then decrypt the secrets (`secrets/README.md`):
-   - git: a read-only **deploy key** (`ssh-keygen -t ed25519`, its
+   read access to GitHub and clone the repository to `/srv/kick_tracker`
+   (the cron scripts, compose files, Caddy's sites and the encrypted
+   secrets live in this checkout; `server-sync.sh` keeps it up to date at
+   each deploy):
+   - a read-only **deploy key** (`ssh-keygen -t ed25519`, its
      `~/.ssh/id_ed25519.pub` added under the repository's Settings,
      Deploy keys, write access off), and clone over SSH
-     (`git@github.com:<owner>/<repo>.git`) so the `git pull` of every
-     deploy needs no password. A public repository can be cloned over
-     HTTPS with no credentials instead.
-   - images: `docker login ghcr.io -u <GitHub user>` with a personal
-     access token (classic) that has only `read:packages`; Docker keeps it
-     in `~/.docker/config.json` for every later pull. Not needed if the
-     packages are public.
+     (`git@github.com:<owner>/<repo>.git`) so `git fetch` needs no
+     password. A public repository can be cloned over HTTPS instead.
+   - `sops` installed and the server's age key in
+     `~/.config/sops/age/keys.txt`; then `secrets/decrypt.sh`
+     (`secrets/README.md`).
 2. `./rabbitmq/make-prod-definitions.sh` with `secrets/rabbitmq.env` loaded
    (it writes `rabbitmq/definitions.prod.json`, git-ignored).
-3. Pin the app image in `deploy/.env` (git-ignored; the deploy workflow
-   keeps it up to date afterwards), then pull the images CI built, or
-   build the database image here (`docker compose -f compose.single.yml
-   build db`):
+3. Choose what serves HTTPS. A VPS with no web server of its own uses the
+   bundled Caddy: `echo COMPOSE_PROFILES=caddy >> .env` in `deploy/`. A
+   VPS whose host already runs Caddy for something else keeps it, and
+   imports our sites into it (below, "A Caddy already on the host").
+4. Kamal's network, then the infrastructure (the database image is built
+   here, or pulled: `DB_IMAGE` in `deploy/.env`):
 
-       echo "APP_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha>" >> .env
-       echo "COLLECTOR_IMAGE=ghcr.io/<owner>/kicktracker-app:<sha>" >> .env
-       docker compose -f compose.single.yml pull
-4. Choose what serves HTTPS. A VPS with no web server of its own uses the
-   bundled Caddy: `echo COMPOSE_PROFILES=caddy >> .env`. A VPS whose host
-   already runs Caddy for something else keeps it, and imports our sites
-   into it (below, "A Caddy already on the host").
-5. Start the database and the queue, then migrate:
+       docker network create kamal
+       docker compose -f compose.single.yml up -d --wait db rabbitmq
 
-       docker compose -f compose.single.yml up -d db rabbitmq
-       docker compose -f compose.single.yml run --rm migrate
+5. On **your machine**, in a checkout of `main`:
+   - `.kamal/kit.local.env` from its example: the server (`KT_HOST`), the
+     deploy user (`KT_SSH_USER`), the checkout (`KT_DEPLOY_DIR`), the smoke
+     URLs and where the kit's notifications go;
+   - `secrets/deployer.sops.env` from `deployer.env.example`: a GitHub
+     token (classic) with only `read:packages`, encrypted like the others;
+   - Kamal (`gem install kamal`, 2.12 or later), `sops`, and `gh` logged in
+     (for the CI and attestation checks).
+6. The first deploy (collectors with `--bootstrap`: nobody collects yet),
+   then the receivers:
 
-6. Start everything: `docker compose -f compose.single.yml up -d`.
+       .kamal/kit/bin/kit deploy --bootstrap
+       .kamal/kit/bin/kit deploy -c deploy/kamal/receiver.yml
+
+   With the bundled Caddy: `docker compose -f compose.single.yml up -d caddy`.
 7. Take the first base backup (`./backup/base-backup.sh`) and install the
    cron lines from `backup/base-backup.sh`, `backup/restore-test.sh` and
    `ops/check-host.sh` in the deploy user's crontab (`crontab -e`: the
    decrypted secrets are readable by that user only).
 8. Invite the first admin and open the link from an allowed network:
 
-       docker compose -f compose.single.yml exec web-a /app/bin/invite you@example.org
+       docker exec $(docker ps -q --filter label=role=web_a) /app/bin/invite you@example.org
 
 9. Point the Kick app's webhook URL (in Kick's developer settings) at
    `https://$INGRESS_HOST/`.
@@ -72,11 +100,12 @@ On a fresh VPS with Docker, `sops` and `age`:
 
 When the host already runs Caddy (for another site), ours isn't started
 (no `caddy` profile) and the host's serves both. Each web node and
-receiver is published on loopback for it: `web-a` on 127.0.0.1:4110,
-`web-b` on 4111, `receiver-1` on 4160, `receiver-2` on 4161 (set
-`WEB_A_PORT`, `WEB_B_PORT`, `RECEIVER_1_PORT`, `RECEIVER_2_PORT` in
-`deploy/.env` if one is taken). Add one line to the host's Caddyfile
-(`/etc/caddy/Caddyfile` for the packaged Caddy), outside any site block:
+receiver publishes its port on loopback for it: `web_a` on 127.0.0.1:4110,
+`web_b` on 4111, `receiver_1` on 4160, `receiver_2` on 4161 (set
+`KT_WEB_A_PORT`, `KT_WEB_B_PORT`, `KT_RECEIVER_1_PORT`, `KT_RECEIVER_2_PORT`
+in `.kamal/kit.local.env` if one is taken). Add one line to the host's
+Caddyfile (`/etc/caddy/Caddyfile` for the packaged Caddy), outside any
+site block:
 
     import /srv/kick_tracker/deploy/caddy/sites.caddy stats.example.org ingress.example.org 127.0.0.1:4110 127.0.0.1:4111 127.0.0.1:4160 127.0.0.1:4161 100.64.0.0/10
 
@@ -87,14 +116,16 @@ and `systemctl reload caddy`. The host's Caddy gets the certificates with
 its own ACME email; `secrets/stack.env` is then read only by
 `ops/check-host.sh` (the hosts whose certificates it checks).
 
-The sites stay in git: after a `git pull` that changes
-`caddy/sites.caddy`, reload the host's Caddy. The Caddy user must be able
-to read the file (it is world-readable in a normal checkout).
+The sites stay in git: after a deploy that changes `caddy/sites.caddy`
+(the server's checkout is brought up to the commit), reload the host's
+Caddy. The Caddy user must be able to read the file (it is
+world-readable in a normal checkout).
 
 If the host's Caddy runs in a container instead, it can't reach the host's
-loopback: give it `network_mode: host`, or attach it to this stack's
-network (`kicktracker_default`) and pass `web-a:4100 web-b:4100
-receiver-1:4060 receiver-2:4060` as the upstreams.
+loopback: give it `network_mode: host`, or attach it to the `kamal`
+network and pass `web-a:4100 web-b:4100 receiver-1:4060 receiver-2:4060`
+as the upstreams (the containers' network aliases, which follow each
+deploy).
 
 If Cloudflare (or another proxy) is in front of the host's Caddy, set
 `TRUSTED_PROXY_HOPS=2` in `secrets/app.env`, or every visitor shares the
@@ -102,72 +133,107 @@ proxy's address for the rate limits.
 
 ## Deploying a change
 
-Merge to `main`. CI runs the checks, builds the images, then deploys them:
-the `deploy` job in `.github/workflows/ci.yml` runs `release.sh` on the
-server over SSH, which pulls, decrypts the secrets, and deploys the
-collectors, web and the receivers in turn with `deploy.sh`. A step that
-fails stops the release and the job goes red; what wasn't reached keeps
-running the previous version.
+Merge to `main` and wait for CI to pass (its Images job builds, labels and
+attests the app, receiver and database images, tagged with the commit).
+Then, from your machine, in an up-to-date checkout of `main`:
 
-It needs, once:
+    deploy/release.sh
 
-- in GitHub (Settings, Secrets and variables, Actions; the repository's
-  or the `production` environment's): the secrets `DEPLOY_SSH_KEY` (a key
-  only for deploying, its public half in that user's
-  `~/.ssh/authorized_keys`) and `DEPLOY_KNOWN_HOSTS` (`ssh-keyscan
-  <host>`), and `DEPLOY_HOST` and `DEPLOY_USER`, as secrets or variables.
-  Without them the job skips with a notice;
-- the repository variable `DEPLOY_DIR` if the checkout isn't in
-  `/srv/kick_tracker` (e.g. `/opt/kick_tracker`); the paths in this file
-  and in the cron lines of `backup/` and `ops/` are then that directory;
-- on the server, as that user: the checkout in `DEPLOY_DIR` able to
-  `git pull` without a prompt and `docker login ghcr.io` done (both in
-  "First deployment", step 1), `sops` installed and the server's age key
-  in `~/.config/sops/age/keys.txt`.
+That is two `kit deploy`s (deploy-kit, `.kamal/`): the app's Kamal config,
+then the receivers'. Before anything is replaced, the kit checks that
+you're on `main`, clean and pushed, that CI passed for this exact commit
+and that the images carry the CI workflow's attestation; then it brings
+the server's checkout up to the commit and decrypts its secrets there
+(`server-sync.sh`), and runs the migrations (`.kamal/steps/migrate`: the
+new image's `bin/migrate`, expand-then-contract only, `lock_timeout 5s`).
+Then, one group at a time (`.kamal/groups/`):
 
-To stop deploying on merge, set the repository variable `AUTO_DEPLOY` to
-`false` (Settings, Secrets and variables, Actions, Variables).
+- **collectors**: only the standby gets the new build (stopped first,
+  never two containers on one journal), then the leader restarts in place
+  on the build it had and its clean stop hands collection over within a
+  second. The old leader stays on the previous build as the standby.
+- **web**: `web_a`, then `web_b`, each stopped, replaced and healthy
+  before the next (Caddy sends visitors to whichever answers). One that
+  fails its new build goes back to its previous one.
+- **receivers**: `receiver_1`, then `receiver_2`, the same way.
 
-By hand, from the checkout (the same as CI):
+Last, the smoke tests (`KIT_SMOKE_URLS`) through Caddy: if they fail, the
+release is rolled back (web and receivers to their previous build, the
+collectors switched back). A step that fails stops the release; what
+wasn't reached keeps running the previous build. Every outcome goes to the
+kit's notification channels.
 
-    git pull && deploy/release.sh
+Only `kit` deploys these containers: a plain `kamal deploy` that would put
+both collectors on one build is refused by the kit's role guard.
 
-or one role from `deploy/`: `ROLE=collector ./deploy.sh` (or `web`,
-`receivers`). The Deploy workflow does either from GitHub (`all` or a
-role). Each deploys the images CI built from the checkout's commit (they
-are tagged with the `main` commit they were built from). `TAG=<sha>`
-deploys another build, e.g. to roll back; `APP_IMAGE` / `RECEIVER_IMAGE`
-name an image outright. An image that doesn't exist yet (CI still
-building) stops the script before anything changes. A change to
+One part at a time, and rollbacks:
+
+    .kamal/kit/bin/kit group deploy web                  # this checkout's commit
+    .kamal/kit/bin/kit group deploy web -- --version <sha>  # another build (a rollback)
+    .kamal/kit/bin/kit group switch collectors           # collectors: back to the standby (a second, nothing pulled)
+    .kamal/kit/bin/kit group status                      # versions, health, who collects
+    .kamal/kit/bin/kit freeze "reason" / unfreeze        # stop deploys for a while
+
+`kit group switch collectors` again goes forward; the next collector
+deploy updates whichever one stands by. `release.sh --version <sha>`
+redeploys another commit's images everywhere.
+
+Images are named by commit, so a deploy never swaps an image by accident;
+`kamal app version -c deploy/kamal/app.yml` shows what runs (with
+`.kamal/kit.local.env` exported, or through `kit`). A change to
 `caddy/sites.caddy` also needs the host's Caddy reloaded, by hand.
-
-Migrations run first, as their own step, and only expand-then-contract
-ones (§15.3); each statement waits at most 5s for a lock. Then the pair
-is updated one at a time, each waiting for the other to be healthy:
-`web-a` then `web-b` (Caddy sends visitors to whichever answers); the
-collectors' **standby only**, which then takes over from the leader: the
-leader restarts in place on its own build, and its clean stop hands
-collection over within a second; `receiver-1` then `receiver-2`. Images
-are pinned in `deploy/.env` (each collector has its own:
-`COLLECTOR_A_IMAGE`, `COLLECTOR_B_IMAGE`), so a plain `docker compose up
--d` never swaps one by accident. A rollback of web or the receivers is the
-same command with `TAG=` the previous sha.
-
-The collector left standing by after a deploy still runs the previous
-build, so rolling the collectors back is switching collection to it (a
-second's handover, nothing rebuilt or pulled):
-
-    ROLE=collector-switch ./deploy.sh
-
-Run it again to go forward. The next collector deploy updates whichever
-one stands by, so each deploy leaves the build before it ready.
-
-Which collector leads:
-
-    docker compose -f compose.single.yml exec collector-a curl -s http://127.0.0.1:4101/status
 
 Before trusting a change to any of this, rehearse it on a development
 machine: `rehearsal/rehearse.sh` (rehearsal/README.md).
+
+## Moving the running server from compose to Kamal (once)
+
+The main VPS ran every container with compose until the switch to
+deploy-kit. The move, without a gap in collection or webhook intake:
+
+1. On the server, `git pull` (for `server-sync.sh`, the new
+   `compose.single.yml` and `secrets/decrypt.sh`), then
+   `secrets/decrypt.sh`: it refuses quoted values in `app.env`,
+   `collector.env` and `receiver.env` (Docker's `--env-file` would keep
+   the quotes); fix any with `sops` first.
+2. `docker network create kamal`, and attach the running infrastructure to
+   it without restarting it:
+
+       docker network connect --alias db kamal kicktracker-db-1
+       docker network connect --alias rabbitmq kamal kicktracker-rabbitmq-1
+       # with the bundled Caddy:
+       docker network connect --alias caddy kamal kicktracker-caddy-1
+
+   (The next `docker compose up` of the infrastructure recreates them on
+   `kamal` alone: plan that restart like any database restart.)
+3. The web nodes, one at a time (compose's and Kamal's share ports, and
+   Caddy sends visitors to whichever answers):
+
+       docker stop kicktracker-web-b-1
+       .kamal/kit/bin/kit group deploy web --role web_b
+       docker stop kicktracker-web-a-1
+       .kamal/kit/bin/kit group deploy web --role web_a
+
+   The receivers the same way, `receiver-2` / `receiver_2` first (Caddy
+   sends webhooks to receiver-1 while it answers), with
+   `kit group deploy receivers --role …`. Each Kamal receiver takes over
+   its compose twin's spool volume, so spooled webhooks are forwarded.
+4. The collectors: stop the compose collector standing by
+   (`docker stop kicktracker-collector-b-1` if `collector-a` leads; the
+   health page says which), and start its Kamal twin on the same journal
+   volume, standing by:
+
+       .kamal/kit/bin/kit group deploy collectors --bootstrap --role collector_b
+
+   When it's healthy, stop the compose leader (`docker stop -t 60
+   kicktracker-collector-a-1`): its clean stop hands the lease to
+   `collector_b`. Then `… --bootstrap --role collector_a`, and
+   `kit group status collectors` shows one collecting, one standing by.
+5. Remove the stopped compose containers, check the health page and
+   `rehearsal/`'s report items by hand (gaps, webhooks), and delete the
+   GitHub secrets the old CI deploy used (`DEPLOY_SSH_KEY`,
+   `DEPLOY_KNOWN_HOSTS`, `DEPLOY_HOST`, `DEPLOY_USER`) and that key's line
+   in the server's `authorized_keys`.
 
 ## The backup receiver (stage 2, §15.2)
 
@@ -230,8 +296,9 @@ minutes, for the last `BACKFILL_DAYS` (7).
 5. Set the shadow's own `HEARTBEAT_URL`, and alerts (it tells you when it
    can't reach the main VPS; the main side's alerts may be down with it).
 
-Deploy it with the Deploy workflow's `shadow` target (standby first, like
-the main collectors). The health page shows it as "shadow, on another
+Deploy it on that machine, from `deploy/` in its checkout, after
+`git pull`: `ROLE=shadow ./deploy.sh` (standby first, like the main
+collectors; `TAG=<sha>` for another build). The health page shows it as "shadow, on another
 machine", and an alert fires when it hasn't been seen collecting for 15
 minutes. It keeps `SHADOW_KEEP_DAYS` (30) of data and isn't backed up: its
 data only matters until the main side has filled its gaps.
@@ -262,7 +329,9 @@ Each collector's journal (`journal-a`, `journal-b`) holds writes only
 until the database has them, and isn't backed up; don't delete a volume
 whose collector reports writes waiting (health page).
 
-To restore for real, stop both collectors and web, then follow the same steps
+To restore for real, stop both collectors and web (`kamal app stop -c
+deploy/kamal/app.yml`, through `kit` or with `.kamal/kit.local.env`
+exported), then follow the same steps
 as the restore test into the production volume (with `recovery_target_time`
 set if you need a moment before a mistake).
 
@@ -273,7 +342,8 @@ set if you need a moment before a mistake).
   or Telegram; the admin health page shows the open alerts and each
   collector: collecting or standing by, writes waiting, recent handoffs.
 - Each collector's container healthcheck asks its own status port
-  (`docker compose ps` shows it).
+  (`docker ps` shows it; `.kamal/kit/bin/kit group status` shows which
+  collects).
 - External checks, from a service off the VPS (e.g. healthchecks.io or
   UptimeRobot):
   - `https://$SITE_HOST/healthz` and `https://$INGRESS_HOST/health`;

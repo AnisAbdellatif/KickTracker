@@ -1,0 +1,16 @@
+# The deploy rehearsal (deploy/rehearsal/README.md): what differs from
+# production for Kamal, merged over app.yml by `-d rehearsal`: the fake
+# Kick runs on the host.
+servers:
+  web_a:
+    options:
+      add-host: host.docker.internal:host-gateway
+  web_b:
+    options:
+      add-host: host.docker.internal:host-gateway
+  collector_a:
+    options:
+      add-host: host.docker.internal:host-gateway
+  collector_b:
+    options:
+      add-host: host.docker.internal:host-gateway

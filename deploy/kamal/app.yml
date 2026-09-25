@@ -1,0 +1,110 @@
+# The app image as Kamal runs it (project.md §15, deploy/README.md): two
+# web nodes and two collectors on the main VPS. The database, RabbitMQ and
+# Caddy are compose's (../compose.single.yml), on the same Docker network
+# ("kamal"), so the app reaches them as `db` and `rabbitmq`.
+#
+# Deployed with deploy-kit (.kamal/), never a plain `kamal deploy`: every
+# role here is in a group (.kamal/groups/): the web nodes one at a time,
+# the collectors by handing over to the standby (§15.3).
+#
+# No kamal-proxy: each role publishes its port on loopback exactly as the
+# compose stack did, and Caddy (the bundled one, or the host's) keeps
+# routing, health-checking and restricting as before (caddy/sites.caddy).
+#
+# The server, user and folder come from the environment (.kamal/kit.local.env,
+# git-ignored; kit exports it): KT_HOST, KT_SSH_USER, KT_DEPLOY_DIR. The
+# app's secrets stay on the server, decrypted there (deploy/server-sync.sh),
+# and reach the containers as --env-file: they never pass through the
+# machine that deploys. Docker reads those files literally: no quotes around
+# values (server-sync.sh refuses them).
+<%
+  host = ENV.fetch("KT_HOST") { raise "KT_HOST isn't set: put the server in .kamal/kit.local.env" }
+  dir = ENV.fetch("KT_DEPLOY_DIR", "/srv/kick_tracker")
+  secrets = ENV.fetch("KT_SECRETS_DIR", "#{dir}/deploy/secrets")
+  # The volumes compose created for this stack (kicktracker_*): the journals
+  # hold collected data not yet written, so they carry over as they are.
+  vol = ENV.fetch("KT_VOLUME_PREFIX", "kicktracker")
+%>
+service: kicktracker
+image: <%= ENV.fetch("KT_IMAGE_OWNER", "anisabdellatif") %>/kicktracker-app
+
+# Kamal gives the primary role a proxy unless told not to (proxy: false).
+primary_role: web_a
+
+servers:
+  # Two, behind Caddy: a deploy replaces one while the other serves.
+  web_a:
+    hosts: [<%= host %>]
+    proxy: false
+    env:
+      clear: {ROLE: web}
+    options:
+      env-file: <%= secrets %>/app.env
+      # "app": how the nodes find each other (DNS_CLUSTER_QUERY=app) and
+      # form one cluster; "web-a": the bundled Caddy's upstream.
+      network-alias: [app, web-a]
+      publish: 127.0.0.1:<%= ENV.fetch("KT_WEB_A_PORT", 4110) %>:4100
+      # Exports and imports (TRANSFER_DIR, §13.8), shared with the collectors.
+      volume: <%= vol %>_transfers:/transfers
+  web_b:
+    hosts: [<%= host %>]
+    env:
+      clear: {ROLE: web}
+    options:
+      env-file: <%= secrets %>/app.env
+      network-alias: [app, web-b]
+      publish: 127.0.0.1:<%= ENV.fetch("KT_WEB_B_PORT", 4111) %>:4100
+      volume: <%= vol %>_transfers:/transfers
+
+  # One collects, the other stands by and takes over in about a second on
+  # a deploy, or ~20s if the first dies (§10.1). Each has its own env file
+  # (no web secrets), its journal on its own volume, `always` restarted,
+  # and a minute to stop cleanly (stop collecting, release the lease,
+  # write out its journal).
+  collector_a:
+    hosts: [<%= host %>]
+    stop_timeout: 60
+    env:
+      clear: {ROLE: collector, COLLECTOR_ID: collector-a}
+    options:
+      env-file: <%= secrets %>/collector.env
+      network-alias: app
+      restart: always
+      volume:
+        - <%= vol %>_journal-a:/journal
+        - <%= vol %>_transfers:/transfers
+  collector_b:
+    hosts: [<%= host %>]
+    stop_timeout: 60
+    env:
+      clear: {ROLE: collector, COLLECTOR_ID: collector-b}
+    options:
+      env-file: <%= secrets %>/collector.env
+      network-alias: app
+      restart: always
+      volume:
+        - <%= vol %>_journal-b:/journal
+        - <%= vol %>_transfers:/transfers
+
+# Images are built by CI (.github/workflows/ci.yml, tagged with the commit,
+# labelled for Kamal, attested) and pulled here: kit deploys with
+# --skip-push (KIT_DEPLOY_SKIP_PUSH). The token is read-only
+# (deploy/kamal/registry-password).
+registry:
+  server: <%= ENV.fetch("KT_REGISTRY", "ghcr.io") %>
+  username: <%= ENV.fetch("KT_REGISTRY_USER", "anisabdellatif") %>
+  password: [KAMAL_REGISTRY_PASSWORD]
+
+builder:
+  arch: amd64
+  context: app
+  dockerfile: app/Dockerfile
+
+ssh:
+  user: <%= ENV.fetch("KT_SSH_USER") { raise "KT_SSH_USER isn't set: put the deploy user in .kamal/kit.local.env" } %>
+  port: <%= ENV.fetch("KT_SSH_PORT", 22) %>
+
+# A new container must pass its image's HEALTHCHECK within this before the
+# old one is stopped (the app has a 30s start period).
+deploy_timeout: 180
+retain_containers: 5
