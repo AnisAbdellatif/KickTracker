@@ -591,8 +591,12 @@ cmd_update() {
     source=$(cd "$from" && pwd)
   else
     tmp=$(mktemp -d)
-    trap 'rm -rf "$tmp"' EXIT
-    git clone --quiet --depth 1 ${ref:+--branch "$ref"} "$from" "$tmp/kit" || kit_die "could not clone $from${ref:+ at $ref}"
+    # The path itself, not the variable: `tmp` is gone once this function
+    # returns, before the EXIT trap runs.
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmp'" EXIT
+    git -c advice.detachedHead=false clone --quiet --depth 1 ${ref:+--branch "$ref"} "$from" "$tmp/kit" ||
+      kit_die "could not clone $from${ref:+ at $ref}"
     source="$tmp/kit"
     from="$from${ref:+@$ref} ($(git -C "$source" rev-parse HEAD))"
   fi
