@@ -23,5 +23,6 @@ erl_crash.dump
 receiver-*.tar
 
 
-# The local spool: envelopes waiting for RabbitMQ.
-/spool.sqlite3*
+# The local spools (spool.sqlite3, spool.live.sqlite3…): envelopes waiting
+# for RabbitMQ.
+/spool*.sqlite3*
