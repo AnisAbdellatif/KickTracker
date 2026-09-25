@@ -627,6 +627,53 @@ defmodule KickTracker.Reports do
   end
 
   @doc """
+  Per weekday in the channel's timezone (Monday first), over `[from, to)`:
+  hours watched, average viewers and airtime. Hours watched and average
+  viewers are `nil` for a weekday with no readings; airtime counts the
+  part of each stream that fell on that weekday, split at local midnight.
+  """
+  @spec weekdays(Channel.t(), DateTime.t(), DateTime.t()) :: [map()]
+  def weekdays(%Channel{id: id, timezone: tz}, from, to) do
+    viewers =
+      Repo.query!(
+        """
+        SELECT extract(isodow FROM hour AT TIME ZONE $4)::int, sum(hours_watched),
+               sum(avg_viewers * samples) / nullif(sum(samples), 0)
+        FROM hourly_stats WHERE channel_id = $1 AND hour >= $2 AND hour < $3 AND samples > 0
+        GROUP BY 1
+        """,
+        [id, from, to, tz]
+      ).rows
+      |> Map.new(fn [d, hw, avg] -> {d, {hw, num(avg)}} end)
+
+    airtime =
+      Repo.query!(
+        """
+        WITH s AS (
+          SELECT greatest(started_at, $2) AS a, least(coalesce(ended_at, now()), $3) AS b
+          FROM streams
+          WHERE channel_id = $1 AND started_at < $3 AND coalesce(ended_at, now()) > $2
+            AND id NOT IN (SELECT stream_id FROM excluded_streams)
+        )
+        SELECT extract(isodow FROM d)::int,
+               sum(extract(epoch FROM least(s.b, (d + interval '1 day') AT TIME ZONE $4)
+                                      - greatest(s.a, d AT TIME ZONE $4)))
+        FROM s, generate_series(date_trunc('day', s.a AT TIME ZONE $4),
+                                date_trunc('day', s.b AT TIME ZONE $4), interval '1 day') AS d
+        WHERE s.b > s.a
+        GROUP BY 1
+        """,
+        [id, from, to, tz]
+      ).rows
+      |> Map.new(fn [d, s] -> {d, round(num(s))} end)
+
+    for d <- 1..7 do
+      {hw, avg} = Map.get(viewers, d, {nil, nil})
+      %{weekday: d, hours_watched: hw, avg_viewers: avg, airtime_s: Map.get(airtime, d, 0)}
+    end
+  end
+
+  @doc """
   Per category over a period: hours watched, airtime, average viewers,
   and the average change in viewers after switching to it (the 15 minutes
   after the switch against the 15 before).

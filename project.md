@@ -1273,7 +1273,7 @@ Two surfaces from the same `web` role: a **public site** for casual visitors
 | Page | Route | Content |
 |---|---|---|
 | Home | `/` | Live now (tracked channels on air, current viewers, sparkline), leaderboards (hours watched, avg viewers, peak, follower gain, Kicks) for 7 / 30 / 90 days / all, notable moments (records, big raids, gift bursts) |
-| Channel overview | `/c/:slug` | Header (avatar, live badge, current viewers, tracked since), KPI cards with change vs previous period, viewers over the period (avg line + peak band), follower growth, weekday × hour heatmap, categories (share of hours watched), recent streams, lifetime records, coverage badge |
+| Channel overview | `/c/:slug` | Header (avatar, live badge, current viewers, tracked since), KPI cards with change vs previous period, viewers over the period (avg line + peak band), follower growth, weekday × hour heatmap, categories (share of hours watched), days of the week (hours watched, average viewers, airtime per weekday), recent streams, lifetime records, coverage badge |
 | Streams | `/c/:slug/streams` | Every stream: date, duration, avg / peak, hours watched, category, follower gain, chatters, support; sortable, filterable by period and category |
 | Stream | `/c/:slug/streams/:id` | **The richest chart** (§13.3); live-updating while the stream is on |
 | Chat | `/c/:slug/chat` | Active chatters over time, window picker (5 / 10 / 15 min, rolling), messages per minute, engagement (chatters ÷ viewers), new vs returning chatters |
@@ -1419,11 +1419,21 @@ heatmaps without plugins. uPlot is faster but too narrow for heatmaps and
 shares.)
 
 Also: every chart can switch to a **table view** and **export CSV** (the same
-JSON), which also serves accessibility. Colors come from a colorblind-safe
-palette (checked for colour-vision deficiency in both themes), used in a
-fixed order so a channel keeps its colour; magnitudes use one blue ramp.
-Light and dark themes follow the visitor's system setting unless they pick
-one, and both come from the same CSS tokens (`assets/css/app.css`).
+JSON), which also serves accessibility. Each metric has one hue and one
+icon, used everywhere it appears (stat card, chart header, line or bars,
+meter): hours watched blue, average viewers amber, peak viewers pink,
+airtime magenta, followers violet, chat teal, subs and support orange. A
+series that is a metric takes its hue (`metric` on the column); other
+series, and channels in a comparison, take the same seven hues in a fixed
+order. Every pair stays apart under simulated protanopia, deuteranopia
+and tritanopia in both themes, and every hue holds 4.5:1 as text on a
+card. Magnitudes use one blue ramp. The site opens dark; a visitor can
+pick light or "follow the system", which is remembered. Both themes come
+from the same CSS tokens (`assets/css/app.css`): a near-black canvas,
+cards a step lighter with a soft shadow, and an inset well inside cards
+for the chart area, table headers and bar columns. `primary` is the only
+interactive colour; `up`/`down` only mark change against the previous
+period, always with an arrow.
 
 ### 13.8 Admin interface
 

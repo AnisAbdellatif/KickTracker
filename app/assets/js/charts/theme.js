@@ -2,6 +2,10 @@
 // from CSS custom properties (assets/css/app.css), so dark and light are the
 // same tokens: a colour-blind-checked categorical palette used in a fixed
 // order, one blue ramp for magnitudes, and quiet chrome around the data.
+// A series that is one of the site's metrics takes that metric's hue
+// (`metric` on its column), the same hue as its stat card and icon.
+
+const METRICS = ["hw", "avg", "peak", "airtime", "followers", "chat", "subs"]
 
 function cssVar(name, fallback) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -10,19 +14,28 @@ function cssVar(name, fallback) {
 
 export function tokens() {
   const dark = document.documentElement.getAttribute("data-theme") === "dark"
-  const palette = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => cssVar(`--viz-${i}`, "#2a78d6"))
+  const palette = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => cssVar(`--viz-${i}`, "#3fa2ff"))
+  const metric = Object.fromEntries(METRICS.map((m) => [m, cssVar(`--metric-${m}`, palette[0])]))
   return {
     dark,
     palette,
+    metric,
     sequential: cssVar("--viz-seq", "#cde2fb, #3987e5, #0d366b").split(",").map((s) => s.trim()),
-    surface: cssVar("--viz-surface", dark ? "#1a1a19" : "#fcfcfb"),
-    text: cssVar("--viz-ink", dark ? "#ffffff" : "#0b0b0b"),
-    text2: cssVar("--viz-ink-2", dark ? "#c3c2b7" : "#52514e"),
-    muted: cssVar("--viz-muted", "#898781"),
-    grid: cssVar("--viz-grid", dark ? "#2c2c2a" : "#e1e0d9"),
-    axis: cssVar("--viz-axis", dark ? "#383835" : "#c3c2b7"),
+    surface: cssVar("--viz-surface", dark ? "#17171c" : "#ffffff"),
+    text: cssVar("--viz-ink", dark ? "#f4f4f6" : "#0c0c10"),
+    text2: cssVar("--viz-ink-2", dark ? "#a3a3ae" : "#555663"),
+    muted: cssVar("--viz-muted", "#8a8a96"),
+    grid: cssVar("--viz-grid", dark ? "#26262e" : "#e6e8ee"),
+    axis: cssVar("--viz-axis", dark ? "#3a3a44" : "#c9ccd5"),
     noData: cssVar("--viz-nodata", "rgba(0,0,0,0.05)"),
   }
+}
+
+// A column's colour: its metric's hue when it names one, else the next
+// free palette slot (`slot` is a counter object shared across columns).
+export function columnColor(t, c, slot) {
+  if (c.metric && t.metric[c.metric]) return t.metric[c.metric]
+  return t.palette[slot.i++ % t.palette.length]
 }
 
 // A colour with an alpha, for area washes (~10%) and bands.
@@ -53,7 +66,7 @@ export function tooltip(t, extra = {}) {
     borderWidth: 1,
     padding: [6, 10],
     textStyle: {color: t.text, fontSize: 12},
-    extraCssText: "border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.12);",
+    extraCssText: "border-radius: 10px; box-shadow: 0 12px 32px -8px rgba(0,0,0,.35);",
     axisPointer: {type: "line", lineStyle: {color: t.axis, width: 1}},
     valueFormatter: fmt,
     ...extra,
@@ -122,7 +135,7 @@ export function zip(t, v) {
 export function line(name, data, color, extra = {}) {
   return {
     name, type: "line", data, showSymbol: false, connectNulls: false, symbolSize: 8,
-    lineStyle: {width: 2, color, cap: "round", join: "round"},
+    lineStyle: {width: 2.5, color, cap: "round", join: "round"},
     itemStyle: {color},
     emphasis: {focus: "none", scale: false},
     ...extra,

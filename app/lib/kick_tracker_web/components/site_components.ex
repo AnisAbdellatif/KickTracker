@@ -188,22 +188,68 @@ defmodule KickTrackerWeb.SiteComponents do
     if Enum.any?(values, &is_nil/1), do: nil, else: Enum.sum(values)
   end
 
+  @metrics ~w(hw avg peak airtime followers chat subs)a
+
+  @doc """
+  The site's metrics, each with one hue and one icon used wherever it
+  appears: stat cards, chart headers, bars and lines (project.md §13.7).
+  """
+  def metrics, do: @metrics
+
+  @doc "A metric's Heroicon."
+  def metric_icon(:hw), do: "hero-clock"
+  def metric_icon(:avg), do: "hero-eye"
+  def metric_icon(:peak), do: "hero-arrow-trending-up"
+  def metric_icon(:airtime), do: "hero-signal"
+  def metric_icon(:followers), do: "hero-heart"
+  def metric_icon(:chat), do: "hero-chat-bubble-left-right"
+  def metric_icon(:subs), do: "hero-gift"
+
+  @doc "A metric's icon on its soft ground; neutral with no metric."
+  attr :metric, :atom, default: nil, values: [nil | @metrics]
+  attr :icon, :string, default: nil, doc: "overrides the metric's icon"
+  attr :size, :atom, default: :md, values: [:sm, :md]
+
+  def icon_tile(assigns) do
+    ~H"""
+    <span
+      class={["icon-tile", @metric && "m-#{@metric}", @size == :sm && "is-sm"]}
+      aria-hidden="true"
+    >
+      <.icon
+        name={@icon || metric_icon(@metric || :hw)}
+        class={if @size == :sm, do: "size-4", else: "size-5"}
+      />
+    </span>
+    """
+  end
+
   @doc "A KPI card with the change against the previous period."
   attr :label, :string, required: true
   attr :value, :any, required: true
   attr :previous, :any, default: nil
   attr :kind, :atom, default: :number, values: [:number, :duration, :decimal]
+  attr :metric, :atom, default: nil, values: [nil | @metrics]
+  attr :icon, :string, default: nil, doc: "an icon for a card with no metric"
   attr :hint, :string, default: nil
   attr :id, :string, default: nil
   attr :note, :string, default: nil, doc: "a qualifier shown under the value (e.g. since when)"
+  slot :badge, doc: "shown after the label (e.g. the estimate pill)"
 
   def kpi(assigns) do
     ~H"""
-    <div id={@id} class="card-surface p-4">
-      <div class="truncate text-xs font-medium text-base-content/60" title={@hint || @label}>
-        {@label}
+    <div id={@id} class={["card-surface stat-card p-4 sm:px-5", @metric && "m-#{@metric}"]}>
+      <div class="flex items-center gap-2">
+        <.icon_tile :if={@metric || @icon} metric={@metric} icon={@icon} size={:sm} />
+        <span class="truncate text-[0.8125rem] font-medium text-muted" title={@hint || @label}>
+          {@label}
+        </span>
+        {render_slot(@badge)}
       </div>
-      <div class="mt-1.5 text-2xl font-semibold tracking-tight">
+      <div class={[
+        "mt-3 text-2xl font-bold tracking-tight tabular-nums sm:text-[1.75rem] sm:leading-8",
+        is_nil(@value) && "text-subtle"
+      ]}>
         <%= case @kind do %>
           <% :duration -> %>
             <.duration seconds={@value} />
@@ -211,7 +257,7 @@ defmodule KickTrackerWeb.SiteComponents do
             <.num value={@value} compact />
         <% end %>
       </div>
-      <div :if={@note} class="mt-1 text-xs text-base-content/70">{@note}</div>
+      <div :if={@note} class="mt-2 text-xs text-muted">{@note}</div>
       <.change :if={!@note} value={@value} previous={@previous} />
     </div>
     """
@@ -236,22 +282,19 @@ defmodule KickTrackerWeb.SiteComponents do
     ~H"""
     <div
       :if={@dir}
-      class={[
-        "mt-1 flex items-center gap-1 whitespace-nowrap text-xs tabular-nums",
-        @dir == :up && "text-success",
-        @dir == :down && "text-error",
-        @dir == :flat && "text-base-content/70"
-      ]}
+      class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
       title={gettext("Change against the previous period of the same length")}
     >
-      <.icon :if={@dir == :up} name="hero-arrow-trending-up-micro" class="size-4" />
-      <.icon :if={@dir == :down} name="hero-arrow-trending-down-micro" class="size-4" />
-      <.icon :if={@dir == :flat} name="hero-minus-micro" class="size-4" />
-      <span :if={@dir != :flat}>{:erlang.float_to_binary(abs(@pct), decimals: 1)}%</span>
-      <span :if={@dir == :flat}>{gettext("no change")}</span>
-      <span class="hidden text-base-content/70 sm:inline">{gettext("vs previous")}</span>
+      <span class={["delta", "is-#{@dir}"]}>
+        <.icon :if={@dir == :up} name="hero-arrow-trending-up-micro" class="size-3.5" />
+        <.icon :if={@dir == :down} name="hero-arrow-trending-down-micro" class="size-3.5" />
+        <.icon :if={@dir == :flat} name="hero-minus-micro" class="size-3.5" />
+        <span :if={@dir != :flat}>{:erlang.float_to_binary(abs(@pct), decimals: 1)}%</span>
+        <span :if={@dir == :flat}>{gettext("no change")}</span>
+      </span>
+      <span class="hidden whitespace-nowrap text-subtle sm:inline">{gettext("vs previous")}</span>
     </div>
-    <div :if={!@dir and !is_nil(@previous)} class="mt-1 text-xs">&nbsp;</div>
+    <div :if={!@dir and !is_nil(@previous)} class="mt-2 h-5"></div>
     """
   end
 
@@ -273,6 +316,8 @@ defmodule KickTrackerWeb.SiteComponents do
   attr :title, :string, default: nil
   attr :class, :any, default: "h-64"
   attr :chatters_src, :string, default: nil
+  attr :metric, :atom, default: nil, values: [nil | @metrics], doc: "the header's icon tile"
+  attr :icon, :string, default: nil, doc: "a header icon for a chart of no one metric"
 
   attr :refresh, :integer,
     default: nil,
@@ -283,9 +328,10 @@ defmodule KickTrackerWeb.SiteComponents do
 
   def chart(assigns) do
     ~H"""
-    <figure class="card-surface p-4">
-      <figcaption class="mb-3 flex flex-wrap items-center gap-2">
-        <span :if={@title} class="text-sm font-semibold">{@title}</span>
+    <figure class="card-surface p-4 sm:p-5">
+      <figcaption class="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <.icon_tile :if={@metric || @icon} metric={@metric} icon={@icon} />
+        <span :if={@title} class="text-[0.9375rem] font-semibold leading-5">{@title}</span>
         <span class="flex-1"></span>
         {render_slot(@controls)}
         <div class="flex items-center">
@@ -320,20 +366,22 @@ defmodule KickTrackerWeb.SiteComponents do
           </button>
         </div>
       </figcaption>
-      <div
-        id={@id}
-        phx-hook="Chart"
-        phx-update="ignore"
-        data-kind={@kind}
-        data-src={@src}
-        data-values={@values && Jason.encode!(@values)}
-        data-opts={Jason.encode!(@opts)}
-        data-chatters-src={@chatters_src}
-        data-refresh={@refresh}
-        data-filename={@id}
-        data-error={gettext("Couldn't load this chart.")}
-        class={["relative", @class]}
-      >
+      <div class="inset-well p-2 sm:p-3">
+        <div
+          id={@id}
+          phx-hook="Chart"
+          phx-update="ignore"
+          data-kind={@kind}
+          data-src={@src}
+          data-values={@values && Jason.encode!(@values)}
+          data-opts={Jason.encode!(@opts)}
+          data-chatters-src={@chatters_src}
+          data-refresh={@refresh}
+          data-filename={@id}
+          data-error={gettext("Couldn't load this chart.")}
+          class={["relative", @class]}
+        >
+        </div>
       </div>
       <p :if={@note != []} class="mt-3 text-xs text-base-content/70">{render_slot(@note)}</p>
       <p data-chart-note class="mt-2 text-xs text-base-content/70" hidden></p>
@@ -377,7 +425,7 @@ defmodule KickTrackerWeb.SiteComponents do
 
   def live_badge(assigns) do
     ~H"""
-    <span class="inline-flex items-center gap-1 rounded-full bg-error px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wide text-error-content">
+    <span class="live-pill">
       <span class="inline-block size-1.5 rounded-full bg-current motion-safe:animate-pulse"></span>{gettext(
         "LIVE"
       )}
@@ -386,14 +434,14 @@ defmodule KickTrackerWeb.SiteComponents do
   end
 
   @doc """
-  A channel's avatar: its initial on a colour picked from its name. Kick's
-  avatar images are not fetched or hotlinked.
+  A channel's avatar: its initial on one of the seven metric hues, picked
+  from its name. Kick's avatar images are not fetched or hotlinked.
   """
   attr :name, :string, required: true
   attr :class, :any, default: "size-10 text-base"
 
   def avatar(assigns) do
-    assigns = assign(assigns, :hue, :erlang.phash2(assigns.name, 8) + 1)
+    assigns = assign(assigns, :hue, :erlang.phash2(assigns.name, 7) + 1)
 
     ~H"""
     <span
@@ -417,16 +465,16 @@ defmodule KickTrackerWeb.SiteComponents do
 
   def tabs(assigns) do
     ~H"""
-    <nav id={@id} class={["no-scrollbar flex gap-1 overflow-x-auto border-b border-base-300", @class]}>
+    <nav id={@id} class={["no-scrollbar flex gap-5 overflow-x-auto border-b border-base-300", @class]}>
       <.link
         :for={{key, label, path} <- @tabs}
         patch={path}
         aria-current={@active == key && "page"}
         class={[
-          "shrink-0 border-b-2 px-3 py-2 text-sm transition-colors",
+          "-mb-px shrink-0 border-b-2 py-2.5 text-sm font-semibold transition-colors",
           if(@active == key,
-            do: "border-primary font-medium text-base-content",
-            else: "border-transparent text-base-content/60 hover:text-base-content"
+            do: "border-primary text-primary",
+            else: "border-transparent text-muted hover:text-base-content"
           )
         ]}
       >
