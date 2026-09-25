@@ -20,6 +20,8 @@ export KIT_BIN KIT_HOME KIT
 . "$KIT_HOME/lib/groups.sh"
 # shellcheck source=../lib/sops.sh
 . "$KIT_HOME/lib/sops.sh"
+# shellcheck source=../lib/sandbox.sh
+. "$KIT_HOME/lib/sandbox.sh"
 
 KIT_KAMAL_HOOKS="docker-setup pre-connect pre-build pre-deploy post-deploy pre-app-boot post-app-boot pre-proxy-reboot post-proxy-reboot"
 
@@ -56,6 +58,7 @@ Setting up
   kit host remote USER@HOST [SETUP-ARGS...]     run host setup on a server over SSH
   kit host cloud-init [SETUP-ARGS...]           cloud-init user data that runs host setup
   kit doctor [-d DEST]                          check tools and configuration
+  kit sandbox up|deploy|status|down|...         this deploy path on this machine (kit sandbox help)
   kit version
 EOF
 }
@@ -462,7 +465,7 @@ cmd_hook() {
 # ------------------------------------------------------------ setting up
 
 # The files a project's vendored copy holds.
-KIT_VENDORED="bin lib steps host templates VERSION LICENSE"
+KIT_VENDORED="bin lib steps host templates sandbox VERSION LICENSE"
 
 _vendor_into() { # SOURCE-HOME TARGET
   local source=$1 target=$2 tmp item
@@ -701,6 +704,73 @@ cmd_doctor() {
   kit_ok "no problems found"
 }
 
+# --------------------------------------------------------------- sandbox
+
+cmd_sandbox() {
+  local sub=${1:-help}
+  [ $# -gt 0 ] && shift
+  case $sub in
+    help | -h | --help)
+      cat <<'USAGE'
+kit sandbox: this project's deploy path, on this machine (docs/sandbox.md)
+  kit sandbox init                 .kamal/sandbox/ and a sandbox overlay per Kamal config
+  kit sandbox up                   build the working tree, start everything, first deploy
+  kit sandbox deploy [ARGS...]     build the working tree and deploy it (kit deploy's ARGS: --group, -c...)
+  kit sandbox status               groups, containers, the project's URLs
+  kit sandbox logs ROLE [-f]       a role's logs
+  kit sandbox exec ROLE CMD...     a command in a role's container
+  kit sandbox kit ARGS...          any kit command, aimed at the sandbox
+  kit sandbox down                 stop it, keep its data
+  kit sandbox reset [--yes]        remove it and its data
+USAGE
+      return 0
+      ;;
+  esac
+  kit_sandbox_load
+  case $sub in
+    init) kit_sandbox_init ;;
+    up) kit_sandbox_up ;;
+    deploy) kit_sandbox_deploy "$@" ;;
+    status) kit_sandbox_status ;;
+    logs)
+      [ $# -ge 1 ] || kit_die "kit sandbox logs ROLE [-f]"
+      local role=$1 follow=()
+      shift
+      [ "${1:-}" = -f ] && follow=(-f)
+      _sbx_docker logs --tail 200 ${follow[@]+"${follow[@]}"} "$(kit_sandbox_role_container "$role")"
+      ;;
+    exec)
+      [ $# -ge 2 ] || kit_die "kit sandbox exec ROLE CMD..."
+      local id tty=()
+      id=$(kit_sandbox_role_container "$1")
+      shift
+      [ -t 0 ] && [ -t 1 ] && tty=(-it)
+      _sbx_docker exec ${tty[@]+"${tty[@]}"} "$id" "$@"
+      ;;
+    kit)
+      [ $# -ge 1 ] || kit_die "kit sandbox kit ARGS..."
+      local config
+      for config in $(kit_sandbox_configs); do kit_sandbox_check_target "$config"; done
+      kit_sandbox_kit "$@"
+      ;;
+    down) kit_sandbox_down ;;
+    reset)
+      if [ "${1:-}" != --yes ]; then
+        if [ -t 0 ]; then
+          printf 'Remove the sandbox, its containers, the images in its registry and its data? [y/N] ' >&2
+          local answer
+          read -r answer
+          [ "$answer" = y ] || kit_die "not reset"
+        else
+          kit_die "kit sandbox reset --yes (it removes the sandbox and its data)"
+        fi
+      fi
+      kit_sandbox_reset
+      ;;
+    *) kit_die "kit sandbox: unknown command $sub (kit sandbox help)" ;;
+  esac
+}
+
 # ------------------------------------------------------------------ main
 
 main() {
@@ -721,6 +791,7 @@ main() {
     update) cmd_update "$@" ;;
     host) cmd_host "$@" ;;
     doctor) cmd_doctor "$@" ;;
+    sandbox) cmd_sandbox "$@" ;;
     version | --version) cat "$KIT_HOME/VERSION" ;;
     help | -h | --help) usage ;;
     *) usage >&2 && exit 2 ;;

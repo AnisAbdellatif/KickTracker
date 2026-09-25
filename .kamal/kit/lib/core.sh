@@ -67,7 +67,8 @@ kit_is_int() { case "${1:-}" in '' | *[!0-9]*) return 1 ;; *) return 0 ;; esac; 
 #   .kamal/kit.env                      the project's settings (committed)
 #   .kamal/kit.<destination>.env        per destination (committed)
 #   .kamal/kit.local.env                personal overrides (git-ignored)
-#   the environment                     KIT_*=… kit deploy …
+#   the environment                     KIT_*=… kit deploy …, or any variable
+#                                       the files set (KT_HOST=… …)
 #
 # A value can also be given per destination inside any of these with a
 # suffix: KIT_DEPLOY_BRANCH_STAGING=dev beats KIT_DEPLOY_BRANCH for
@@ -90,11 +91,14 @@ kit_load_config() {
   local dest=${1:-${KIT_DESTINATION:-${KAMAL_DESTINATION:-}}}
   local saved="" var file
 
-  # What the environment says wins over the files: remember it, then put it
-  # back after reading them.
-  for var in $(compgen -v KIT_ || true); do
-    case $var in KIT_HOME | KIT_LOADED) continue ;; esac
-    saved="$saved$(printf '%s=%q' "$var" "${!var}")"$'\n'
+  # What the environment says wins over the files, for every variable: a
+  # script that sets KT_HOST (the sandbox, a rehearsal) must never lose to
+  # the real server's address in kit.local.env. Remember the environment
+  # (and any KIT_* set in this shell), then put it back after the files.
+  for var in $( (compgen -e; compgen -v KIT_) 2>/dev/null | sort -u); do
+    case $var in KIT_HOME | KIT_LOADED | PWD | OLDPWD | SHLVL | _ | BASH_* | FUNCNAME) continue ;; esac
+    kit_is_name "$var" || continue
+    saved="$saved$(printf '%s=%q' "$var" "${!var-}")"$'\n'
   done
 
   KIT_PROJECT_DIR=$(kit_project_dir)

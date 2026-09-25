@@ -4,6 +4,12 @@
 # goes back to a build that was already allowed.
 . "$(dirname "$0")/_preamble.sh"
 
+# kit sandbox: local, nothing to check against GitHub, the branch or a freeze.
+if [ -n "${KIT_SANDBOX:-}" ]; then
+  kit_info "sandbox: require-branch skipped"
+  exit 0
+fi
+
 kit_is_rollback && exit 0
 allowed=$(kit_conf KIT_DEPLOY_BRANCH main)
 branch=$(git -C "$KIT_PROJECT_DIR" symbolic-ref --quiet --short HEAD || true)

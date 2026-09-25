@@ -90,3 +90,15 @@ KIT_WEBHOOK_URL=                 # Slack, Discord, Mattermost, or anything takin
 KIT_NTFY_URL=
 KIT_NTFY_TOKEN=
 KIT_NOTIFY_COMMAND=
+
+# --- kit sandbox (docs/sandbox.md; usually set in .kamal/sandbox/sandbox.env)
+KIT_SANDBOX_CONFIGS=             # Kamal configs, in order; empty: the project's
+KIT_SANDBOX_NAME=                # container names' part; empty: the project folder's name
+KIT_SANDBOX_SSH_PORT=2222
+KIT_SANDBOX_REGISTRY_PORT=5555
+KIT_SANDBOX_PROXY_PORT=8080      # kamal-proxy's HTTP port, for roles behind it
+KIT_SANDBOX_PROXY_TLS_PORT=8443
+KIT_SANDBOX_SERVER_PATH=/srv/sandbox  # where hooks' server files appear on the "server"
+KIT_SANDBOX_ENV=                 # NAME=value ... for the deployer (what your Kamal configs' ERB reads)
+KIT_SANDBOX_NOTIFY=false         # send the kit's notifications from the sandbox too
+KIT_SANDBOX_IMAGE=               # empty: deploy-kit-sandbox:<kit version>, built from sandbox/Dockerfile
