@@ -29,10 +29,11 @@ deploy-kit $(cat "$KIT_HOME/VERSION") — presets around Kamal
 
 Deploying
   kit deploy [-d DEST] [-c CONFIG] [-P|--skip-push] [--version V] [--bootstrap]
-             [--no-smoke] [--no-rollback] [-- KAMAL-ARGS]
+             [--group NAME]... [--no-smoke] [--no-rollback] [-- KAMAL-ARGS]
       Deploy everything: plain roles with Kamal, then each group by its
       strategy, then smoke tests; rolls back if they fail. -c picks a Kamal
-      config (and so its groups); --bootstrap: a first deploy of standby groups.
+      config (and so its groups); --bootstrap: a first deploy of standby groups;
+      --group: only these groups (no plain roles), smoke tests and rollback included.
   kit group deploy NAME [-d DEST] [--bootstrap] [--role ROLE]... [-- KAMAL-ARGS]
   kit group switch NAME [--to ROLE] [-d DEST]   hand a standby group over (rollback, and forward again)
   kit group status [NAME] [-d DEST]
@@ -130,7 +131,7 @@ _short_version() {
 # ---------------------------------------------------------------- deploy
 
 cmd_deploy() {
-  local skip_push=false version="" smoke=true rollback=true bootstrap=() kamal_args=()
+  local skip_push=false version="" smoke=true rollback=true bootstrap=() kamal_args=() only=""
   _take_destination "$@"
   set -- ${ARGS[@]+"${ARGS[@]}"}
   while [ $# -gt 0 ]; do
@@ -138,6 +139,12 @@ cmd_deploy() {
       -P | --skip-push) skip_push=true ;;
       --version) version=$2 && shift ;;
       --version=*) version=${1#--version=} ;;
+      --group)
+        [ $# -ge 2 ] || kit_die "--group needs a group"
+        only="$only $2"
+        shift
+        ;;
+      --group=*) only="$only ${1#--group=}" ;;
       --no-smoke) smoke=false ;;
       --no-rollback) rollback=false ;;
       --bootstrap) bootstrap=(--bootstrap) ;;
@@ -173,6 +180,20 @@ cmd_deploy() {
     for role in $(kit_all_roles); do
       kit_in_list "$role" "$group_roles" || plain+=("$role")
     done
+  fi
+  # --group: those groups alone, in the usual order; the plain roles and
+  # the other groups keep their build (and aren't rolled back either).
+  if [ -n "$only" ]; then
+    for g in $only; do
+      kit_in_list "$g" "$(printf '%s' "$groups" | tr '\n' ' ')" ||
+        kit_die "kit deploy: no group '$g' in $(kit_config_file "$(kit_conf KIT_KAMAL_CONFIG_FILE "")") (groups: $(printf '%s' "$groups" | tr '\n' ' '))"
+    done
+    local selected=""
+    for g in $groups; do
+      kit_in_list "$g" "$only" && selected="$selected$g"$'\n'
+    done
+    groups=${selected%$'\n'}
+    plain=()
   fi
 
   local common=()
@@ -266,7 +287,7 @@ _rollback_after_smoke() {
   while read -r role v; do
     [ -n "$role" ] || continue
     if [ -n "$v" ]; then
-      KIT_GROUP_DEPLOY=$(_group_of "$role" "$groups") kit_kamal rollback -H -r "$role" "$v" || failed=1
+      (kit_group_load "$(_group_of "$role" "$groups")" && kit_group_rollback_role "$role" "$v") || failed=1
     fi
   done <"$rolling"
   [ "$failed" -eq 0 ] || kit_error "the rollback was incomplete: check \`kit group status\` and \`kamal app version\`"
