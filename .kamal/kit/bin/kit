@@ -48,7 +48,8 @@ Helpers
   kit hook NAME                                 what .kamal/hooks/<NAME> runs
 
 Setting up
-  kit init [--no-vendor] [--force]              add the kit to this project
+  kit init [--no-vendor] [--force] [--preset NAME]  add the kit to this project
+                                                (presets: behind-caddy)
   kit update [--from PATH|GIT-URL] [--ref REF]  replace the vendored copy in .kamal/kit
   kit host script                               print host/setup.sh (pipe it to a server)
   kit host remote USER@HOST [SETUP-ARGS...]     run host setup on a server over SSH
@@ -104,6 +105,21 @@ _performer() {
   git config user.email 2>/dev/null || id -un 2>/dev/null || printf '%s\n' "${USER:-uid $(id -u)}"
 }
 
+# _pull_version: the version to deploy when images are pulled, not built
+# (--skip-push): the checkout's commit. Kamal would otherwise name it
+# <sha>_uncommitted_<hash> as soon as `git status` shows anything, even an
+# untracked file, and no image has that tag. Changes to tracked files are
+# refused: the image of this commit doesn't contain them.
+_pull_version() {
+  local changes
+  changes=$(git -C "$KIT_PROJECT_DIR" status --porcelain --untracked-files=no 2>/dev/null) || true
+  if [ -n "$changes" ]; then
+    printf '%s\n' "$changes" >&2
+    kit_die "uncommitted changes (above): the images are built from commits, so these wouldn't be deployed. Commit or stash them"
+  fi
+  git -C "$KIT_PROJECT_DIR" rev-parse HEAD
+}
+
 _short_version() {
   local v
   v=${1:-$(git -C "$KIT_PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "?")}
@@ -133,6 +149,16 @@ cmd_deploy() {
   kit_load_config "$DEST"
   kit_is_true "$(kit_conf KIT_AUTO_ROLLBACK true)" || rollback=false
   kit_is_true "$(kit_conf KIT_DEPLOY_SKIP_PUSH false)" && skip_push=true
+  # One version for every Kamal call of this deploy (plain roles, each
+  # group, the rollback): pulled images are the checkout's commit's; a
+  # build is tagged with Kamal's own version for this checkout.
+  if [ -z "$version" ]; then
+    if [ "$skip_push" = true ]; then
+      version=$(_pull_version) || exit 1
+    else
+      version=$(kit_kamal config 2>/dev/null | sed -n 's/^:version:[[:space:]]*//p' | head -n 1)
+    fi
+  fi
 
   KIT_RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kit-run.XXXXXX")
   export KIT_RUN_DIR
@@ -325,6 +351,19 @@ cmd_group() {
       if kit_is_true "$(kit_conf KIT_DEPLOY_SKIP_PUSH false)"; then
         case " ${rest[*]:-} " in *" --skip-push "* | *" -P "*) ;; *) rest=(--skip-push ${rest[@]+"${rest[@]}"}) ;; esac
       fi
+      # Pulling (not building): this commit's images, unless --version says.
+      case " ${rest[*]:-} " in
+        *" --skip-push "* | *" -P "*)
+          case " ${rest[*]:-} " in
+            *" --version "* | *" --version="*) ;;
+            *)
+              local pull_version
+              pull_version=$(_pull_version) || exit 1
+              rest+=(--version "$pull_version")
+              ;;
+          esac
+          ;;
+      esac
       kit_group_deploy ${bootstrap[@]+"${bootstrap[@]}"} ${rest[@]+"${rest[@]}"} || exit 1
       [ "$standalone" = false ] || kit_notify success "group $name deployed, by $(_performer)"
       ;;
@@ -428,19 +467,35 @@ exec "$kit" hook "$(basename "$0")" "$@"
 EOF
 }
 
+# The presets the kit ships (templates/presets/<name>/).
+_presets() {
+  local d
+  for d in "$KIT_HOME"/templates/presets/*/; do [ -d "$d" ] && basename "$d"; done
+}
+
 cmd_init() {
-  local vendor=true force=false project dir hook file
+  local vendor=true force=false preset="" project dir hook file
   while [ $# -gt 0 ]; do
     case $1 in
       --no-vendor) vendor=false ;;
       --force) force=true ;;
+      --preset)
+        [ $# -ge 2 ] || kit_die "--preset needs a name: $(_presets | tr '\n' ' ')"
+        preset=$2
+        shift
+        ;;
       *) kit_die "kit init: unknown option $1" ;;
     esac
     shift
   done
+  if [ -n "$preset" ] && [ ! -d "$KIT_HOME/templates/presets/$preset" ]; then
+    kit_die "no preset '$preset'; there are: $(_presets | tr '\n' ' ')"
+  fi
   project=$(kit_project_dir)
   dir="$project/.kamal"
-  [ -f "$project/config/deploy.yml" ] || kit_warn "no config/deploy.yml here: run \`kamal init\` first (or ignore, if your config lives elsewhere)"
+  if [ ! -f "$project/config/deploy.yml" ] && [ -z "$preset" ]; then
+    kit_warn "no config/deploy.yml here: run \`kamal init\` first (or ignore, if your config lives elsewhere)"
+  fi
   if grep -qs '^hooks_path:' "$project/config/deploy.yml"; then
     kit_warn "config/deploy.yml sets hooks_path: the shims go in .kamal/hooks; move them there or point hooks_path at it"
   fi
@@ -476,6 +531,10 @@ cmd_init() {
   fi
   [ -f "$dir/hooks.d/README.md" ] || cp "$KIT_HOME/templates/project/.kamal/hooks.d/README.md" "$dir/hooks.d/README.md"
 
+  if [ -n "$preset" ]; then
+    _init_preset "$preset" "$project" "$force"
+  fi
+
   if ! grep -qs 'kit.local.env' "$project/.gitignore"; then
     printf '\n# deploy-kit: personal overrides\n.kamal/kit.local.env\n' >>"$project/.gitignore"
     kit_ok "added .kamal/kit.local.env to .gitignore"
@@ -488,6 +547,30 @@ Next:
   2. Deploy with: .kamal/kit/bin/kit deploy   (or: kamal deploy; the gates run either way)
   3. Groups (standby / rolling roles): see .kamal/kit/templates/groups/ and docs/groups.md.
 EOF
+}
+
+# _init_preset NAME PROJECT FORCE: the preset's files in .kamal/presets/NAME/
+# (to copy from), and its deploy.yml as config/deploy.yml when there is none.
+_init_preset() {
+  local name=$1 project=$2 force=$3 target
+  target="$project/.kamal/presets/$name"
+  if [ -d "$target" ] && [ "$force" != true ]; then
+    kit_info "preset $name already in .kamal/presets/$name (--force to replace it)"
+  else
+    rm -rf "$target"
+    mkdir -p "$target"
+    cp -R "$KIT_HOME/templates/presets/$name/." "$target/"
+    kit_ok "preset $name in .kamal/presets/$name: see its README.md"
+  fi
+  if [ -f "$KIT_HOME/templates/presets/$name/deploy.yml" ]; then
+    if [ -f "$project/config/deploy.yml" ]; then
+      kit_info "config/deploy.yml exists: merge .kamal/presets/$name/deploy.yml into it by hand"
+    else
+      mkdir -p "$project/config"
+      cp "$KIT_HOME/templates/presets/$name/deploy.yml" "$project/config/deploy.yml"
+      kit_ok "wrote config/deploy.yml from the preset: fill in its <placeholders>"
+    fi
+  fi
 }
 
 cmd_update() {
