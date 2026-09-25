@@ -3,58 +3,27 @@
 #   Caddy ─► receiver-1 / receiver-2 (lb_policy first) ─► RabbitMQ ─► collector-a/b ─► db
 #         └► web-a / web-b (by visitor address) ─────────────────────────────────────┘
 #
-# Each service is redeployed on its own, one of a pair at a time
-# (deploy.sh): the site, the collectors and webhook intake never stop for
-# a deploy (§15.3).
-# Two collectors run; one collects, the other stands by and takes over in
-# about a second on a deploy, or ~20s if the first dies (§10.1).
+# This file holds what isn't redeployed with the code: the database, the
+# queue and the bundled Caddy. The app's containers (web, collectors,
+# receivers) are Kamal's (deploy/kamal/*.yml), deployed with deploy-kit
+# (deploy/release.sh), one of a pair at a time: the site, the collectors
+# and webhook intake never stop for a deploy (§15.3).
 #
-# Images are pinned in deploy/.env (APP_IMAGE, COLLECTOR_IMAGE; written by
-# the deploy workflow): a plain `docker compose up -d` never swaps the
-# collectors' image by accident.
+# Everything is on Kamal's Docker network ("kamal", created before this
+# stack starts: deploy/README.md), so the app reaches `db` and `rabbitmq`
+# by name, and the bundled Caddy reaches web-a, web-b, receiver-1 and
+# receiver-2 by their network aliases.
+#
 # Secrets come from env files decrypted from secrets/*.sops.env (see
-# secrets/README.md), never from this file. Images come from GHCR (§19.1).
+# secrets/README.md), never from this file.
 name: kicktracker
-
-x-app: &app
-  image: ${APP_IMAGE:?pin APP_IMAGE in deploy/.env (deploy/README.md)}
-  env_file: [secrets/app.env]
-  restart: unless-stopped
-  # Exports and imports: web takes uploads and serves downloads, the
-  # collector does the work (TRANSFER_DIR, project.md §13.8).
-  volumes: [transfers:/transfers]
-  # Every app container answers to "app": how the nodes find each other
-  # (DNS_CLUSTER_QUERY=app) and form one cluster for PubSub.
-  networks: {default: {aliases: [app]}}
-  depends_on:
-    db: {condition: service_healthy}
-
-# A collector: its own env file (no web secrets), its journal on its own
-# volume, `always` restarted, and a minute to stop cleanly (stop
-# collecting, release the lease, write out its journal). Each has its own
-# image pin (COLLECTOR_A_IMAGE, COLLECTOR_B_IMAGE): a deploy updates only
-# the one standing by and switches to it, leaving the other on the
-# previous build for a rollback (deploy.sh). COLLECTOR_IMAGE is the
-# fallback for a pin not set yet.
-x-collector: &collector
-  env_file: [secrets/collector.env]
-  restart: always
-  stop_grace_period: 60s
-  networks: {default: {aliases: [app]}}
-  depends_on:
-    db: {condition: service_healthy}
-    rabbitmq: {condition: service_healthy}
-
-x-receiver: &receiver
-  image: ${RECEIVER_IMAGE:-ghcr.io/anisabdellatif/kicktracker-receiver:latest}
-  env_file: [secrets/receiver.env]
-  restart: unless-stopped
 
 services:
   # HTTPS in front, for a VPS with no web server of its own: enabled with
   # COMPOSE_PROFILES=caddy in deploy/.env. A Caddy the host already runs
   # imports caddy/sites.caddy instead and reaches web and the receivers on
-  # their loopback ports below (README.md, "A Caddy already on the host").
+  # the loopback ports they publish (deploy/kamal/*.yml; README.md, "A Caddy
+  # already on the host").
   caddy:
     image: caddy:2
     profiles: [caddy]
@@ -66,20 +35,6 @@ services:
       - ./caddy/sites.caddy:/etc/caddy/sites.caddy:ro
       - caddy_data:/data
       - caddy_config:/config
-
-  # Each web node and receiver is also published on loopback, for a Caddy
-  # running on the host (the ports are set in deploy/.env if taken).
-  receiver-1:
-    <<: *receiver
-    environment: {RECEIVER_ID: "vps1/1", PEER_HEALTH_URL: "http://receiver-2:4060/health"}
-    volumes: [spool1:/data]
-    ports: ["127.0.0.1:${RECEIVER_1_PORT:-4160}:4060"]
-
-  receiver-2:
-    <<: *receiver
-    environment: {RECEIVER_ID: "vps1/2", PEER_HEALTH_URL: "http://receiver-1:4060/health"}
-    volumes: [spool2:/data]
-    ports: ["127.0.0.1:${RECEIVER_2_PORT:-4161}:4060"]
 
   rabbitmq:
     image: rabbitmq:4-management
@@ -120,45 +75,15 @@ services:
       timeout: 3s
       retries: 60
 
-  collector-a:
-    <<: *collector
-    image: ${COLLECTOR_A_IMAGE:-${COLLECTOR_IMAGE:?pin COLLECTOR_IMAGE in deploy/.env (deploy/README.md)}}
-    environment: {ROLE: collector, COLLECTOR_ID: collector-a}
-    volumes: [journal-a:/journal, transfers:/transfers]
-
-  collector-b:
-    <<: *collector
-    image: ${COLLECTOR_B_IMAGE:-${COLLECTOR_IMAGE:?pin COLLECTOR_IMAGE in deploy/.env (deploy/README.md)}}
-    environment: {ROLE: collector, COLLECTOR_ID: collector-b}
-    volumes: [journal-b:/journal, transfers:/transfers]
-
-  # Two, behind Caddy: a site deploy updates one while the other serves.
-  web-a:
-    <<: *app
-    environment: {ROLE: web}
-    ports: ["127.0.0.1:${WEB_A_PORT:-4110}:4100"]
-
-  web-b:
-    <<: *app
-    environment: {ROLE: web}
-    ports: ["127.0.0.1:${WEB_B_PORT:-4111}:4100"]
-
-  # Migrations are a step of their own, before a deploy (§19.1):
-  #   docker compose run --rm migrate
-  migrate:
-    <<: *app
-    profiles: [tools]
-    restart: "no"
-    environment: {ROLE: web}
-    command: ["/app/bin/migrate"]
-
+# The app's volumes (journals, spools, transfers) were created by this file
+# as kicktracker_*; Kamal's containers use them under those names.
 volumes:
-  journal-a:
-  journal-b:
   caddy_data:
   caddy_config:
-  transfers:
-  spool1:
-  spool2:
   rabbitmq:
   db:
+
+networks:
+  default:
+    name: kamal
+    external: true

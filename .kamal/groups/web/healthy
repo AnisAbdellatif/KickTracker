@@ -1,0 +1,3 @@
+#!/bin/sh
+# /healthz answers over plain HTTP (it is exempt from force_ssl).
+"$KIT" role-exec "$KIT_ROLE" "curl -fsS http://127.0.0.1:4100/healthz" >/dev/null

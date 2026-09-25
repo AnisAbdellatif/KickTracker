@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# pre-deploy: migrations from the image being deployed, as a step of their
+# own, before any of its containers starts (§15.3, expand-then-contract,
+# lock_timeout 5s). Runs the app image with web's env file on the server
+# (not `kamal app exec`, whose container would take web's published port).
+# Only for the app image: the receiver has no database.
+# shellcheck source=/dev/null
+. "$KIT_HOME/steps/_preamble.sh"
+# shellcheck source=/dev/null
+. "$KIT_HOME/lib/kamal.sh"
+
+[ "${KAMAL_SERVICE:-}" = kicktracker ] || exit 0
+dir=${KT_DEPLOY_DIR:-/srv/kick_tracker}
+secrets=${KT_SECRETS_DIR:-$dir/deploy/secrets}
+image=$(kit_conf KIT_IMAGE_KICKTRACKER "")
+[ -n "$image" ] || kit_die "KIT_IMAGE_KICKTRACKER isn't set (.kamal/kit.env)"
+kit_kamal server exec -H -q -p \
+  "docker run --rm --network kamal --env-file $secrets/app.env -e ROLE=web $image:${KAMAL_VERSION:?} /app/bin/migrate"

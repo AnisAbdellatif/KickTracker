@@ -2,10 +2,11 @@
 # warnings, Credo, Sobelow, Dialyzer, vulnerable and retired dependencies,
 # and every test suite against real TimescaleDB and RabbitMQ
 # (deploy/compose.dev.yml) and the fake Kick (sim/, a path dependency).
-# On main, the images are built and pushed to GHCR, then deployed
-# (deploy/release.sh over SSH): every merge to main goes live once its
-# checks pass. Set the repository variable AUTO_DEPLOY to "false" to stop
-# that; the Deploy workflow stays for rollbacks and single roles.
+# On main, the images are built, labelled for Kamal, pushed to GHCR and
+# attested (where they came from, signed). CI deploys nothing and holds no
+# key to the server: a person deploys with deploy/release.sh, whose gates
+# check this run passed for the commit and that the images carry this
+# workflow's attestation (deploy/README.md, "Deploying a change").
 name: CI
 
 on:
@@ -13,8 +14,8 @@ on:
     branches: [dev, main]
   pull_request:
 
-# A newer push cancels a run in progress, except on main: a run there ends
-# in a deploy, which must never be cut off halfway.
+# A newer push cancels a run in progress, except on main: its images are
+# what gets deployed.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -151,15 +152,23 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # The build attestation: signed (Sigstore, keyless) by this workflow.
+      id-token: write
+      attestations: write
     strategy:
       matrix:
         include:
+          # service: the Kamal service that runs the image (deploy/kamal/*.yml);
+          # Kamal refuses to pull an image without that label.
           - name: app
             context: app
+            service: kicktracker
           - name: receiver
             context: ingress/receiver
+            service: kicktracker-receiver
           - name: db
             context: deploy/db
+            service: kicktracker-db
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -171,55 +180,22 @@ jobs:
       - name: Image name
         id: name
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           push: true
           tags: |
             ${{ steps.name.outputs.image }}:${{ github.sha }}
             ${{ steps.name.outputs.image }}:latest
+          labels: service=${{ matrix.service }}
           build-args: BUILD_SHA=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-
-  deploy:
-    name: Deploy
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AUTO_DEPLOY != 'false'
-    needs: [images]
-    runs-on: ubuntu-24.04
-    environment: production
-    # One deploy at a time, shared with the Deploy workflow; a waiting one
-    # is replaced by a newer one (it deploys a later main).
-    concurrency:
-      group: deploy
-      cancel-in-progress: false
-    steps:
-      - name: Server configured?
-        id: server
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST || vars.DEPLOY_HOST }}
-        run: |
-          if [ -n "$HOST" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::Not deployed: set DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS (deploy/README.md)."
-          fi
-      - name: SSH key
-        if: steps.server.outputs.ready == 'true'
-        run: |
-          install -m 700 -d ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
-          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/id_ed25519
-      - name: Release
-        if: steps.server.outputs.ready == 'true'
-        env:
-          # Host and user: secrets or plain variables, either works.
-          TARGET: ${{ secrets.DEPLOY_USER || vars.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST || vars.DEPLOY_HOST }}
-          # The checkout on the server: repository variable DEPLOY_DIR.
-          DIR: ${{ vars.DEPLOY_DIR || '/srv/kick_tracker' }}
-        # This commit's images, even if main has moved on since: the run
-        # for the newer commit deploys that one next.
-        run: |
-          [[ "$DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "DEPLOY_DIR must be an absolute path: $DIR" >&2; exit 1; }
-          ssh "$TARGET" "cd '$DIR' && git pull --ff-only && TAG=$GITHUB_SHA IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,} deploy/release.sh"
+      # Checked before a deploy (the kit's attestation step): an image in
+      # the registry that this workflow didn't build is refused.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.name.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

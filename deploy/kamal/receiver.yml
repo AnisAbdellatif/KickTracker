@@ -1,0 +1,56 @@
+# The webhook receivers as Kamal runs them (project.md §8.4, §15): two on
+# the main VPS, a separate image (ingress/receiver), hence their own
+# config. Caddy sends every webhook to the first healthy one (lb_policy
+# first) and fails over to the other, so they are replaced one at a time
+# (.kamal/groups/receivers). Each keeps its spool on the volume compose
+# created for it (kicktracker_spool1, _spool2): spooled webhooks carry over.
+# The rest as in app.yml.
+<%
+  host = ENV.fetch("KT_HOST") { raise "KT_HOST isn't set: put the server in .kamal/kit.local.env" }
+  dir = ENV.fetch("KT_DEPLOY_DIR", "/srv/kick_tracker")
+  secrets = ENV.fetch("KT_SECRETS_DIR", "#{dir}/deploy/secrets")
+  vol = ENV.fetch("KT_VOLUME_PREFIX", "kicktracker")
+%>
+service: kicktracker-receiver
+image: <%= ENV.fetch("KT_IMAGE_OWNER", "anisabdellatif") %>/kicktracker-receiver
+
+# Kamal gives the primary role a proxy unless told not to (proxy: false).
+primary_role: receiver_1
+
+servers:
+  receiver_1:
+    hosts: [<%= host %>]
+    proxy: false
+    env:
+      clear: {RECEIVER_ID: "vps1/1", PEER_HEALTH_URL: "http://receiver-2:4060/health"}
+    options:
+      env-file: <%= secrets %>/receiver.env
+      network-alias: receiver-1
+      publish: 127.0.0.1:<%= ENV.fetch("KT_RECEIVER_1_PORT", 4160) %>:4060
+      volume: <%= vol %>_spool1:/data
+  receiver_2:
+    hosts: [<%= host %>]
+    env:
+      clear: {RECEIVER_ID: "vps1/2", PEER_HEALTH_URL: "http://receiver-1:4060/health"}
+    options:
+      env-file: <%= secrets %>/receiver.env
+      network-alias: receiver-2
+      publish: 127.0.0.1:<%= ENV.fetch("KT_RECEIVER_2_PORT", 4161) %>:4060
+      volume: <%= vol %>_spool2:/data
+
+registry:
+  server: <%= ENV.fetch("KT_REGISTRY", "ghcr.io") %>
+  username: <%= ENV.fetch("KT_REGISTRY_USER", "anisabdellatif") %>
+  password: [KAMAL_REGISTRY_PASSWORD]
+
+builder:
+  arch: amd64
+  context: ingress/receiver
+  dockerfile: ingress/receiver/Dockerfile
+
+ssh:
+  user: <%= ENV.fetch("KT_SSH_USER") { raise "KT_SSH_USER isn't set: put the deploy user in .kamal/kit.local.env" } %>
+  port: <%= ENV.fetch("KT_SSH_PORT", 22) %>
+
+deploy_timeout: 120
+retain_containers: 5

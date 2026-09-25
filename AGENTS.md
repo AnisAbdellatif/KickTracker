@@ -101,7 +101,8 @@ understanding their intent first.
 | `sim/` | The fake Kick + the recorder (§17) | All development and tests run against it |
 | `fixtures/` | Recorded, anonymized Kick payloads (§17.1) | Source for the simulator and parser tests |
 | `contracts/` | The event envelope (§8.1) | The only thing app and ingress share |
-| `deploy/` | Compose files, Caddy, RabbitMQ definitions, `deploy.sh`, `release.sh` (what CI runs on the server after every merge to `main`) | `compose.dev.yml` runs TimescaleDB (55432) and RabbitMQ (55672) for development and tests; `rehearsal/rehearse.sh` runs the production stack locally and upgrades it under load: run it after changing anything on the deploy path |
+| `deploy/` | Kamal configs (`kamal/`), compose files (infrastructure, stage 2), Caddy, RabbitMQ definitions, `release.sh` (a release, run by a person with deploy-kit), `server-sync.sh` (run on the server before each deploy) | `compose.dev.yml` runs TimescaleDB (55432) and RabbitMQ (55672) for development and tests; `rehearsal/rehearse.sh` runs the production stack locally and upgrades it under load with the kit: run it after changing anything on the deploy path |
+| `.kamal/` | deploy-kit: settings (`kit.env`), groups, project steps, the vendored kit (`kit/`) | Update the kit with `kit update --from <deploy-kit checkout or URL> --ref <tag>`; never edit `.kamal/kit/` by hand |
 
 Follow the phase order in §20. Don't build ahead of the current phase without asking.
 

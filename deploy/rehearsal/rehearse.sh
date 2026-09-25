@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# The deploy rehearsal (README.md here): runs the production stack
-# (compose.single.yml) on this machine against the fake Kick, keeps it
-# busy (a visitor on the site every second, webhooks every few seconds,
-# three live channels with chat), and upgrades it the way production is
-# upgraded, through deploy.sh, measuring what each step costs:
+# The deploy rehearsal (README.md here): runs the production stack on this
+# machine against the fake Kick, keeps it busy (a visitor on the site every
+# second, webhooks every few seconds, three live channels with chat), and
+# upgrades it the way production is upgraded, with deploy-kit and Kamal
+# (deploy/release.sh, .kamal/), measuring what each step costs:
 #
 #   web deploy (with a migration on a live hypertable), collector deploy,
 #   receiver deploy, database restart, RabbitMQ restart, a collector
-#   killed, and a rollback to the previous image.
+#   killed, a rollback of web and collectors, and a whole release.
 #
 #   deploy/rehearsal/rehearse.sh         # all of it, then a report
 #   deploy/rehearsal/rehearse.sh down    # remove the stack and its volumes
 #
-# Needs Docker (compose v2.24+) and Elixir (for the fake Kick). Takes
-# about 25 minutes, mostly waiting for polls to happen. Writes everything
-# under deploy/rehearsal/.work (git-ignored), the report included.
+# Kamal deploys over SSH to a server: here a container ("the server": sshd
+# and a Docker CLI on this machine's Docker), and runs from another ("the
+# deployer": Kamal and the kit), both from tools/Dockerfile. Images go
+# through a local registry. Needs Docker (compose v2.24+) and Elixir (for
+# the fake Kick). Takes about 30 minutes, mostly waiting for polls to
+# happen. Writes everything under deploy/rehearsal/.work (git-ignored),
+# the report included.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
@@ -24,11 +28,18 @@ LOG=$WORK/log
 export COMPOSE_PROJECT_NAME=kicktracker-rehearsal
 export COMPOSE_FILES="compose.single.yml compose.rehearsal.yml"
 
-APP_V1=kicktracker-app:rehearsal-v1
-APP_V2=kicktracker-app:rehearsal-v2
-RECEIVER_V1=kicktracker-receiver:rehearsal-v1
-RECEIVER_V2=kicktracker-receiver:rehearsal-v2
+REGISTRY=127.0.0.1:5555
+OWNER=anisabdellatif
+APP=$REGISTRY/$OWNER/kicktracker-app
+RECEIVER=$REGISTRY/$OWNER/kicktracker-receiver
+V1=rehearsal-v1
+V2=rehearsal-v2
 DB_IMAGE=kicktracker-db:rehearsal
+TOOLS=kicktracker-rehearsal-tools
+SERVER=kicktracker-rehearsal-server
+REGISTRY_CONTAINER=kicktracker-rehearsal-registry
+SSH_PORT=2222
+VOLUMES=kicktracker-rehearsal # the Kamal containers' volume prefix
 SIM=http://127.0.0.1:4050
 SITE=http://localhost:8080
 CHANNELS="rehearsalbig rehearsalmid rehearsalsmall"
@@ -37,6 +48,36 @@ dc() {
   local args=()
   for f in $COMPOSE_FILES; do args+=(-f "$f"); done
   (cd "$DEPLOY" && docker compose "${args[@]}" "$@")
+}
+
+# The deployer: the kit and Kamal, as on the machine that deploys, with
+# the rehearsal's server, registry and volumes (deploy/kamal/*.yml read
+# KT_*) and the destination "rehearsal" (.kamal/kit.rehearsal.env,
+# deploy/kamal/*.rehearsal.yml). --userns=host: Docker refuses the host's
+# network to a container otherwise when user namespaces are on.
+deployer() {
+  docker run --rm --network host --userns=host --user "$(id -u):$(id -g)" \
+    -e HOME=/tmp/home -e NO_COLOR=1 \
+    -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=user.email -e GIT_CONFIG_VALUE_0=rehearsal@localhost \
+    -v "$REPO:$REPO" -w "$REPO" -v "$WORK/ssh:/tmp/home/.ssh" \
+    -e KT_HOST=127.0.0.1 -e KT_SSH_PORT="$SSH_PORT" -e KT_SSH_USER=root \
+    -e KT_DEPLOY_DIR=/srv/kick_tracker -e KT_VOLUME_PREFIX="$VOLUMES" \
+    -e KT_REGISTRY="$REGISTRY" -e KT_IMAGE_OWNER="$OWNER" -e KT_REGISTRY_PASSWORD=rehearsal \
+    -e KIT_SMOKE_URLS="${SMOKE_URLS:-}" \
+    "$TOOLS" "$@"
+}
+
+# kitd WORDS… ARGS…: the kit, for the rehearsal destination.
+kitd() {
+  case $1 in
+    group) deployer .kamal/kit/bin/kit group "$2" -d rehearsal "${@:3}" ;;
+    *) deployer .kamal/kit/bin/kit "$1" -d rehearsal "${@:2}" ;;
+  esac
+}
+
+# role_container ROLE: the running container of a Kamal role.
+role_container() {
+  docker ps -q --filter "label=role=$1" --filter label=destination=rehearsal | head -1
 }
 
 say() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$LOG/steps.log"; }
@@ -48,9 +89,13 @@ psql_q() { dc exec -T db psql -U kick_tracker -d kick_tracker -Atc "$1"; }
 
 build() {
   say "building images (cached layers make this quick after the first time)"
-  docker build -q -t "$APP_V1" -f "$REPO/app/Dockerfile" "$REPO/app" >/dev/null
-  docker build -q -t "$RECEIVER_V1" -f "$REPO/ingress/receiver/Dockerfile" "$REPO/ingress/receiver" >/dev/null
+  # Labelled for Kamal (it refuses an image without its service's label),
+  # as CI labels them.
+  docker build -q -t "$APP:$V1" --label service=kicktracker -f "$REPO/app/Dockerfile" "$REPO/app" >/dev/null
+  docker build -q -t "$RECEIVER:$V1" --label service=kicktracker-receiver \
+    -f "$REPO/ingress/receiver/Dockerfile" "$REPO/ingress/receiver" >/dev/null
   docker build -q -t "$DB_IMAGE" -f "$REPO/deploy/db/Dockerfile" "$REPO/deploy/db" >/dev/null
+  docker build -q -t "$TOOLS" "$REPO/deploy/rehearsal/tools" >/dev/null
 
   # v2: v1 plus a migration on a hypertable the collectors write to all
   # the time (expand only: a nullable column), to see what a migration
@@ -70,11 +115,18 @@ defmodule KickTracker.Repo.Migrations.RehearsalProbe do
 end
 EOS
   cat > "$ctx/Dockerfile" <<EOS
-FROM $APP_V1
+FROM $APP:$V1
 COPY --chown=app 20990101000000_rehearsal_probe.exs /app/lib/kick_tracker-0.1.0/priv/repo/migrations/
 EOS
-  docker build -q -t "$APP_V2" "$ctx" >/dev/null
-  docker tag "$RECEIVER_V1" "$RECEIVER_V2"
+  docker build -q -t "$APP:$V2" "$ctx" >/dev/null
+  docker tag "$RECEIVER:$V1" "$RECEIVER:$V2"
+
+  say "starting a local registry on $REGISTRY and pushing the images to it"
+  docker run -d --name "$REGISTRY_CONTAINER" -p "$REGISTRY:5000" registry:2 >/dev/null
+  until curl -sf "http://$REGISTRY/v2/" >/dev/null; do sleep 1; done
+  for image in "$APP:$V1" "$APP:$V2" "$RECEIVER:$V1" "$RECEIVER:$V2"; do
+    docker push -q "$image" >/dev/null
+  done
 }
 
 # --- the stack ------------------------------------------------------------------
@@ -120,8 +172,23 @@ RABBITMQ_MANAGEMENT_URL=http://monitor:$monitor_pw@rabbitmq:15672"
   RABBITMQ_ADMIN_PASSWORD=$admin_pw RABBITMQ_RECEIVER_PASSWORD=$receiver_pw RABBITMQ_APP_PASSWORD=$app_pw \
     RABBITMQ_OPS_PASSWORD=$ops_pw RABBITMQ_MONITOR_PASSWORD=$monitor_pw "$DEPLOY/rabbitmq/make-prod-definitions.sh"
 
-  printf 'APP_IMAGE=%s\nCOLLECTOR_IMAGE=%s\nRECEIVER_IMAGE=%s\nDB_IMAGE=%s\n' \
-    "$APP_V1" "$APP_V1" "$RECEIVER_V1" "$DB_IMAGE" > "$DEPLOY/.env"
+  printf 'DB_IMAGE=%s\n' "$DB_IMAGE" > "$DEPLOY/.env"
+
+  say "starting the server (sshd on 127.0.0.1:$SSH_PORT, this machine's Docker and network, deploy/ at /srv/kick_tracker)"
+  mkdir -p "$WORK/ssh"
+  [ -f "$WORK/ssh/id_ed25519" ] || ssh-keygen -q -t ed25519 -N "" -f "$WORK/ssh/id_ed25519"
+  printf 'Host 127.0.0.1\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n' > "$WORK/ssh/config"
+  # On the host's network, as a real server's Docker CLI is: `docker login`
+  # runs in the CLI, and must reach the registry on 127.0.0.1 too. (Outside
+  # the user namespace the image's files aren't root's: sshd wants them so.)
+  docker run -d --name "$SERVER" --network host --userns=host \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$DEPLOY:/srv/kick_tracker/deploy" \
+    -v "$WORK/ssh/id_ed25519.pub:/keys/id.pub:ro" \
+    "$TOOLS" sh -c "chown -R root:root /var/empty /etc/ssh /root && install -m 600 /keys/id.pub /root/.ssh/authorized_keys \
+      && exec /usr/sbin/sshd -D -e -p $SSH_PORT -o ListenAddress=127.0.0.1" >/dev/null
+  until ssh -q -p "$SSH_PORT" -i "$WORK/ssh/id_ed25519" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    root@127.0.0.1 true; do sleep 1; done
 }
 
 start_sim() {
@@ -134,10 +201,15 @@ start_sim() {
 }
 
 up() {
-  say "starting the stack: database and queue, migrations, then everything"
+  say "starting the database and the queue (compose, on Kamal's network)"
+  docker network inspect kamal >/dev/null 2>&1 || docker network create kamal >/dev/null
   dc up -d --wait db rabbitmq
-  dc run --rm migrate
-  dc up -d --wait
+
+  say "first deploy with the kit: migrations, then the collectors (--bootstrap) and web; then the receivers"
+  kitd deploy --bootstrap --no-smoke --version "$V1"
+  kitd deploy -c deploy/kamal/receiver.yml --no-smoke --version "$V1"
+  dc up -d --wait caddy
+
   # Through Caddy, as visitors and Kick reach it: nothing else counts.
   say "checking the site and the ingress answer through Caddy"
   for _ in $(seq 1 30); do
@@ -150,7 +222,7 @@ up() {
     exit 1
   fi
   say "tracking $CHANNELS"
-  dc exec -T web-a bin/kick_tracker rpc "
+  docker exec "$(role_container web_a)" bin/kick_tracker rpc "
     for slug <- ~w($CHANNELS), do: IO.inspect(KickTracker.Channels.add(slug) |> elem(0), label: slug)
     IO.inspect(Node.list(), label: \"cluster\")"
 }
@@ -189,28 +261,43 @@ op() {
   shift
   say "== $name"
   echo "$name $(now)" >> "$LOG/ops.start"
-  "$@" >> "$LOG/ops.log" 2>&1
-  # Settle: healthy again, and a poll cycle after.
+  if ! "$@" >> "$LOG/ops.log" 2>&1; then
+    say "   (it failed: see $LOG/ops.log)"
+    echo "$name" >> "$LOG/ops.failed"
+  fi
+  # Settle: the infrastructure healthy again, and a poll cycle after.
   dc up -d --wait --no-recreate >> "$LOG/ops.log" 2>&1 || true
   sleep 75
   echo "$name $(now)" >> "$LOG/ops.end"
 }
 
-deploy() { (cd "$DEPLOY" && ROLE=$1 APP_IMAGE=${2:-} RECEIVER_IMAGE=${3:-} ./deploy.sh); }
-
 leader_container() {
-  for c in collector-a collector-b; do
-    if dc exec -T "$c" curl -fsS http://127.0.0.1:4101/status 2>/dev/null | grep -q '"role":"leader"'; then
-      dc ps -q "$c"
+  local r id
+  for r in collector_a collector_b; do
+    id=$(role_container "$r")
+    if [ -n "$id" ] && docker exec "$id" curl -fsS http://127.0.0.1:4101/status 2>/dev/null | grep -q '"role":"leader"'; then
+      echo "$id"
       return
     fi
   done
 }
 
+# The collecting container killed, as a crash would. Docker counts `docker
+# kill` as stopping it by hand and skips its restart policy (a real crash
+# is restarted): start it again as the policy would, a few seconds later.
 kill_leader() {
   local id
   id=$(leader_container)
   docker kill -s KILL "$id"
+  sleep 3
+  docker start "$id"
+}
+
+# A whole release as deploy/release.sh does it (both Kamal configs), with
+# the smoke tests through Caddy that would roll it back.
+release() {
+  SMOKE_URLS="$SITE/healthz" kitd deploy --version "$1"
+  SMOKE_URLS="$SITE/healthz" kitd deploy -c deploy/kamal/receiver.yml --version "$1"
 }
 
 operations() {
@@ -219,14 +306,17 @@ operations() {
   sleep 120
   echo "baseline $(now)" >> "$LOG/ops.end"
 
-  op "web deploy (with a migration on viewer_samples)" deploy web "$APP_V2"
-  op "collector deploy" deploy collector "$APP_V2"
-  op "receiver deploy" deploy receivers "" "$RECEIVER_V2"
+  op "web deploy (with a migration on viewer_samples)" kitd group deploy web -- --version "$V2"
+  op "collector deploy" kitd group deploy collectors -- --version "$V2"
+  op "receiver deploy" kitd group deploy receivers -- --version "$V2"
   op "database restart" dc restart db
   op "RabbitMQ restart" dc restart rabbitmq
   op "collector killed (SIGKILL)" kill_leader
-  op "rollback: web" deploy web "$APP_V1"
-  op "rollback: collectors (switch to the standby, still on v1)" deploy collector-switch
+  op "rollback: web" kitd group deploy web -- --version "$V1"
+  # After the kill the other collector (still on v1) collects: this hands
+  # collection back and forth, the collectors' rollback, nothing pulled.
+  op "collectors switched (the rollback: a handover, nothing pulled)" kitd group switch collectors
+  op "release (kit deploy, both configs) to v2" release "$V2"
 }
 
 # --- the report ----------------------------------------------------------------------
@@ -247,7 +337,13 @@ print("\n".join(json.load(sys.stdin)["message_ids"]))' | sort -u > "$LOG/sent.tx
   {
     echo "# Deploy rehearsal"
     echo
-    echo "Run $(date -u +%Y-%m-%dT%H:%MZ) with images $APP_V1 / $APP_V2."
+    echo "Run $(date -u +%Y-%m-%dT%H:%MZ) with images $APP:$V1 / $V2, deployed with deploy-kit $(cat "$REPO/.kamal/kit/VERSION") and Kamal."
+    echo
+    if [ -s "$LOG/ops.failed" ]; then
+      echo "**Operations that failed:** $(tr '\n' ';' < "$LOG/ops.failed")"
+    else
+      echo "Every operation succeeded."
+    fi
     echo
     echo "## The site during each operation"
     echo
@@ -322,7 +418,13 @@ for slug, minutes in rows.items():
     echo
     echo "## Cluster and alerts"
     echo
-    echo "web-a sees: $(dc exec -T web-a bin/kick_tracker rpc 'IO.puts(Enum.join(Node.list(), " "))' | tr -d '\r')"
+    echo "web_a sees: $(docker exec "$(role_container web_a)" bin/kick_tracker rpc 'IO.puts(Enum.join(Node.list(), " "))' | tr -d '\r')"
+    echo
+    echo "Running at the end:"
+    echo
+    echo '```'
+    docker ps --filter label=destination=rehearsal --format '{{.Names}}  {{.Status}}' | sort
+    echo '```'
     echo
     echo "Open alerts: $(psql_q "SELECT coalesce(string_agg(message, '; '), 'none') FROM alerts WHERE resolved_at IS NULL")"
     echo
@@ -335,7 +437,13 @@ down() {
   stop_probes
   [ -f "$WORK/sim.pid" ] && kill "$(cat "$WORK/sim.pid")" 2>/dev/null || true
   pkill -f "mix sim --ip 0.0.0.0 --port 4050" 2>/dev/null || true
+  local ids
+  ids=$(docker ps -aq --filter label=destination=rehearsal)
+  # shellcheck disable=SC2086 # one id per word
+  [ -z "$ids" ] || docker rm -f $ids >/dev/null
+  docker rm -f "$SERVER" "$REGISTRY_CONTAINER" >/dev/null 2>&1 || true
   [ -d "$DEPLOY" ] && dc down -v --remove-orphans || true
+  docker volume ls -q --filter "name=^${VOLUMES}_" | xargs -r docker volume rm >/dev/null
 }
 
 case "${1:-all}" in
