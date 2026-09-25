@@ -80,7 +80,10 @@ export function legend(t) {
 
 // Numbers in the visitor's locale (§13.6).
 const exact = new Intl.NumberFormat()
-const compact = new Intl.NumberFormat(undefined, {notation: "compact", maximumFractionDigits: 1})
+// Axis ticks are ECharts' round steps, so every significant digit is kept:
+// a tight range (25,990 to 26,020 followers) needs "25.99K" and "26.01K",
+// which one fraction digit would all turn into "26K".
+const compact = new Intl.NumberFormat(undefined, {notation: "compact", maximumSignificantDigits: 21})
 export const fmt = (v) => (v == null ? "–" : exact.format(Math.abs(v) >= 10 ? Math.round(v) : Math.round(v * 10) / 10))
 export const fmtCompact = (v) => (v == null ? "–" : compact.format(v))
 
