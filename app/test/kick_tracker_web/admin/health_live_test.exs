@@ -55,6 +55,45 @@ defmodule KickTrackerWeb.Admin.HealthLiveTest do
     assert html =~ "Recent handoffs"
   end
 
+  test "shows the build each collector runs, and marks one that differs from the site's", %{
+    conn: conn
+  } do
+    now = DateTime.utc_now()
+    new = "5567775ded6214516af8765b9c57f4529550eb95"
+    old = "320be38839bc023b674849567f7fbf7a42f4be9c"
+
+    for {id, state, build} <- [
+          {"collector-a", "leader", new},
+          {"collector-b", "standby", old},
+          # An image from before BUILD_SHA: unknown.
+          {"collector-c", "standby", nil}
+        ] do
+      status = %{
+        "journal" => %{"depth" => 0, "oldest_at" => nil, "buried" => 0},
+        "build" => build
+      }
+
+      KickTracker.Repo.query!(
+        "INSERT INTO collector_nodes (id, state, epoch, started_at, heartbeat_at, status) VALUES ($1, $2, 1, $3, $3, $4)",
+        [id, state, now, status]
+      )
+    end
+
+    assert [%{build: ^new}, %{build: ^old}, %{build: nil}] = Health.collectors()
+
+    previous = Application.get_env(:kick_tracker, :build)
+    Application.put_env(:kick_tracker, :build, new)
+    on_exit(fn -> Application.put_env(:kick_tracker, :build, previous) end)
+
+    {:ok, view, _html} = live(conn, ~p"/admin")
+    assert has_element?(view, "#collector-collector-a", "5567775")
+    refute has_element?(view, "#collector-collector-a", "other build")
+    assert has_element?(view, "#collector-collector-b", "320be38")
+    assert has_element?(view, "#collector-collector-b", "other build")
+    assert has_element?(view, "#collector-collector-c", "–")
+    assert has_element?(view, "#web-build", "5567775")
+  end
+
   test "a channel quarantined on a collector is named, with how often it crashed", %{conn: conn} do
     channel = Fixtures.channel!(slug: "somestreamer")
     now = DateTime.utc_now()

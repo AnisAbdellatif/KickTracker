@@ -90,6 +90,10 @@ config :kick_tracker,
 # The collector (project.md §10.1): its name among the collectors, the
 # lease they share, its journal file, and its status port (loopback; the
 # container healthcheck and the deploy script read it).
+# The commit the running image was built from (BUILD_SHA, set by the
+# image build), or nil outside one: shown on the health page.
+config :kick_tracker, :build, System.get_env("BUILD_SHA")
+
 collector_id = System.get_env("COLLECTOR_ID")
 
 config :kick_tracker, :collector,

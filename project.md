@@ -720,7 +720,10 @@ depends on. The web role can restart freely.
 - **Health**: each collector answers `/healthz` and `/status` on its own
   loopback port (the container healthcheck; the deploy script reads which
   one leads) and writes a `collector_nodes` row every 10s, which the health
-  page and the alerts read from the web role (§18.2).
+  page and the alerts read from the web role (§18.2). The row carries the
+  commit its image was built from (`BUILD_SHA`, passed by CI), so the
+  health page shows which build collects and which one stands by as the
+  rollback.
 
 Scope: this protects collection on one VPS. For the VPS itself going,
 there is the shadow collector on another machine (§10.5).
