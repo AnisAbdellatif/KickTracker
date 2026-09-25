@@ -55,16 +55,37 @@ dc() {
 # KT_*) and the destination "rehearsal" (.kamal/kit.rehearsal.env,
 # deploy/kamal/*.rehearsal.yml). --userns=host: Docker refuses the host's
 # network to a container otherwise when user namespaces are on.
+#
+# The kit reads .kamal/kit.local.env last and over the environment for
+# anything but KIT_*: the real server's KT_HOST in it would win over the
+# rehearsal's, and the rehearsal would deploy to production. The deployer
+# sees an empty one instead (mounted only over a file that exists, so
+# Docker never creates one in the repo), and check_target stops the
+# rehearsal unless the kit resolves the server to this machine.
 deployer() {
+  local shadow=()
+  [ -f "$REPO/.kamal/kit.local.env" ] && shadow=(-v /dev/null:"$REPO/.kamal/kit.local.env":ro)
   docker run --rm --network host --userns=host --user "$(id -u):$(id -g)" \
     -e HOME=/tmp/home -e NO_COLOR=1 \
     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=user.email -e GIT_CONFIG_VALUE_0=rehearsal@localhost \
-    -v "$REPO:$REPO" -w "$REPO" -v "$WORK/ssh:/tmp/home/.ssh" \
+    -v "$REPO:$REPO" -w "$REPO" ${shadow[@]+"${shadow[@]}"} -v "$WORK/ssh:/tmp/home/.ssh" \
     -e KT_HOST=127.0.0.1 -e KT_SSH_PORT="$SSH_PORT" -e KT_SSH_USER=root \
     -e KT_DEPLOY_DIR=/srv/kick_tracker -e KT_VOLUME_PREFIX="$VOLUMES" \
     -e KT_REGISTRY="$REGISTRY" -e KT_IMAGE_OWNER="$OWNER" -e KT_REGISTRY_PASSWORD=rehearsal \
     -e KIT_SMOKE_URLS="${SMOKE_URLS:-}" \
     "$TOOLS" "$@"
+}
+
+# check_target: the server the kit would deploy to, as its own loader
+# resolves it for the rehearsal destination, must be the local one.
+check_target() {
+  local target
+  # shellcheck disable=SC2016 # expanded by the deployer's bash, after the kit's loader
+  target=$(deployer bash -c '. .kamal/kit/lib/core.sh && kit_load_config rehearsal && printf "%s:%s" "${KT_HOST:-}" "${KT_SSH_PORT:-22}"')
+  [ "$target" = "127.0.0.1:$SSH_PORT" ] || {
+    echo "the kit would deploy to $target, not this machine's rehearsal server (127.0.0.1:$SSH_PORT): stopping" >&2
+    exit 1
+  }
 }
 
 # kitd WORDS… ARGS…: the kit, for the rehearsal destination.
@@ -206,6 +227,7 @@ up() {
   dc up -d --wait db rabbitmq
 
   say "first deploy with the kit: migrations, then the collectors (--bootstrap) and web; then the receivers"
+  check_target
   kitd deploy --bootstrap --no-smoke --version "$V1"
   kitd deploy -c deploy/kamal/receiver.yml --no-smoke --version "$V1"
   dc up -d --wait caddy
@@ -326,13 +348,19 @@ report() {
   say "writing the report to $out"
 
   # Webhooks: every delivery the fake Kick made (not dropped on purpose)
-  # against what reached the database. The last 30s are left out (in flight).
+  # against what reached the database. Deliveries still in flight when the
+  # list is taken (the probe keeps sending) get up to 30s to land.
   curl -s "$SIM/_sim/webhooks" | python3 -c '
 import json, sys
 print("\n".join(json.load(sys.stdin)["message_ids"]))' | sort -u > "$LOG/sent.txt"
-  psql_q "SELECT message_id FROM webhook_events" | sort -u > "$LOG/stored.txt"
-  local missing
-  missing=$(comm -23 "$LOG/sent.txt" "$LOG/stored.txt" | wc -l)
+  local missing waited=0
+  while :; do
+    psql_q "SELECT message_id FROM webhook_events" | sort -u > "$LOG/stored.txt"
+    missing=$(comm -23 "$LOG/sent.txt" "$LOG/stored.txt" | wc -l)
+    if [ "$missing" -eq 0 ] || [ "$waited" -ge 30 ]; then break; fi
+    sleep 1
+    waited=$((waited + 1))
+  done
 
   {
     echo "# Deploy rehearsal"
