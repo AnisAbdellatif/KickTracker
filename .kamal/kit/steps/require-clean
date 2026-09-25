@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# No uncommitted changes. Kamal builds from a clean clone of the commit
+# anyway; this catches deploying something other than what you think.
+# Untracked files are ignored unless KIT_CLEAN_IGNORE_UNTRACKED=false.
+. "$(dirname "$0")/_preamble.sh"
+
+kit_is_rollback && exit 0
+args=(--porcelain)
+kit_is_true "$(kit_conf KIT_CLEAN_IGNORE_UNTRACKED true)" && args+=(--untracked-files=no)
+changes=$(git -C "$KIT_PROJECT_DIR" status "${args[@]}")
+if [ -n "$changes" ]; then
+  printf '%s\n' "$changes" >&2
+  kit_die "uncommitted changes (above): commit or stash them first"
+fi
+kit_ok "working tree clean"
