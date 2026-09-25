@@ -1569,10 +1569,13 @@ written by the collector, with the deletion itself.
 | `db` | TimescaleDB | Rarely | Collection continues into the leader's journal and is written when it is back; the consumer stops acking, events wait in the queue; the site is down |
 | `caddy` | official, or the host's own Caddy (it imports `caddy/sites.caddy`) | Rarely | Ingress unreachable (see stage 2) |
 
-`docker compose up -d web` redeploys only the website; the receivers, the
-queue and the collectors keep running the images they have (images are
-pinned in `deploy/.env`, so a plain `docker compose up -d` doesn't swap
-the collectors' either).
+The app's containers (web, collectors, receivers) are run by Kamal and
+deployed with deploy-kit (§19.1), each pair one at a time by its group
+(`.kamal/groups/`): `kit group deploy web` redeploys only the website; the
+receivers, the queue and the collectors keep running the images they have
+(images are named by commit, and a plain `kamal deploy` that would touch
+the collectors is refused). The database, the queue and Caddy are
+compose's (`deploy/compose.single.yml`), on the same Docker network.
 
 ### 15.2 Stages
 
@@ -1615,21 +1618,24 @@ change to the app beyond producer config.
 - Redeploy the web nodes one at a time too: Caddy health-checks both
   every 2s, keeps a visitor on one (by address) and retries a request on
   the other when one is being replaced.
-- Every merge to `main` is deployed by CI once its checks pass and its
-  images are built (`deploy/release.sh` over SSH: every role in turn, with
-  `deploy/deploy.sh`); the Deploy workflow is for rollbacks and single
-  roles. The whole path is rehearsed on a development machine
-  with `deploy/rehearsal/rehearse.sh` (the production stack under load,
-  upgraded step by step, with what each step costs measured).
+- A release is run by a person, from their machine, on `main` once CI has
+  passed and built the images (`deploy/release.sh`: deploy-kit and Kamal,
+  §19.1). Before anything is replaced it checks the branch, a clean and
+  pushed tree, CI green for the exact commit and the images' build
+  attestations, brings the server's checkout up to the commit and
+  decrypts its secrets there, and runs the migrations; after, smoke tests
+  through Caddy roll a failed release back. The whole path is rehearsed on
+  a development machine with `deploy/rehearsal/rehearse.sh` (the production
+  stack under load, upgraded step by step, with what each step costs
+  measured).
 - A collector deploy updates **only the standby**, waits for it to be
   healthy, then switches collection to it: the leader restarts in place,
   on the build it had, and its clean stop hands over within a second
   (§10.1). The old leader stays on the previous build as the standby, so
-  rolling back is `ROLE=collector-switch deploy/deploy.sh` (collection back
-  to it, a second's handover), and the next deploy updates it. Each
-  collector has its own image pin (`COLLECTOR_A_IMAGE`,
-  `COLLECTOR_B_IMAGE`). The deploy script finds the leader from the
-  collectors' status ports.
+  rolling back is `kit group switch collectors` (collection back to it, a
+  second's handover), and the next deploy updates it. The collectors'
+  group finds the leader from their status ports; each collector is
+  stopped before it's replaced, so two containers never share a journal.
 - Migrations run with `lock_timeout = 5s`: one that would queue behind
   the collector's writes (and hold every later write behind it) fails and
   is retried at a quieter moment; the collectors' journals absorb the wait.
@@ -1877,9 +1883,16 @@ Done after everything else is set up and working (§20, phase 6).
 
 - On every push: `mix format --check-formatted`, Credo, Dialyzer, tests
   (with TimescaleDB, RabbitMQ and the simulator as services).
-- Images built and pushed to GHCR, one per deployable (app, receiver).
-- **Deploy per role**, migrations as a separate step before a deploy,
-  following the expand-then-contract rule (§15.3).
+- On `main`, images built and pushed to GHCR, one per deployable (app,
+  receiver, database), tagged with the commit, labelled for Kamal and
+  **attested** (signed provenance from the CI workflow).
+- **CI deploys nothing** and holds no key to the server. A person deploys
+  with deploy-kit (presets around Kamal, vendored in `.kamal/kit`):
+  gates (branch, pushed, CI green for the commit, attestations), then
+  each group by its strategy (collectors: standby; web and receivers: one
+  at a time), migrations as a separate step before any container is
+  replaced (expand-then-contract, §15.3), smoke tests with rollback. The
+  app's secrets stay on the server (decrypted there, passed as env files).
 
 ### 19.2 Data quality
 

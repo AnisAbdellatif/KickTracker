@@ -11,3 +11,6 @@ erl_crash.dump
 
 # Raw, un-anonymized recordings from the real Kick (AGENTS.md §6)
 sim/recordings/
+
+# deploy-kit: personal overrides
+.kamal/kit.local.env

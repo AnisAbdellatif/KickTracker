@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# pre-deploy: the server's checkout up to the commit being deployed, and
+# its secrets decrypted there (deploy/server-sync.sh), before any
+# container starts. The app's secrets never pass through this machine.
+# shellcheck source=/dev/null
+. "$KIT_HOME/steps/_preamble.sh"
+# shellcheck source=/dev/null
+. "$KIT_HOME/lib/kamal.sh"
+
+dir=${KT_DEPLOY_DIR:-/srv/kick_tracker}
+kit_kamal server exec -H -q "cd $dir && deploy/server-sync.sh ${KAMAL_VERSION:?}"

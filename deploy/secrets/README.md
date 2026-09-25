@@ -12,6 +12,7 @@ git-ignored and live only on the server.
 | `collector.env` | both collectors | see `collector.env.example` (no web secrets) |
 | `shadow.env`, `shadow-db.env` | the shadow machine (`compose.shadow.yml`) | see their examples |
 | `receiver.env` | both receivers | see `receiver.env.example` |
+| `deployer.env` | the machine that deploys (Kamal's registry login) | see `deployer.env.example` |
 | `db.env` | the database and the backups (`backup/*.sh` also read `POSTGRES_*`, `WALG_*`, `AWS_*` and the backup heartbeat URLs here) | see `db.env.example` |
 | `rabbitmq.env` | `rabbitmq/make-prod-definitions.sh` | the five RabbitMQ passwords |
 
@@ -30,9 +31,25 @@ git-ignored and live only on the server.
 
 ## On the server
 
-    cd deploy/secrets
-    for f in *.sops.env; do sops --decrypt "$f" > "${f%.sops.env}.env"; done
-    chmod 600 *.env
+Before each deploy the kit runs `deploy/server-sync.sh` there, which runs
+`decrypt.sh`: every `*.sops.env` decrypted with the server's age key,
+swapped in only if all of them decrypted. By hand:
+
+    deploy/secrets/decrypt.sh
+
+`app.env`, `collector.env` and `receiver.env` reach the containers as
+`docker run --env-file` (deploy/kamal/*.yml), which takes values
+literally: `KEY="value"` would keep its quotes. `decrypt.sh` refuses such
+values and changes nothing; remove the quotes (`sops app.sops.env`).
 
 Rotate a secret by editing it in place (`sops app.sops.env`), committing,
-decrypting on the server and redeploying the services that use it.
+and deploying: the deploy decrypts it on the server, and the containers
+that read it are replaced (a secret only the collectors read: `kit group
+deploy collectors`).
+
+## On the machine that deploys
+
+`deployer.sops.env` (from `deployer.env.example`) holds `GHCR_READ_TOKEN`,
+a GitHub token (classic) with only `read:packages`, which Kamal logs the
+server in to GHCR with at each deploy (`deploy/kamal/registry-password`).
+The app's secrets never need decrypting there.

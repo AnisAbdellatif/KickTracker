@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Refuses to deploy while frozen: KIT_FREEZE=true, or a file .kamal/FREEZE
+# (all destinations) or .kamal/FREEZE.<destination>, whose content is shown
+# as the reason. Rollbacks stay allowed (KIT_FREEZE_ALLOWS_ROLLBACK).
+. "$(dirname "$0")/_preamble.sh"
+
+if kit_is_rollback && kit_is_true "$(kit_conf KIT_FREEZE_ALLOWS_ROLLBACK true)"; then exit 0; fi
+for file in "$KIT_CONFIG_DIR/FREEZE" ${KIT_DESTINATION:+"$KIT_CONFIG_DIR/FREEZE.$KIT_DESTINATION"}; do
+  if [ -f "$file" ]; then
+    kit_die "deploys are frozen (${file#"$KIT_PROJECT_DIR"/}): $(head -c 500 "$file" | tr '\n' ' ')"
+  fi
+done
+kit_is_true "$(kit_conf KIT_FREEZE false)" && kit_die "deploys are frozen (KIT_FREEZE)"
+exit 0
