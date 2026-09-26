@@ -1497,7 +1497,8 @@ auth check.
   corrections travel; derived tables are rebuilt afterwards. Imports only
   add, matching rows on natural keys (Kick ids, `(channel, started_at)`,
   `message_id`), so rows already here win and a second import changes
-  nothing. Removal requests travel with the data (`removals`): a channel or
+  nothing. A channel's "tracked since" comes only with its history: the
+  channel list alone tracks new channels from the import. Removal requests travel with the data (`removals`): a channel or
   user removed on either side stays removed. The collector does the work
   (`Workers.Transfer`, its own queue); the files live in `TRANSFER_DIR`,
   shared by both roles, for 7 days.

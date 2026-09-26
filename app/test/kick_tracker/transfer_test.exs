@@ -130,6 +130,33 @@ defmodule KickTracker.TransferTest do
       assert kid == c.kick_user_id
       assert rows("streams", ["id"]) == []
     end
+
+    test "with history a channel keeps when it was first tracked; the list alone doesn't claim it",
+         %{dir: dir} do
+      c = history!()
+      Repo.query!("UPDATE channels SET tracked_since = $1 WHERE id = $2", [ago(3 * 86_400), c.id])
+      [%{tracked_since: first}] = rows("channels", ["id"])
+      list = export!(dir, [c.id], :channels)
+      data = export!(dir, [c.id])
+
+      # Before: the list alone set the other instance's date, so the two
+      # days since read as a gap here. After: tracked from the import.
+      wipe!()
+      {:ok, _} = Import.run(list, Path.join(dir, "in"))
+      [%{tracked_since: since}] = rows("channels", ["id"])
+      assert DateTime.diff(DateTime.utc_now(), since) < 60
+
+      # The list again, with an older date, leaves it alone; history moves it back.
+      {:ok, _} = Import.run(list, Path.join(dir, "in"))
+      assert [%{tracked_since: ^since}] = rows("channels", ["id"])
+      {:ok, _} = Import.run(data, Path.join(dir, "in"))
+      assert [%{tracked_since: ^first}] = rows("channels", ["id"])
+
+      # Into an empty instance, history brings its date as it was.
+      wipe!()
+      {:ok, _} = Import.run(data, Path.join(dir, "in"))
+      assert [%{tracked_since: ^first}] = rows("channels", ["id"])
+    end
   end
 
   describe "removal requests" do
