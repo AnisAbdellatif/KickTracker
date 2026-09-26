@@ -1412,7 +1412,9 @@ the edge), and a stream opens on what we recorded rather than Kick's own
 start. The axis still spans the whole period or stream: the reader zooms
 in or out from there (wheel or pinch, drag to pan). Their zoom is kept
 across live points and theme changes; double-click, or the chart's "show
-all" button, fits the data again.
+all" button, fits the data again. The value axes follow the window: zoomed
+in, each spans what is visible (counts still from zero), and a series
+switched off in the legend no longer counts.
 
 (Chart.js was the earlier pick; it lacks bands, markers, linked zoom and
 heatmaps without plugins. uPlot is faster but too narrow for heatmaps and
