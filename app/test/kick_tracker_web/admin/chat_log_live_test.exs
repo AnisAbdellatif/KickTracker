@@ -167,6 +167,67 @@ defmodule KickTrackerWeb.Admin.ChatLogLiveTest do
     assert [%{action: "chat_log.delete", target: "somestreamer"} | _] = Audit.recent()
   end
 
+  test "times are shown, grouped and typed in the admin's timezone; the URL and the job keep UTC",
+       %{conn: conn} do
+    c = channel!(slug: "somestreamer")
+    # 20:30 UTC on 1 June is 05:30 on 2 June in Tokyo (UTC+9).
+    ChatLog.insert_messages(c.id, [
+      ChatLog.message_row(%{id: "m1", sender_id: 7, at: ~U[2026-06-01 20:30:00Z]}, %{
+        content: "late",
+        type: "message"
+      })
+    ])
+
+    tokyo = put_connect_params(conn, %{"timezone" => "Asia/Tokyo"})
+    {:ok, view, _} = live(tokyo, ~p"/admin/chat-log?#{%{"channels" => c.id}}")
+    html = render(view)
+    assert html =~ "Times in Asia/Tokyo"
+    assert html =~ "05:30:00"
+    assert html =~ "Tuesday 2 June 2026"
+
+    # A period typed in Tokyo time lands in the URL as UTC.
+    view |> element("#chat-log-period-custom") |> render_click()
+
+    view
+    |> form("#chat-log-custom", %{"from" => "2026-06-02T05:00", "to" => "2026-06-02T06:00"})
+    |> render_submit()
+
+    assert_patch(
+      view,
+      ~p"/admin/chat-log?#{%{"channels" => c.id, "from" => "2026-06-01T20:00", "to" => "2026-06-01T21:00"}}"
+    )
+
+    # ...and reads back in Tokyo time.
+    assert has_element?(view, "#chat-log-custom input[name=from][value='2026-06-02T05:00']")
+    assert has_element?(view, "#chat-log-chips", "2026-06-02 05:00 – 2026-06-02 06:00")
+
+    # The deletion's period too: typed in Tokyo, run in UTC.
+    view |> element("#chat-log-ask-delete") |> render_click()
+    assert has_element?(view, "#chat-log-delete input[name='d[from]'][value='2026-06-02T05:00']")
+
+    view
+    |> form("#chat-log-delete",
+      d: %{
+        slug: "somestreamer",
+        from: "2026-06-02T05:00",
+        to: "2026-06-02T06:00",
+        understood: "true"
+      }
+    )
+    |> render_submit()
+
+    assert_enqueued(
+      worker: KickTracker.Workers.ChatLog,
+      args: %{"from" => "2026-06-01T20:00:00Z", "to" => "2026-06-01T21:00:00Z"}
+    )
+  end
+
+  test "a timezone Postgres doesn't know falls back to UTC", %{conn: conn} do
+    conn = put_connect_params(conn, %{"timezone" => "Not/AZone"})
+    {:ok, _view, html} = live(conn, ~p"/admin/chat-log")
+    assert html =~ "Times in Etc/UTC"
+  end
+
   test "the export is the filtered log as CSV, oldest first; audited", %{conn: conn} do
     a = channel!(slug: "somestreamer")
     b = channel!(slug: "otherstreamer")

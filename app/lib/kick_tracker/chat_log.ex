@@ -173,7 +173,8 @@ defmodule KickTracker.ChatLog do
   Logged messages, newest first, with the sender's username and the
   channel's slug. Filters (all optional): `:channel_ids`, `:user_ids`,
   `:from`, `:to` (`[from, to)`), `:before` (a `{sent_at, message_id}`
-  cursor for the next page); `:limit` (default 200).
+  cursor for the next page); `:limit` (default 200). With `:tz` (a
+  timezone Postgres knows), each row also has `local_at`, its time there.
   """
   @spec messages(map()) :: [map()]
   def messages(filters) do
@@ -212,6 +213,7 @@ defmodule KickTracker.ChatLog do
     )
     |> where_in(:channel_id, filters[:channel_ids])
     |> where_time(:occurred_at, filters[:from], filters[:to])
+    |> local_time(:occurred_at, filters[:tz])
     |> Repo.all()
   end
 
@@ -310,6 +312,36 @@ defmodule KickTracker.ChatLog do
     |> where_in(:channel_id, filters[:channel_ids])
     |> where_in(:user_id, filters[:user_ids])
     |> where_time(:sent_at, filters[:from], filters[:to])
+    |> local_time(:sent_at, filters[:tz])
+  end
+
+  # The time in the reader's timezone, as Postgres reckons it (the same
+  # database of zones the channels' timezones use).
+  defp local_time(query, _field, nil), do: query
+
+  defp local_time(query, field, tz),
+    do:
+      select_merge(query, [x], %{local_at: fragment("(? AT TIME ZONE ?)", field(x, ^field), ^tz)})
+
+  @doc """
+  A wall-clock time in `tz` as the UTC instant it is (a time typed by an
+  admin). nil for a time the zone skips or an unknown zone.
+  """
+  @spec to_utc(NaiveDateTime.t(), String.t()) :: DateTime.t() | nil
+  def to_utc(%NaiveDateTime{} = local, tz) do
+    case Repo.query("SELECT ($1::timestamp AT TIME ZONE $2)", [local, tz]) do
+      {:ok, %{rows: [[%DateTime{} = at]]}} -> DateTime.shift_zone!(at, "Etc/UTC")
+      _ -> nil
+    end
+  end
+
+  @doc "A UTC instant as the wall-clock time it is in `tz`."
+  @spec to_local(DateTime.t(), String.t()) :: NaiveDateTime.t() | nil
+  def to_local(%DateTime{} = at, tz) do
+    case Repo.query("SELECT ($1::timestamptz AT TIME ZONE $2)", [at, tz]) do
+      {:ok, %{rows: [[%NaiveDateTime{} = local]]}} -> local
+      _ -> nil
+    end
   end
 
   defp where_in(query, _field, nil), do: query

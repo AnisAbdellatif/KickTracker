@@ -11,6 +11,10 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
   is reproducible and shareable between admins. Views, exports, deletions
   and setting changes are audited; which users were looked up is not
   written down (as for privacy searches), only that a view was by user.
+
+  Times are shown, grouped by day and typed in the admin's own timezone
+  (the browser's, checked and converted by Postgres); the URL keeps UTC,
+  so a link means the same period for every admin. The CSV stays in UTC.
   """
 
   use KickTrackerWeb, :live_view
@@ -26,6 +30,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
      socket
      |> assign(
        page_title: gettext("Chat log"),
+       tz: timezone(socket),
        settings_q: "",
        settings_show: "all",
        picker_open?: false,
@@ -37,6 +42,13 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
        more?: false
      )
      |> load_channels()}
+  end
+
+  # The browser's timezone, once connected and if Postgres knows it; UTC
+  # until then (the first, static render).
+  defp timezone(socket) do
+    tz = connected?(socket) && get_connect_params(socket)["timezone"]
+    if is_binary(tz) and Channels.valid_timezone?(tz), do: tz, else: "Etc/UTC"
   end
 
   defp load_channels(socket) do
@@ -52,12 +64,15 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
     {filters, form} = ChatLogFilters.parse(params)
     tab = if params["tab"] == "events", do: "events", else: "messages"
     viewing? = map_size(filters) > 0
+    tz = socket.assigns.tz
+    filters = Map.put(filters, :tz, tz)
+    local = %{"from" => to_local(form["from"], tz), "to" => to_local(form["to"], tz)}
 
     if viewing? and connected?(socket), do: audit_view(socket, "chat_log.view", filters, tab)
 
     {:noreply,
      socket
-     |> assign(filters: filters, form: form, tab: tab, viewing?: viewing?)
+     |> assign(filters: filters, form: form, local: local, tab: tab, viewing?: viewing?)
      |> assign(
        custom_open?: socket.assigns.custom_open? or form["from"] != "" or form["to"] != ""
      )
@@ -154,6 +169,9 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
     do: {:noreply, assign(socket, custom_open?: not socket.assigns.custom_open?)}
 
   def handle_event("custom_period", %{"from" => from, "to" => to}, socket) do
+    tz = socket.assigns.tz
+    {from, to} = {to_utc(from, tz), to_utc(to, tz)}
+
     {:noreply,
      push_patch(socket,
        to: page_path(socket.assigns, %{"period" => "", "from" => from, "to" => to})
@@ -192,8 +210,8 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
      assign(socket,
        deleting: %{
          "slug" => slug,
-         "from" => socket.assigns.form["from"],
-         "to" => socket.assigns.form["to"]
+         "from" => socket.assigns.local["from"],
+         "to" => socket.assigns.local["to"]
        }
      )}
   end
@@ -204,8 +222,8 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
   def handle_event("delete", %{"d" => d}, socket) do
     slug = String.trim(d["slug"] || "")
     channel = Enum.find(socket.assigns.channels, &(&1.slug == slug))
-    from = ChatLogFilters.time(d["from"] || "")
-    to = ChatLogFilters.time(d["to"] || "")
+    from = ChatLogFilters.time(to_utc(d["from"] || "", socket.assigns.tz))
+    to = ChatLogFilters.time(to_utc(d["to"] || "", socket.assigns.tz))
 
     cond do
       channel == nil ->
@@ -302,7 +320,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
           <h1 class="text-xl font-semibold">{gettext("Chat log")}</h1>
           <p class="text-muted mt-1 max-w-2xl text-sm">
             {gettext(
-              "Message text and chat events, kept only for channels logging is on for, for each channel's retention. Admin only; never shown on the public site. Times are UTC."
+              "Message text and chat events, kept only for channels logging is on for, for each channel's retention. Admin only; never shown on the public site."
             )}
           </p>
         </div>
@@ -314,6 +332,13 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
           {gettext("What the privacy page tells chatters")}
         </.link>
       </div>
+
+      <p id="chat-log-tz" class="text-muted mt-1 text-xs">
+        <.icon name="hero-clock" class="size-3.5" />
+        {gettext("Times in %{tz}, your timezone. Links keep UTC; the CSV export is in UTC.",
+          tz: @tz
+        )}
+      </p>
 
       <div id="chat-log-summary" class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <.summary_tile icon="hero-signal" label={gettext("Logging on")}>
@@ -574,20 +599,20 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
             class="inset-well mt-3 flex flex-wrap items-end gap-2 p-3"
           >
             <label class="text-muted text-xs">
-              {gettext("From (UTC)")}
+              {gettext("From")}
               <input
                 type="datetime-local"
                 name="from"
-                value={@form["from"]}
+                value={@local["from"]}
                 class="input input-sm mt-1 block"
               />
             </label>
             <label class="text-muted text-xs">
-              {gettext("To (UTC)")}
+              {gettext("To")}
               <input
                 type="datetime-local"
                 name="to"
-                value={@form["to"]}
+                value={@local["to"]}
                 class="input input-sm mt-1 block"
               />
             </label>
@@ -624,7 +649,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
               icon="hero-clock"
               patch={page_path(assigns, %{"from" => "", "to" => ""})}
             >
-              {period_range(@form)}
+              {period_range(@local)}
             </.chip>
             <.link patch={~p"/admin/chat-log"} class="text-muted ms-1 text-xs hover:underline">
               {gettext("Clear all")}
@@ -669,8 +694,9 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
                         <time
                           class="text-subtle tabular-nums"
                           datetime={DateTime.to_iso8601(m.sent_at)}
+                          title={DateTime.to_iso8601(m.sent_at)}
                         >
-                          {Calendar.strftime(m.sent_at, "%H:%M:%S")}
+                          {Calendar.strftime(m.local_at, "%H:%M:%S")}
                         </time>
                       </div>
                       <p :if={m.reply_to_message_id} class="text-muted mt-0.5 text-xs">
@@ -709,7 +735,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
                       <span class="font-mono text-xs">{short_event(e.event)}</span>
                       <span class={["channel-pill", "avatar-#{hue(e.slug)}"]}>{e.slug}</span>
                       <time class="text-subtle ms-auto text-xs tabular-nums">
-                        {Calendar.strftime(e.occurred_at, "%Y-%m-%d %H:%M:%S")}
+                        {Calendar.strftime(e.local_at, "%Y-%m-%d %H:%M:%S")}
                       </time>
                     </summary>
                     <pre class="inset-well mt-2 overflow-x-auto p-3 text-xs">{Jason.encode!(e.payload, pretty: true)}</pre>
@@ -785,7 +811,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
           </datalist>
           <div class="grid grid-cols-2 gap-2">
             <label class="block text-xs">
-              <span class="text-muted">{gettext("From (UTC)")}</span>
+              <span class="text-muted">{gettext("From")}</span>
               <input
                 type="datetime-local"
                 name="d[from]"
@@ -795,7 +821,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
               />
             </label>
             <label class="block text-xs">
-              <span class="text-muted">{gettext("To (UTC)")}</span>
+              <span class="text-muted">{gettext("To")}</span>
               <input
                 type="datetime-local"
                 name="d[to]"
@@ -884,8 +910,8 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
 
   defp by_day(messages) do
     messages
-    |> Enum.chunk_by(&DateTime.to_date(&1.sent_at))
-    |> Enum.map(fn [m | _] = day -> {Calendar.strftime(m.sent_at, "%A %-d %B %Y"), day} end)
+    |> Enum.chunk_by(&NaiveDateTime.to_date(&1.local_at))
+    |> Enum.map(fn [m | _] = day -> {Calendar.strftime(m.local_at, "%A %-d %B %Y"), day} end)
   end
 
   defp hue(name), do: :erlang.phash2(name, 7) + 1
@@ -895,6 +921,32 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
   defp period_label("7d"), do: gettext("7d")
   defp period_label("30d"), do: gettext("30d")
   defp period_label(other), do: other
+
+  # A URL's UTC time ("YYYY-MM-DDTHH:MM") as the admin's wall-clock time,
+  # for the inputs and chips; and back.
+  defp to_local("", _tz), do: ""
+  defp to_local(utc, "Etc/UTC"), do: utc
+
+  defp to_local(utc, tz) do
+    with %DateTime{} = at <- ChatLogFilters.time(utc),
+         %NaiveDateTime{} = local <- ChatLog.to_local(at, tz) do
+      Calendar.strftime(local, "%Y-%m-%dT%H:%M")
+    else
+      _ -> ""
+    end
+  end
+
+  defp to_utc("", _tz), do: ""
+  defp to_utc(local, "Etc/UTC"), do: local
+
+  defp to_utc(local, tz) do
+    with %DateTime{} = typed <- ChatLogFilters.time(local),
+         %DateTime{} = at <- ChatLog.to_utc(DateTime.to_naive(typed), tz) do
+      Calendar.strftime(at, "%Y-%m-%dT%H:%M")
+    else
+      _ -> ""
+    end
+  end
 
   defp period_range(form) do
     from = if form["from"] != "", do: String.replace(form["from"], "T", " "), else: "…"

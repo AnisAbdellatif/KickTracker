@@ -1553,7 +1553,9 @@ auth check.
   audited without what was searched for.
 - **Chat log** (`/admin/chat-log`, §12.8): turn chat logging on or off
   per channel and set its retention; read the log by channels, users
-  (across channels) and UTC period, filters in the URL, with the chat-feed
+  (across channels) and period, filters in the URL (times in UTC there;
+  shown, grouped by day and typed in the admin's browser timezone,
+  converted by Postgres), with the chat-feed
   events beside it; export the selection as CSV (streamed; formula-like
   cells get a leading apostrophe); delete one channel's log over a period
   (typing its slug confirms; the collector's `Workers.ChatLog` runs it).
