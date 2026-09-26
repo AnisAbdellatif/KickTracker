@@ -81,7 +81,7 @@ kit_config_service() {
   local file=$1
   case $file in /*) ;; *) file="$KIT_PROJECT_DIR/$file" ;; esac
   [ -r "$file" ] || return 0
-  sed -n 's/^service:[[:space:]]*["'"'"']\{0,1\}\([^"'"'"'[:space:]#]*\).*/\1/p' "$file" | head -n 1
+  kit_yaml_get service "$file" || true
 }
 
 # kit_group_roles_of NAME: a group's roles, read without loading it.

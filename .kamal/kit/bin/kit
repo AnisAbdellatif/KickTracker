@@ -20,6 +20,8 @@ export KIT_BIN KIT_HOME KIT
 . "$KIT_HOME/lib/groups.sh"
 # shellcheck source=../lib/sops.sh
 . "$KIT_HOME/lib/sops.sh"
+# shellcheck source=../lib/runner.sh
+. "$KIT_HOME/lib/runner.sh"
 # shellcheck source=../lib/sandbox.sh
 . "$KIT_HOME/lib/sandbox.sh"
 
@@ -44,6 +46,7 @@ Deploying
   kit freeze [-d DEST] [REASON...] | kit unfreeze [-d DEST]
 
 Helpers
+  kit kamal [-d DEST] [-c CONFIG] ARGS...       Kamal, as the kit runs it (in its image with KIT_RUNNER=docker)
   kit role-exec ROLE COMMAND [-d DEST]          run COMMAND in ROLE's running container
   kit notify LEVEL MESSAGE [-d DEST]            info | success | warning | error
   kit ping URL                                  heartbeat, never fails
@@ -166,7 +169,7 @@ cmd_deploy() {
     if [ "$skip_push" = true ]; then
       version=$(_pull_version) || exit 1
     else
-      version=$(kit_kamal config 2>/dev/null | sed -n 's/^:version:[[:space:]]*//p' | head -n 1)
+      version=$(kit_kamal_config_get version "$(kit_kamal config 2>/dev/null || true)") || exit 1
     fi
   fi
 
@@ -468,12 +471,18 @@ cmd_hook() {
 KIT_VENDORED="bin lib steps host templates sandbox VERSION LICENSE"
 
 _vendor_into() { # SOURCE-HOME TARGET
-  local source=$1 target=$2 tmp item
+  local source=$1 target=$2 tmp item items
   case $target in */.kamal/kit) ;; *) kit_die "refusing to write the kit to $target" ;; esac
   tmp="$target.new.$$"
   rm -rf "$tmp"
   mkdir -p "$tmp"
-  for item in $KIT_VENDORED; do cp -R "$source/$item" "$tmp/"; done
+  # The list of the kit being vendored, which may name other folders than
+  # this one's.
+  items=$(sed -n 's/^KIT_VENDORED="\(.*\)"$/\1/p' "$source/bin/kit" | head -n 1)
+  for item in ${items:-$KIT_VENDORED}; do
+    [ -e "$source/$item" ] || kit_die "$source has no $item: not vendored"
+    cp -R "$source/$item" "$tmp/"
+  done
   printf '%s\n' "Vendored deploy-kit: don't edit here, run \`kit update\`. Source: ${KIT_UPDATE_SOURCE:-$source}" >"$tmp/SOURCE"
   rm -rf "$target"
   mv "$tmp" "$target"
@@ -654,6 +663,12 @@ cmd_host() {
   esac
 }
 
+cmd_kamal() {
+  _take_destination "$@"
+  kit_load_config "$DEST"
+  kit_kamal ${ARGS[@]+"${ARGS[@]}"}
+}
+
 cmd_doctor() {
   local problems=0 tool g
   _take_destination "$@"
@@ -661,6 +676,9 @@ cmd_doctor() {
   _check() { if "$@" >/dev/null 2>&1; then return 0; fi; problems=$((problems + 1)); return 1; }
 
   printf 'deploy-kit %s (%s)\n' "$(cat "$KIT_HOME/VERSION")" "$KIT_HOME"
+  if [ -n "${KIT_IN_RUNNER:-}" ]; then
+    printf "running in the kit's image (KIT_RUNNER=docker)\n"
+  fi
   printf 'bash %s\n' "$BASH_VERSION"
   for tool in git curl; do
     if _check command -v "$tool"; then kit_ok "$tool"; else kit_error "$tool missing"; fi
@@ -776,8 +794,11 @@ USAGE
 main() {
   local cmd=${1:-help}
   [ $# -gt 0 ] && shift
+  # KIT_RUNNER=docker: the commands running Kamal run in the kit's image.
+  kit_runner_maybe_exec "$cmd" "$@"
   case $cmd in
     deploy) cmd_deploy "$@" ;;
+    kamal) cmd_kamal "$@" ;;
     group) cmd_group "$@" ;;
     role-exec) cmd_role_exec "$@" ;;
     smoke) cmd_smoke "$@" ;;

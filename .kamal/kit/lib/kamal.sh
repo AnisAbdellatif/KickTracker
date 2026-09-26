@@ -63,16 +63,29 @@ kit_role_version() {
   printf '%s\n' "$first"
 }
 
+# kit_kamal_config_get PATH OUTPUT: a value from `kamal config`'s OUTPUT
+# (Kamal's view of the config: destination merged, ERB evaluated), read
+# by kit_yaml_get (lib/yaml.sh): a value, a list's values one per line, a
+# map's KEY=VALUE lines; nothing when it isn't there. Stops the kit when
+# Kamal printed it in a shape the kit can't read, rather than guess.
+# Callers: value=$(kit_kamal_config_get PATH "$out") || exit 1
+kit_kamal_config_get() {
+  local value status=0
+  value=$(printf '%s\n' "$2" | kit_yaml_get "$1") || status=$?
+  case $status in
+    0) [ -z "$value" ] || printf '%s\n' "$value" ;;
+    1) ;;
+    *) kit_die "could not read $1 from \`kamal config\`" ;;
+  esac
+}
+
 # kit_all_roles: every role, from KIT_ROLES or `kamal config`.
 kit_all_roles() {
-  local roles
+  local roles out
   roles=$(kit_conf KIT_ROLES "")
   if [ -z "$roles" ]; then
-    # `kamal config` prints YAML with symbol keys: ":roles:" then "- web".
-    roles=$(kit_kamal config 2>/dev/null | awk '
-      /^:roles:/ { inside = 1; next }
-      inside && /^- / { sub(/^- /, ""); print; next }
-      inside { exit }')
+    out=$(kit_kamal config 2>/dev/null) || out=""
+    roles=$(kit_kamal_config_get roles "$out") || exit 1
   fi
   [ -n "$roles" ] || kit_die "could not tell the roles: set KIT_ROLES in .kamal/kit.env"
   kit_words "$roles"

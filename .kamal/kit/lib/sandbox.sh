@@ -2,7 +2,7 @@
 # kit sandbox: the project's deploy path (the kit, Kamal, groups, hooks,
 # smoke tests) run against a "server" on this machine, with the services
 # on localhost. docs/sandbox.md explains it; this is the engine. Sourced
-# after core.sh, notify.sh and kamal.sh.
+# after core.sh, notify.sh, kamal.sh and runner.sh.
 #
 # The parts, all on this machine's Docker:
 #   registry   registry:2 on 127.0.0.1:<registry port>; the working tree's
@@ -46,7 +46,7 @@ kit_sandbox_load() {
   SANDBOX_REGISTRY_ADDR="127.0.0.1:$(kit_conf KIT_SANDBOX_REGISTRY_PORT 5555)"
   SANDBOX_SERVER_PATH=$(kit_conf KIT_SANDBOX_SERVER_PATH /srv/sandbox)
   SANDBOX_IMAGE=$(kit_conf KIT_SANDBOX_IMAGE "")
-  [ -n "$SANDBOX_IMAGE" ] || SANDBOX_IMAGE="deploy-kit-sandbox:$(cat "$KIT_HOME/VERSION")"
+  [ -n "$SANDBOX_IMAGE" ] || SANDBOX_IMAGE=$(kit_conf KIT_RUNNER_IMAGE "")
   export SANDBOX_DIR SANDBOX_WORK SANDBOX_NAME SANDBOX_SERVER_PATH
 }
 
@@ -61,26 +61,23 @@ kit_sandbox_configs() {
 # kit_sandbox_overlay CONFIG: its sandbox destination file, as Kamal names it.
 kit_sandbox_overlay() { printf '%s.sandbox.yml\n' "${1%.yml}"; }
 
-_sbx_docker() {
-  local docker=()
-  read -r -a docker <<<"${KIT_SANDBOX_DOCKER:-docker}"
-  "${docker[@]}" "$@"
-}
+_sbx_docker() { kit_docker "$@"; }
 
 _sbx_exists() { [ -n "$(_sbx_docker ps -aq --filter "name=^$1\$" 2>/dev/null)" ]; }
 _sbx_running() { [ -n "$(_sbx_docker ps -q --filter "name=^$1\$" 2>/dev/null)" ]; }
 
 # ---------------------------------------------------------------- deployer
 
-# kit_sandbox_deployer COMMAND...: runs COMMAND in the deployer container,
-# as this user, in this checkout, with the sandbox's SSH key, the variables
-# of KIT_SANDBOX_ENV, and an empty .kamal/kit.local.env over the real one.
+# kit_sandbox_deployer COMMAND...: runs COMMAND in the deployer container
+# (the kit's runner, lib/runner.sh, at the checkout's root), with the
+# sandbox's SSH key and the host's network, the variables of
+# KIT_SANDBOX_ENV, and an empty .kamal/kit.local.env over the real one.
 # KIT_SANDBOX_DEPLOYER=local runs it here instead (the tests; or Kamal
 # installed on this machine).
 kit_sandbox_deployer() {
   local env=() assign
-  env+=(KIT_SANDBOX=1 "KIT_SANDBOX_REGISTRY_PASSWORD=$KIT_SANDBOX_REGISTRY_PASSWORD_VALUE" "KIT_BIN=$KIT_BIN"
-    "KIT_PROJECT_DIR=$KIT_PROJECT_DIR")
+  env+=(KIT_SANDBOX=1 KIT_IN_RUNNER=1 "KIT_SANDBOX_REGISTRY_PASSWORD=$KIT_SANDBOX_REGISTRY_PASSWORD_VALUE"
+    "KIT_BIN=$KIT_BIN" "KIT_PROJECT_DIR=$KIT_PROJECT_DIR")
   # The project's smoke URLs are production's: the sandbox checks only
   # KIT_SMOKE_URLS_SANDBOX (empty unless set). And it notifies no one,
   # unless KIT_SANDBOX_NOTIFY is on.
@@ -95,14 +92,9 @@ kit_sandbox_deployer() {
     return
   fi
 
-  local args=(run --rm --network host --userns=host --user "$(id -u):$(id -g)"
-    -e HOME=/tmp/home -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=user.email
-    -e GIT_CONFIG_VALUE_0=sandbox@localhost
-    -v "$KIT_PROJECT_DIR:$KIT_PROJECT_DIR" -w "$KIT_PROJECT_DIR"
-    -v "$SANDBOX_WORK/ssh:/tmp/home/.ssh")
-  [ -t 0 ] && [ -t 1 ] && args+=(-it)
-  # The kit itself, when it lives outside the checkout (not vendored).
-  case $KIT_HOME/ in "$KIT_PROJECT_DIR"/*) ;; *) args+=(-v "$KIT_HOME:$KIT_HOME:ro") ;; esac
+  kit_sandbox_image
+  kit_runner_base "$KIT_PROJECT_DIR"
+  local args=("${KIT_RUNNER_ARGS[@]}" --network host -v "$SANDBOX_WORK/ssh:/home/kit/.ssh")
   # The real server's settings must not reach the sandbox's kit.
   [ -f "$KIT_CONFIG_DIR/kit.local.env" ] && args+=(-v "/dev/null:$KIT_CONFIG_DIR/kit.local.env:ro")
   for assign in "${env[@]}"; do args+=(-e "$assign"); done
@@ -130,13 +122,11 @@ kit_sandbox_kamal_config() {
 # images from the sandbox's registry.
 kit_sandbox_check_target() {
   local config=$1 out hosts port repository host bad=""
-  out=$(kit_sandbox_kamal_config "$config" 2>&1) || {
-    printf '%s\n' "$out" >&2
+  out=$(kit_sandbox_kamal_config "$config") ||
     kit_die "could not read $config for the sandbox destination (kit sandbox init writes $(kit_sandbox_overlay "$config"))"
-  }
-  hosts=$(printf '%s\n' "$out" | awk '/^:hosts:/ { inside = 1; next } inside && /^- / { sub(/^- /, ""); print; next } inside { exit }')
-  port=$(printf '%s\n' "$out" | awk '/^:ssh_options:/ { inside = 1; next } inside && /^  :port:/ { print $2; exit } inside && /^:/ { exit }')
-  repository=$(printf '%s\n' "$out" | sed -n 's/^:repository:[[:space:]]*//p' | head -n 1)
+  hosts=$(kit_kamal_config_get hosts "$out") || exit 1
+  port=$(kit_kamal_config_get ssh_options.port "$out") || exit 1
+  repository=$(kit_kamal_config_get repository "$out") || exit 1
   [ -n "$hosts" ] || bad="no hosts"
   for host in $hosts; do
     [ "$host" = 127.0.0.1 ] || bad="$bad host $host"
@@ -151,10 +141,7 @@ kit_sandbox_check_target() {
 # -------------------------------------------------------------- the pieces
 
 kit_sandbox_image() {
-  _sbx_docker image inspect "$SANDBOX_IMAGE" >/dev/null 2>&1 && return 0
-  kit_info "building the sandbox image ($SANDBOX_IMAGE: Kamal, the deployer and the server)"
-  _sbx_docker build -q -t "$SANDBOX_IMAGE" "$KIT_HOME/sandbox" >/dev/null ||
-    kit_die "could not build $SANDBOX_IMAGE"
+  SANDBOX_IMAGE=$(kit_runner_image "$SANDBOX_IMAGE") || exit 1
 }
 
 kit_sandbox_ssh_key() {
@@ -242,25 +229,19 @@ kit_sandbox_next_version() {
 # tree, as its Kamal builder describes it (context, dockerfile, target,
 # args), labelled for Kamal, pushed to the sandbox registry.
 kit_sandbox_build() {
-  local config=$1 version=$2 out repository service context dockerfile target args=() line
+  local config=$1 version=$2 out repository service context dockerfile target build_args args=() line
   out=$(kit_sandbox_kamal_config "$config") || kit_die "could not read $config for the sandbox destination"
-  repository=$(printf '%s\n' "$out" | sed -n 's/^:repository:[[:space:]]*//p' | head -n 1)
+  repository=$(kit_kamal_config_get repository "$out") || exit 1
   service=$(kit_config_service "$config")
   [ -n "$service" ] || kit_die "$config names no service"
-  context=$(printf '%s\n' "$out" | awk '/^:builder:/ { b = 1; next } b && /^  context:/ { sub(/^  context:[[:space:]]*/, ""); print; exit } b && /^:/ { exit }')
-  dockerfile=$(printf '%s\n' "$out" | awk '/^:builder:/ { b = 1; next } b && /^  dockerfile:/ { sub(/^  dockerfile:[[:space:]]*/, ""); print; exit } b && /^:/ { exit }')
-  target=$(printf '%s\n' "$out" | awk '/^:builder:/ { b = 1; next } b && /^  target:/ { sub(/^  target:[[:space:]]*/, ""); print; exit } b && /^:/ { exit }')
+  context=$(kit_kamal_config_get builder.context "$out") || exit 1
+  dockerfile=$(kit_kamal_config_get builder.dockerfile "$out") || exit 1
+  target=$(kit_kamal_config_get builder.target "$out") || exit 1
+  build_args=$(kit_kamal_config_get builder.args "$out") || exit 1
   while IFS= read -r line; do
     [ -n "$line" ] && args+=(--build-arg "$line")
-  done < <(printf '%s\n' "$out" | awk '
-    /^:builder:/ { b = 1; next }
-    b && /^  args:/ { a = 1; next }
-    b && a && /^    [^ ]/ { sub(/^    /, ""); k = $0; sub(/:.*/, "", k); v = $0; sub(/^[^:]*:[[:space:]]*/, "", v); gsub(/^"|"$/, "", v); print k "=" v; next }
-    b && a { a = 0 }
-    b && /^:/ { exit }')
+  done <<<"$build_args"
   context=${context:-.}
-  context=${context#\"} && context=${context%\"}
-  dockerfile=${dockerfile#\"} && dockerfile=${dockerfile%\"}
   kit_info "building $service from the working tree ($context) as $repository:$version"
   (cd "$KIT_PROJECT_DIR" && _sbx_docker build -q -t "$repository:$version" --label "service=$service" \
     ${dockerfile:+-f "$dockerfile"} ${target:+--target "$target"} ${args[@]+"${args[@]}"} "$context") >/dev/null ||
@@ -268,8 +249,29 @@ kit_sandbox_build() {
   _sbx_docker push -q "$repository:$version" >/dev/null || kit_die "pushing $repository:$version to the sandbox registry failed"
 }
 
-# The Kamal-run containers of the sandbox.
-kit_sandbox_containers() { _sbx_docker ps -q --filter label=destination=sandbox 2>/dev/null; }
+# kit_sandbox_services: the Kamal services of the sandbox's configs.
+kit_sandbox_services() {
+  local config service
+  for config in $(kit_sandbox_configs); do
+    service=$(kit_config_service "$config")
+    [ -n "$service" ] || kit_die "$config names no service"
+    printf '%s\n' "$service"
+  done
+}
+
+# _sbx_ps [DOCKER-PS-OPTIONS...]: `docker ps` of this sandbox's Kamal-run
+# containers, those of its own services only: other projects' sandboxes
+# on this machine carry the same destination label.
+_sbx_ps() {
+  local services service
+  services=$(kit_sandbox_services) || exit 1
+  for service in $services; do
+    _sbx_docker ps "$@" --filter label=destination=sandbox --filter "label=service=$service" 2>/dev/null
+  done
+}
+
+# The running Kamal-run containers of the sandbox.
+kit_sandbox_containers() { _sbx_ps -q; }
 
 # kamal-proxy, when a config's sandbox destination runs it: one per
 # machine, and the sandbox's is the one bound to the sandbox's proxy port.
@@ -365,20 +367,22 @@ kit_sandbox_status() {
   fi
   kit_sandbox_kit group status 2>/dev/null || true
   printf '\ncontainers:\n'
-  _sbx_docker ps --filter label=destination=sandbox --format '  {{.Names}}  {{.Status}}' | sort
+  _sbx_ps --format '  {{.Names}}  {{.Status}}' | sort
   kit_sandbox_hook urls
 }
 
 # kit_sandbox_role_container ROLE: the running container of a sandbox role.
 kit_sandbox_role_container() {
   local id
-  id=$(_sbx_docker ps -q --filter label=destination=sandbox --filter "label=role=$1" | head -n 1)
+  id=$(_sbx_ps -q --filter "label=role=$1" | head -n 1)
   [ -n "$id" ] || kit_die "no running sandbox container for role $1"
   printf '%s\n' "$id"
 }
 
 kit_sandbox_down() {
-  kit_sandbox_containers >"$SANDBOX_WORK/stopped.new" || true
+  local ids
+  ids=$(kit_sandbox_containers) || exit 1
+  if [ -n "$ids" ]; then printf '%s\n' "$ids"; fi >"$SANDBOX_WORK/stopped.new"
   if [ -s "$SANDBOX_WORK/stopped.new" ]; then
     # shellcheck disable=SC2046 # one id per word
     _sbx_docker stop $(cat "$SANDBOX_WORK/stopped.new") >/dev/null
@@ -396,7 +400,7 @@ kit_sandbox_down() {
 
 kit_sandbox_reset() {
   local ids proxy
-  ids=$(_sbx_docker ps -aq --filter label=destination=sandbox 2>/dev/null)
+  ids=$(_sbx_ps -aq) || exit 1
   # shellcheck disable=SC2086 # one id per word
   [ -z "$ids" ] || _sbx_docker rm -f $ids >/dev/null
   proxy=$(kit_sandbox_proxy)
@@ -452,21 +456,21 @@ EOF
 # kit_sandbox_roles CONFIG: the config's roles, read from the file itself
 # (`servers:` as a list means one role, web).
 kit_sandbox_roles() {
-  awk '
-    /^servers:/ { s = 1; next }
-    s && /^[^ #]/ { exit }
-    s && /^  - / { print "web"; exit }
-    s && /^  [A-Za-z0-9_-]+:/ { r = $1; sub(/:.*/, "", r); print r }
-  ' "$KIT_PROJECT_DIR/$1"
+  local file="$KIT_PROJECT_DIR/$1"
+  case $(kit_yaml_type servers "$file") in
+    list) printf 'web\n' ;;
+    map) kit_yaml_keys servers "$file" ;;
+    *) kit_die "$1: could not read its servers" ;;
+  esac
 }
 
 # kit_sandbox_write_overlay CONFIG: the sandbox destination for CONFIG.
 kit_sandbox_write_overlay() {
-  local config=$1 role hosts_key=host proxy_port
+  local config=$1 role roles hosts_key=host proxy_port
+  roles=$(kit_sandbox_roles "$config") || exit 1
   proxy_port=$(kit_conf KIT_SANDBOX_PROXY_PORT 8080)
   # The proxy's host key must be the one the config uses (Kamal refuses both).
-  awk '/^proxy:/ { p = 1; next } p && /^[^ #]/ { exit } p && /^  hosts:/ { f = 1 } END { exit !f }' \
-    "$KIT_PROJECT_DIR/$config" && hosts_key=hosts
+  kit_yaml_type proxy.hosts "$KIT_PROJECT_DIR/$config" >/dev/null 2>&1 && hosts_key=hosts
   cat <<EOF
 # The "sandbox" destination of $config, for \`kit sandbox\` (deploy-kit,
 # docs/sandbox.md): what Kamal deploys to on this machine. Merged over
@@ -477,7 +481,7 @@ kit_sandbox_write_overlay() {
 # the sandbox's port and the images come from the sandbox's registry.
 servers:
 EOF
-  for role in $(kit_sandbox_roles "$config"); do
+  for role in $roles; do
     printf '  %s:\n    hosts: [127.0.0.1]\n' "$role"
   done
   cat <<EOF

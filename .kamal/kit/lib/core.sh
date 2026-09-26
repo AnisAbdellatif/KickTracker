@@ -8,6 +8,9 @@
 KIT_HOME=${KIT_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 export KIT_HOME
 
+# shellcheck source=yaml.sh
+. "$KIT_HOME/lib/yaml.sh"
+
 # ---------------------------------------------------------------- logging
 
 _kit_color() {
