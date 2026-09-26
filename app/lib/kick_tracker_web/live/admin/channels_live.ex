@@ -14,6 +14,7 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
     {:ok,
      socket
      |> assign(page_title: gettext("Channels"), preview: nil, editing: nil, deleting: nil)
+     |> assign(q: "", show: "all")
      |> assign(lookup: to_form(%{"slug" => ""}, as: "lookup"))
      |> assign(timezones: Channels.timezones())
      |> load()}
@@ -146,51 +147,84 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
     end
   end
 
+  def handle_event("search", %{"q" => q}, socket), do: {:noreply, assign(socket, q: q)}
+
+  def handle_event("show", %{"show" => show}, socket)
+      when show in ~w(all tracking paused hidden live),
+      do: {:noreply, assign(socket, show: show)}
+
   @impl true
   def render(assigns) do
+    assigns =
+      assign(assigns,
+        shown: shown(assigns),
+        counts: %{
+          "all" => length(assigns.channels),
+          "tracking" => Enum.count(assigns.channels, & &1.active),
+          "paused" => Enum.count(assigns.channels, &(not &1.active)),
+          "hidden" => Enum.count(assigns.channels, &(not &1.public)),
+          "live" => map_size(assigns.live)
+        },
+        deleting_channel:
+          assigns.deleting && Enum.find(assigns.channels, &(&1.id == assigns.deleting))
+      )
+
     ~H"""
     <Layouts.admin flash={@flash} current_admin={@current_admin} active={:channels}>
-      <.header>
-        {gettext("Channels")}
+      <.page_header title={gettext("Channels")} icon="hero-tv">
         <:subtitle>
-          {gettext("Pausing stops collection and keeps every row already collected.")}
+          {gettext(
+            "The channels being tracked. Pausing stops collection and keeps everything already collected; hiding removes a channel from the public site."
+          )}
         </:subtitle>
-      </.header>
+      </.page_header>
 
-      <section class="card-surface p-4">
-        <.form for={@lookup} id="lookup-form" phx-submit="lookup" class="flex items-end gap-2">
-          <div class="flex-1 max-w-sm">
+      <.panel id="add-channel" title={gettext("Add a channel")} icon="hero-plus-circle" class="mb-6">
+        <.form
+          for={@lookup}
+          id="lookup-form"
+          phx-submit="lookup"
+          class="flex flex-wrap items-end gap-2"
+        >
+          <div class="min-w-56 max-w-sm flex-1">
             <.input
               field={@lookup[:slug]}
-              label={gettext("Add a channel by its Kick slug")}
+              label={gettext("Kick slug")}
               placeholder="somestreamer"
               required
             />
           </div>
-          <.button class="btn mb-2" phx-disable-with={gettext("Looking up…")}>{gettext("Look up")}</.button>
+          <.button class="btn mb-2 gap-1" phx-disable-with={gettext("Looking up…")}>
+            <.icon name="hero-magnifying-glass" class="size-4" />{gettext("Look up")}
+          </.button>
         </.form>
 
-        <div :if={@preview} id="channel-preview" class="mt-4 grid gap-4 sm:grid-cols-2">
-          <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            <dt class="opacity-60">{gettext("Slug")}</dt><dd class="font-medium">{@preview.slug}</dd>
-            <dt class="opacity-60">{gettext("Kick user id")}</dt><dd>{@preview.kick_user_id}</dd>
-            <dt class="opacity-60">{gettext("Status")}</dt>
-            <dd>
-              <%= if @preview.live? do %>
-                <span class="badge badge-error badge-sm">{gettext("live")}</span>
-                {gettext("%{n} viewers", n: @preview.viewers)}
-              <% else %>
-                {gettext("offline")}
-              <% end %>
-            </dd>
-            <dt class="opacity-60">{gettext("Category")}</dt><dd>{@preview.category || "–"}</dd>
-            <dt class="opacity-60">{gettext("Title")}</dt><dd class="break-words">
-              {@preview.title || "–"}
-            </dd>
-            <dt class="opacity-60">{gettext("Language")}</dt><dd>{@preview.language || "–"}</dd>
-          </dl>
+        <div :if={@preview} id="channel-preview" class="inset-well mt-4 grid gap-6 p-4 md:grid-cols-2">
+          <div class="flex gap-3">
+            <.avatar name={@preview.slug} class="size-12 text-lg" />
+            <div class="min-w-0">
+              <p class="flex flex-wrap items-center gap-2 font-semibold">
+                {@preview.slug}
+                <span :if={@preview.live?} class="live-pill">{gettext("live")}</span>
+              </p>
+              <p class="text-muted text-sm">
+                <%= if @preview.live? do %>
+                  {gettext("%{n} viewers", n: @preview.viewers)}
+                <% else %>
+                  {gettext("offline")}
+                <% end %>
+                · {@preview.category || "–"}
+              </p>
+              <p class="mt-1 break-words text-sm">{@preview.title || "–"}</p>
+              <p class="text-muted mt-1 text-xs">
+                {gettext("Kick user id")} {@preview.kick_user_id} · {gettext("Language")} {@preview.language ||
+                  "–"}
+              </p>
+            </div>
+          </div>
           <div>
-            <p :if={@preview.existing} class="mb-2 text-sm text-warning">
+            <p :if={@preview.existing} class="mb-2 flex items-center gap-1 text-sm text-warning">
+              <.icon name="hero-information-circle" class="size-4" />
               <%= if @preview.existing.active do %>
                 {gettext("Already tracked.")}
               <% else %>
@@ -216,93 +250,226 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
             </.form>
           </div>
         </div>
-      </section>
+      </.panel>
 
       <datalist id="timezones">
         <option :for={tz <- @timezones} value={tz} />
       </datalist>
 
-      <.table id="channels" rows={@channels} row_id={&"channel-#{&1.id}"}>
-        <:col :let={c} label={gettext("Channel")}>
-          <span class="font-medium">{c.slug}</span>
-          <span :if={Map.has_key?(@live, c.id)} class="badge badge-error badge-xs ms-1">{gettext(
-            "live"
-          )}</span>
-        </:col>
-        <:col :let={c} label={gettext("Kick ids")}>
-          <span class="text-xs opacity-70">
-            {gettext("user")} {c.kick_user_id} · {gettext("chatroom")} {c.chatroom_id || "?"}
-          </span>
-        </:col>
-        <:col :let={c} label={gettext("Timezone")}>
-          <%= if @editing == c.id do %>
-            <form id={"tz-form-#{c.id}"} phx-submit="save_tz" class="flex gap-1">
-              <input type="hidden" name="channel_id" value={c.id} />
-              <input name="timezone" value={c.timezone} list="timezones" class="input input-xs w-40" />
-              <button class="btn btn-xs">{gettext("Save")}</button>
-            </form>
-          <% else %>
-            <button phx-click="edit_tz" phx-value-id={c.id} class="link link-hover">{c.timezone}</button>
-          <% end %>
-        </:col>
-        <:col :let={c} label={gettext("Tracked since")}>
-          {Calendar.strftime(c.tracked_since, "%Y-%m-%d")}
-        </:col>
-        <:col :let={c} label={gettext("Status")}>
-          {if c.active, do: gettext("tracking"), else: gettext("paused")}
-          <span :if={!c.public} class="badge badge-warning badge-xs">{gettext("hidden")}</span>
-          <form
-            :if={@deleting == c.id}
-            id={"delete-#{c.id}"}
-            phx-submit="delete"
-            class="mt-1 flex gap-1"
-          >
-            <input type="hidden" name="channel_id" value={c.id} />
+      <.panel id="channels-panel" title={gettext("Tracked channels")} icon="hero-tv" flush>
+        <:actions>
+          <nav class="segmented" aria-label={gettext("Show")}>
+            <button
+              :for={
+                {key, label} <- [
+                  {"all", gettext("All")},
+                  {"tracking", gettext("Tracking")},
+                  {"paused", gettext("Paused")},
+                  {"hidden", gettext("Hidden")},
+                  {"live", gettext("Live")}
+                ]
+              }
+              id={"channels-show-#{key}"}
+              type="button"
+              phx-click="show"
+              phx-value-show={key}
+              class={["segmented-item", @show == key && "is-active"]}
+            >
+              {label} · {@counts[key]}
+            </button>
+          </nav>
+          <.search_field
+            id="channels-search"
+            event="search"
+            value={@q}
+            placeholder={gettext("Search channels")}
+          />
+        </:actions>
+        <div class="scroll-panel max-h-[70vh] overflow-auto">
+          <table id="channels" class="table table-sm table-pin-rows">
+            <thead>
+              <tr>
+                <th>{gettext("Channel")}</th>
+                <th>{gettext("Status")}</th>
+                <th>{gettext("Timezone")}</th>
+                <th>{gettext("Tracked since")}</th>
+                <th class="text-end">{gettext("Actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={c <- @shown} id={"channel-#{c.id}"} class={!c.active && "opacity-70"}>
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <.avatar name={c.slug} channel_id={c.id} class="size-8 text-sm" />
+                    <div class="min-w-0">
+                      <p class="flex items-center gap-2 font-medium">
+                        <span class="truncate">{c.slug}</span>
+                        <span :if={Map.has_key?(@live, c.id)} class="live-pill">{gettext("live")}</span>
+                      </p>
+                      <p class="text-muted text-xs">
+                        {gettext("user")} {c.kick_user_id} · {gettext("chatroom")} {c.chatroom_id ||
+                          "?"}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <div class="flex flex-wrap gap-1">
+                    <.status_pill tone={if c.active, do: :ok, else: :neutral}>
+                      {if c.active, do: gettext("tracking"), else: gettext("paused")}
+                    </.status_pill>
+                    <.status_pill :if={!c.public} tone={:warn}>{gettext("hidden")}</.status_pill>
+                    <.status_pill :if={c.chat_log} tone={:info}>
+                      {gettext("chat logged")}
+                    </.status_pill>
+                  </div>
+                </td>
+                <td>
+                  <%= if @editing == c.id do %>
+                    <form id={"tz-form-#{c.id}"} phx-submit="save_tz" class="flex gap-1">
+                      <input type="hidden" name="channel_id" value={c.id} />
+                      <input
+                        name="timezone"
+                        value={c.timezone}
+                        list="timezones"
+                        class="input input-xs w-44"
+                        phx-mounted={Phoenix.LiveView.JS.focus()}
+                      />
+                      <button class="btn btn-xs btn-primary">{gettext("Save")}</button>
+                    </form>
+                  <% else %>
+                    <button
+                      phx-click="edit_tz"
+                      phx-value-id={c.id}
+                      class="group inline-flex items-center gap-1 text-sm hover:text-primary"
+                      title={gettext("Change the timezone")}
+                    >
+                      {c.timezone}
+                      <.icon
+                        name="hero-pencil-square"
+                        class="size-3.5 opacity-0 group-hover:opacity-70"
+                      />
+                    </button>
+                  <% end %>
+                </td>
+                <td class="text-sm tabular-nums">{Calendar.strftime(c.tracked_since, "%Y-%m-%d")}</td>
+                <td>
+                  <div class="flex justify-end gap-0.5">
+                    <.link
+                      navigate={~p"/c/#{c.slug}"}
+                      class="btn btn-ghost btn-sm btn-square"
+                      title={gettext("Public page")}
+                      aria-label={gettext("Public page")}
+                    >
+                      <.icon name="hero-arrow-top-right-on-square" class="size-4" />
+                    </.link>
+                    <.icon_button
+                      id={"toggle-#{c.id}"}
+                      icon={if c.active, do: "hero-pause", else: "hero-play"}
+                      label={if c.active, do: gettext("Pause"), else: gettext("Resume")}
+                      phx-click="toggle"
+                      phx-value-id={c.id}
+                      data-confirm={
+                        if c.active,
+                          do:
+                            gettext("Pause tracking %{slug}? Nothing is collected while paused.",
+                              slug: c.slug
+                            )
+                      }
+                    />
+                    <.icon_button
+                      id={"public-#{c.id}"}
+                      icon={if c.public, do: "hero-eye-slash", else: "hero-eye"}
+                      label={if c.public, do: gettext("Hide"), else: gettext("Show")}
+                      phx-click="toggle_public"
+                      phx-value-id={c.id}
+                    />
+                    <.icon_button
+                      id={"ask-delete-#{c.id}"}
+                      icon="hero-trash"
+                      label={gettext("Delete…")}
+                      tone={:danger}
+                      phx-click="ask_delete"
+                      phx-value-id={c.id}
+                    />
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <.empty_state :if={@channels == []} icon="hero-tv" title={gettext("No channels yet.")}>
+            {gettext("Add one above by its Kick slug.")}
+          </.empty_state>
+          <.empty_state
+            :if={@channels != [] and @shown == []}
+            icon="hero-magnifying-glass"
+            title={gettext("No channel matches.")}
+          />
+        </div>
+      </.panel>
+
+      <div
+        :if={@deleting_channel}
+        id="delete-dialog"
+        class="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
+        role="dialog"
+        aria-modal="true"
+        phx-window-keydown="cancel_delete"
+        phx-key="Escape"
+      >
+        <form
+          id={"delete-#{@deleting_channel.id}"}
+          phx-submit="delete"
+          phx-click-away="cancel_delete"
+          class="card-surface w-full max-w-md space-y-3 p-5"
+        >
+          <input type="hidden" name="channel_id" value={@deleting_channel.id} />
+          <div class="flex items-start gap-3">
+            <span class="icon-tile text-error"><.icon name="hero-trash" class="size-5" /></span>
+            <div>
+              <h2 class="font-semibold">
+                {gettext("Delete %{slug} and all its data?", slug: @deleting_channel.slug)}
+              </h2>
+              <p class="text-muted mt-1 text-sm">
+                {gettext(
+                  "Stops tracking and deletes every stream, sample, chat count, event and log of the channel, for good. For a removal request; to stop collecting, pause it instead."
+                )}
+              </p>
+            </div>
+          </div>
+          <label class="block text-sm">
+            <span class="text-muted">{gettext("Type %{slug} to confirm", slug: @deleting_channel.slug)}</span>
             <input
               name="slug"
-              class="input input-xs w-36"
-              placeholder={gettext("type %{slug}", slug: c.slug)}
+              class="input input-sm mt-1 w-full"
               autocomplete="off"
+              phx-mounted={Phoenix.LiveView.JS.focus()}
             />
-            <button class="btn btn-xs btn-error">{gettext("Delete all data")}</button>
-            <button type="button" phx-click="cancel_delete" class="btn btn-xs btn-ghost">{gettext(
+          </label>
+          <div class="flex justify-end gap-2">
+            <button type="button" phx-click="cancel_delete" class="btn btn-sm btn-ghost">{gettext(
               "Cancel"
             )}</button>
-          </form>
-        </:col>
-        <:action :let={c}>
-          <button
-            id={"toggle-#{c.id}"}
-            phx-click="toggle"
-            phx-value-id={c.id}
-            data-confirm={
-              if c.active,
-                do:
-                  gettext("Pause tracking %{slug}? Nothing is collected while paused.", slug: c.slug)
-            }
-            class="btn btn-ghost btn-xs"
-          >
-            {if c.active, do: gettext("Pause"), else: gettext("Resume")}
-          </button>
-          <button
-            id={"public-#{c.id}"}
-            phx-click="toggle_public"
-            phx-value-id={c.id}
-            class="btn btn-ghost btn-xs"
-          >
-            {if c.public, do: gettext("Hide"), else: gettext("Show")}
-          </button>
-          <button
-            id={"ask-delete-#{c.id}"}
-            phx-click="ask_delete"
-            phx-value-id={c.id}
-            class="btn btn-ghost btn-xs text-error"
-          >
-            {gettext("Delete…")}
-          </button>
-        </:action>
-      </.table>
+            <button class="btn btn-sm btn-error">{gettext("Delete all data")}</button>
+          </div>
+        </form>
+      </div>
     </Layouts.admin>
     """
+  end
+
+  defp shown(%{channels: channels, live: live, q: q, show: show}) do
+    q = String.downcase(String.trim(q))
+
+    Enum.filter(channels, fn c ->
+      (q == "" or String.contains?(String.downcase(c.slug), q)) and
+        case show do
+          "tracking" -> c.active
+          "paused" -> not c.active
+          "hidden" -> not c.public
+          "live" -> Map.has_key?(live, c.id)
+          _ -> true
+        end
+    end)
   end
 end
