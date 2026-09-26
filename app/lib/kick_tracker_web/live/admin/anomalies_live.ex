@@ -337,6 +337,7 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
       chatters: gettext("Active chatters"),
       flagged: gettext("flagged reading, not counted as a peak"),
       kinds: event_labels(),
+      hosts: host_labels(),
       event: event_label(nil),
       title: gettext("Title"),
       category: gettext("Category")

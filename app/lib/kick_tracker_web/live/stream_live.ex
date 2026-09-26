@@ -288,6 +288,7 @@ defmodule KickTrackerWeb.StreamLive do
       flagged: gettext("flagged reading, not counted as a peak"),
       kicks: gettext("Kicks"),
       kinds: event_labels(),
+      hosts: host_labels(),
       event: event_label(nil),
       title: gettext("Title"),
       category: gettext("Category")

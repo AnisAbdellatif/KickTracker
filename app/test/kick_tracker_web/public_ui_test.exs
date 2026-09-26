@@ -329,7 +329,11 @@ defmodule KickTrackerWeb.PublicUITest do
       [_, opts] = Regex.run(~r/id="stream-chart"[^>]*data-opts="([^"]+)"/, html)
       opts = opts |> String.replace("&quot;", "\"") |> Jason.decode!()
       assert opts["labels"]["kinds"]["raid_in"] == "Raid in"
+      assert opts["labels"]["kinds"]["hosted_by"] == "Hosted by"
       assert opts["labels"]["kicks"] == "Kicks"
+      # Hosts' sentences keep their placeholders for the browser to fill.
+      assert opts["labels"]["hosts"]["hosted_by"] == "Hosted by %{other}"
+      assert opts["labels"]["hosts"]["legend"] == "Hosts"
     end
   end
 

@@ -1371,8 +1371,12 @@ One time axis, stacked panels sharing zoom and crosshair:
 1. **Viewers** (60s resolution), with:
    - **shaded bands** for category segments, labeled ("Just Chatting",
      "GTA V"), and ticks for title changes;
-   - **markers** for raids/hosts in and out (with viewer counts), sub gift
-     bursts and big Kicks;
+   - **hosts** in and out as vertical lines across the panel (solid in,
+     dashed out, their own legend entry), labelled above it with the other
+     channel and the viewers (`← other · 542`, `→ other · 1 200`); the
+     tooltip says it in words and, for an incoming host, what the viewer
+     count did in the 5 minutes after;
+   - **markers** for sub gift bursts and big Kicks;
    - "no data" shading where coverage is missing.
 2. **Active chatters**, with the window picker (5 / 10 / 15 min, rolling),
    and messages per minute.
