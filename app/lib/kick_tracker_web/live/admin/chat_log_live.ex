@@ -717,7 +717,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
                       >{Calendar.strftime(m.local_at, "%H:%M:%S")}</time>
                       <.link
                         patch={page_path(assigns, %{"users" => to_string(m.user_id)})}
-                        class={["chat-user", "avatar-#{hue(m.username || to_string(m.user_id))}"]}
+                        class="chat-user"
                         title={gettext("This user's messages")}
                       >{m.username || m.user_id}</.link>
                       <.link

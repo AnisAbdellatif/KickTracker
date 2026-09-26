@@ -467,7 +467,7 @@ a.card-surface:hover, .card-surface.is-link:hover {
 }
 
 /* A chat feed as a chat shows it (as BetterChat does): a line per message,
-   time, the sender in their colour, the channel's tag, the text; a reply
+   time, the sender, the channel's tag, the text; a reply
    says above it what it answers. A sticky header per day. */
 .chat-msg {
   padding: .1875rem .5rem;
@@ -483,7 +483,7 @@ a.card-surface:hover, .card-surface.is-link:hover {
   font-size: .75rem;
   font-variant-numeric: tabular-nums;
 }
-.chat-user { color: var(--m); font-weight: 700; }
+.chat-user { font-weight: 700; }
 .chat-user:hover { text-decoration: underline; }
 .chat-msg .channel-pill { margin-inline-start: .375rem; vertical-align: middle; }
 .chat-sep { margin-inline-end: .375rem; color: var(--ink-muted); }
