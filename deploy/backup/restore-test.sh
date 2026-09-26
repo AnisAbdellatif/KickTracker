@@ -11,9 +11,9 @@
 # Needs nothing from cron's environment. From secrets/db.env: the WAL-G
 # storage settings (every WALG_* and AWS_* line), POSTGRES_USER and
 # POSTGRES_DB, RESTORE_HEARTBEAT_URL (pinged on success); from
-# secrets/collector.env or app.env: ALERT_WEBHOOK_URL / TELEGRAM_* (told
-# about any failure). The environment overrides any of them, so it can run
-# on another host with only the storage variables exported. Also:
+# secrets/collector.env or app.env: ALERT_WEBHOOK_URL / TELEGRAM_* / NTFY_*
+# (told about any failure). The environment overrides any of them, so it can
+# run on another host with only the storage variables exported. Also:
 #   DB_IMAGE           the database image with WAL-G (default: DB_IMAGE in
 #                      deploy/.env, else the one compose.single.yml uses)
 #   LIVE_DATABASE_URL  compare row counts with this database; by default

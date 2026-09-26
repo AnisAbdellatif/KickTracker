@@ -1852,7 +1852,7 @@ loses it for good.
 
 ### 18.2 Alerts
 
-Notifications (Telegram, Discord or email), not just dashboards, when:
+Notifications (Telegram, a Discord/Slack webhook or ntfy), not just dashboards, when:
 
 - no collector is collecting, or the standby is gone (from the
   collectors' heartbeat rows, checked by the web role too: a dead

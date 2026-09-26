@@ -68,8 +68,11 @@ defmodule KickTracker.Workers.ShadowSync do
     sync_channels(main.channels)
 
     case Journal.get(:main_down) do
-      {_since, true} -> Notifier.send("✅ the primary side answers the shadow collector again")
-      _ -> :ok
+      {_since, true} ->
+        Notifier.send("✅ the primary side answers the shadow collector again", :low)
+
+      _ ->
+        :ok
     end
 
     Journal.put(:main_down, nil)
@@ -86,7 +89,8 @@ defmodule KickTracker.Workers.ShadowSync do
       {since, false} ->
         if DateTime.diff(now, since) >= @down_after_s do
           Notifier.send(
-            "🔴 the shadow collector can't reach the primary side (since #{Calendar.strftime(since, "%H:%M")} UTC); it keeps collecting"
+            "🔴 the shadow collector can't reach the primary side (since #{Calendar.strftime(since, "%H:%M")} UTC); it keeps collecting",
+            :high
           )
 
           Journal.put(:main_down, {since, true})

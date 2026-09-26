@@ -350,8 +350,8 @@ data only matters until the main side has filled its gaps.
   `secrets/db.env` (WAL-G's storage, `POSTGRES_USER`/`POSTGRES_DB`,
   `BACKUP_HEARTBEAT_URL`, `RESTORE_HEARTBEAT_URL`) and the alert settings
   of `secrets/collector.env` (or `app.env`). Any failure, expected or not,
-  is sent to `ALERT_WEBHOOK_URL` and/or Telegram; each success pings its
-  heartbeat URL, so a job that stops running is noticed too.
+  is sent to `ALERT_WEBHOOK_URL`, Telegram and/or ntfy; each success pings
+  its heartbeat URL, so a job that stops running is noticed too.
   `ops/check-host.sh` reads its settings the same way.
 - Also keep: `deploy/` (in git), the RabbitMQ definitions (regenerated from
   secrets), and the age private keys (offline). Receiver spools are
@@ -370,9 +370,11 @@ set if you need a moment before a mistake).
 ## Monitoring (§18.2)
 
 - Alerts are checked every minute by the collecting node **and** by web
-  (so a dead collector is noticed), and sent through `ALERT_WEBHOOK_URL`
-  or Telegram; the admin health page shows the open alerts and each
-  collector: collecting or standing by, writes waiting, recent handoffs.
+  (so a dead collector is noticed), and sent through `ALERT_WEBHOOK_URL`,
+  Telegram or ntfy (`NTFY_URL`, with the priority: high when a problem
+  starts, low when it is resolved); the admin health page shows the open
+  alerts and each collector: collecting or standing by, writes waiting,
+  recent handoffs.
 - Each collector's container healthcheck asks its own status port
   (`docker ps` shows it; `.kamal/kit/bin/kit group status` shows which
   collects).
