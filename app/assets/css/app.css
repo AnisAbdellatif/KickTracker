@@ -466,14 +466,41 @@ a.card-surface:hover, .card-surface.is-link:hover {
   font-weight: 600;
 }
 
-/* A chat feed: a row per message, a sticky header per day. */
-.chat-row {
-  display: flex;
-  gap: .75rem;
-  padding: .375rem .5rem;
-  border-radius: var(--radius-field);
+/* A chat feed as a chat shows it (as BetterChat does): a line per message,
+   time, the sender in their colour, the channel's tag, the text; a reply
+   says above it what it answers. A sticky header per day. */
+.chat-msg {
+  padding: .1875rem .5rem;
+  border-radius: var(--radius-selector);
+  font-size: .875rem;
+  line-height: 1.6;
 }
-.chat-row:hover { background: var(--surface-hover); }
+.chat-msg:hover { background: var(--surface-hover); }
+.chat-line { overflow-wrap: anywhere; }
+.chat-ts {
+  margin-inline-end: .5rem;
+  color: var(--ink-subtle, var(--ink-muted));
+  font-size: .75rem;
+  font-variant-numeric: tabular-nums;
+}
+.chat-user { color: var(--m); font-weight: 700; }
+.chat-user:hover { text-decoration: underline; }
+.chat-msg .channel-pill { margin-inline-start: .375rem; vertical-align: middle; }
+.chat-sep { margin-inline-end: .375rem; color: var(--ink-muted); }
+.chat-text { white-space: pre-wrap; }
+.chat-reply {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: .75rem;
+  white-space: nowrap;
+}
+.chat-reply-user { font-weight: 600; color: var(--color-base-content); }
+a.chat-reply-user:hover { text-decoration: underline; }
+.chat-reply .chat-text { white-space: nowrap; }
+.chat-reply .chat-text .emote { height: 1.125rem; margin: 0 .0625rem; }
 .day-divider {
   position: sticky;
   top: 0;

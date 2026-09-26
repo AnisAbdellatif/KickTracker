@@ -297,6 +297,38 @@ defmodule KickTrackerWeb.Admin.ChatLogLiveTest do
     refute has_element?(view, "#chat-log-messages", "elsewhere")
   end
 
+  test "messages read as a chat: time, sender, channel, text; a reply says what it answers",
+       %{conn: conn} do
+    c = channel!(slug: "somestreamer")
+
+    KickTracker.Repo.insert_all("kick_users", [
+      %{id: 7, username: "someone", seen_at: @now},
+      %{id: 8, username: "another", seen_at: @now}
+    ])
+
+    ChatLog.insert_messages(c.id, [
+      ChatLog.message_row(%{id: "q1", sender_id: 7, at: @now}, %{
+        content: "the question",
+        type: "message"
+      }),
+      ChatLog.message_row(%{id: "a1", sender_id: 8, at: DateTime.add(@now, 5)}, %{
+        content: "the answer",
+        type: "reply",
+        reply_to_message_id: "q1",
+        reply_to_user_id: 7
+      })
+    ])
+
+    {:ok, view, _} = live(conn, ~p"/admin/chat-log?#{%{"channels" => c.id}}")
+    line = view |> element("#msg-#{c.id}-a1 .chat-line") |> render()
+    assert line =~ ~r/12:00:05.*another.*somestreamer.*:.*the answer/s
+
+    reply = view |> element("#msg-#{c.id}-a1 .chat-reply") |> render()
+    assert reply =~ "Replying to"
+    assert reply =~ "@someone"
+    assert reply =~ "the question"
+  end
+
   test "the export is the filtered log as CSV, oldest first; audited", %{conn: conn} do
     a = channel!(slug: "somestreamer")
     b = channel!(slug: "otherstreamer")

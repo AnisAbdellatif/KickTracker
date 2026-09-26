@@ -346,6 +346,9 @@ defmodule KickTracker.ChatLog do
       on: k.id == m.user_id,
       left_join: r in "kick_users",
       on: r.id == m.reply_to_user_id,
+      # The message replied to, when it was logged too (same channel).
+      left_join: o in "chat_messages",
+      on: o.channel_id == m.channel_id and o.message_id == m.reply_to_message_id,
       select: %{
         channel_id: m.channel_id,
         slug: c.slug,
@@ -357,7 +360,8 @@ defmodule KickTracker.ChatLog do
         content: m.content,
         reply_to_message_id: m.reply_to_message_id,
         reply_to_user_id: m.reply_to_user_id,
-        reply_to_username: r.username
+        reply_to_username: r.username,
+        reply_to_content: o.content
       }
     )
     |> where_in(:channel_id, filters[:channel_ids])
