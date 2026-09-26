@@ -13,6 +13,6 @@ fi
 kit_is_rollback && exit 0
 allowed=$(kit_conf KIT_DEPLOY_BRANCH main)
 branch=$(git -C "$KIT_PROJECT_DIR" symbolic-ref --quiet --short HEAD || true)
-[ -n "$branch" ] || kit_die "not on a branch (detached HEAD); deploy from: $allowed"
-kit_in_list "$branch" "$allowed" || kit_die "on branch '$branch'; ${KIT_DESTINATION:-this destination} deploys from: $allowed"
+[ -n "$branch" ] || kit_gate_die "not on a branch (detached HEAD); deploy from: $allowed"
+kit_in_list "$branch" "$allowed" || kit_gate_die "on branch '$branch'; ${KIT_DESTINATION:-this destination} deploys from: $allowed"
 kit_ok "branch $branch"

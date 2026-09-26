@@ -72,11 +72,11 @@ while :; do
   case $verdict in
     pass) kit_ok "CI passed for ${version:0:12} ($repo)" && exit 0 ;;
     error) kit_die "could not read CI results for $version from GitHub (gh auth status?)" ;;
-    none) kit_die "no CI results for ${version:0:12} on $repo (pushed? KIT_CI_ALLOW_NONE=true to allow)" ;;
-    fail*) kit_die "CI failed for ${version:0:12}:${verdict#fail}" ;;
+    none) kit_gate_die "no CI results for ${version:0:12} on $repo (pushed? KIT_CI_ALLOW_NONE=true to allow)" ;;
+    fail*) kit_gate_die "CI failed for ${version:0:12}:${verdict#fail}" ;;
     pending*)
       if [ "$SECONDS" -ge "$deadline" ]; then
-        kit_die "CI hasn't finished for ${version:0:12}:${verdict#pending} (KIT_CI_WAIT=<seconds> to wait)"
+        kit_gate_die "CI hasn't finished for ${version:0:12}:${verdict#pending} (KIT_CI_WAIT=<seconds> to wait)"
       fi
       kit_info "CI still running:${verdict#pending}; checking again in ${poll}s"
       sleep "$poll"

@@ -27,6 +27,15 @@ kit_die() {
   exit 1
 }
 
+# kit_gate_die MESSAGE: a gate refusing, and how to go past it once, on
+# purpose (the step's name comes from the hook running it: KIT_STEP).
+kit_gate_die() {
+  local hint=""
+  [ -z "${KIT_STEP:-}" ] ||
+    hint=" To go past it once, on purpose: KIT_SKIP=$(basename "$KIT_STEP") KIT_SKIP_REASON=\"why\" before the command (warned and notified)"
+  kit_die "$1.$hint"
+}
+
 # ------------------------------------------------------------------ values
 
 # kit_is_true VALUE: 1, true, yes, on (any case).
