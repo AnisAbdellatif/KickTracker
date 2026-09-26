@@ -111,6 +111,12 @@ Follow the phase order in §20. Don't build ahead of the current phase without a
 - **Never call the real Kick while developing or testing.** Everything runs against the
   simulator (`sim/`). The only code allowed to reach the real Kick before phase 5 is the
   recorder (§17.1), run by hand by the owner.
+- **The one exception is the sandbox's opt-in real-Kick mode** (`.kamal/sandbox/README.md`):
+  the owner creates it with `KT_SANDBOX_KICK=real` and the sandbox's own Kick app in
+  `.kamal/sandbox/kick.env`. Agents never turn it on, never put production's Kick app
+  there (its subscription sync would remove production's webhooks), never commit
+  `kick.env`, and never weaken the secrets hook's check against production's client id.
+  Tests and the deploy rehearsal always use the fake Kick.
 - Every Kick URL and key comes from **configuration** (`KICK_API_URL`, `KICK_ID_URL`,
   `KICK_V2_URL`, `PUSHER_URL`, `KICK_PUBLIC_KEY`). No code path may know or check whether
   it is talking to the simulator; something that only works against the simulator is a

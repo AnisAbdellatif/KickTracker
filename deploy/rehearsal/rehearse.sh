@@ -59,7 +59,8 @@ psql_q() { dc exec -T db psql -U kick_tracker -d kick_tracker -Atc "$1"; }
 up() {
   say "a fresh sandbox: reset, then up (the working tree built, the stack and the fake Kick started, everything deployed, the channels tracked)"
   "$KIT" sandbox reset --yes
-  "$KIT" sandbox up
+  # Always the fake Kick: the load, the channels and the webhook count are its.
+  KT_SANDBOX_KICK=fake "$KIT" sandbox up
   V1="sandbox-$(cat "$SANDBOX_WORK/version")"
 
   # v2: v1 plus a migration on a hypertable the collectors write to all
