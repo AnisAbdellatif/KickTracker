@@ -8,6 +8,7 @@ set -euo pipefail
 
 mode=$(kick_mode)
 sync_deploy
+[ -f "$SERVER_DIR/secrets/app.env" ] && site_settings
 docker build -q -t "$DB_IMAGE" "$REPO/deploy/db" >/dev/null
 docker network inspect kamal >/dev/null 2>&1 || docker network create kamal >/dev/null
 dc up -d --wait db rabbitmq

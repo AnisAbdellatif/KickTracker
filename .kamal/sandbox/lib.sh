@@ -58,6 +58,34 @@ stop_sim() {
   return 0
 }
 
+# site_settings: what the site needs to be served on this machine, none of
+# it secret, so applied on every `up` too (a sandbox made before a change
+# here gets it without a reset): Caddy's hosts and /admin allowlist, and the
+# public URL the app builds links with (invitations: http://localhost:8080).
+site_settings() {
+  local secrets=$SERVER_DIR/secrets file
+  # Plain HTTP on 127.0.0.1:8080 (compose.sandbox.yml): the site on
+  # localhost, the ingress on 127.0.0.1. Through Docker's port forwarding a
+  # browser here arrives from a Docker network's gateway, not 127.0.0.1:
+  # Docker's private ranges are allowed on /admin (Caddy listens on
+  # 127.0.0.1 only, so nothing outside this machine reaches it).
+  printf 'SITE_HOST=http://localhost\nINGRESS_HOST=http://127.0.0.1\nACME_EMAIL=ops@example.org\nADMIN_ALLOW=127.0.0.1/32 172.16.0.0/12 192.168.0.0/16\n' \
+    >"$secrets/stack.env"
+  for file in "$secrets/app.env" "$secrets/collector.env"; do
+    set_env "$file" PHX_URL_SCHEME http
+    set_env "$file" PHX_URL_PORT 8080
+  done
+}
+
+# set_env FILE NAME VALUE: NAME=VALUE in an env file, replaced or added.
+set_env() {
+  if grep -q "^$2=" "$1"; then
+    sed -i "s|^$2=.*|$2=$3|" "$1"
+  else
+    printf '%s=%s\n' "$2" "$3" >>"$1"
+  fi
+}
+
 # The channels the fake Kick runs, from the scenario.
 channels() { grep -o 'slug: "[^"]*"' "$SCENARIO" | cut -d'"' -f2 | tr '\n' ' '; }
 
