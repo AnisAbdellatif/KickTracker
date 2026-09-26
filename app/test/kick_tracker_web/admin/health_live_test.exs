@@ -51,6 +51,19 @@ defmodule KickTrackerWeb.Admin.HealthLiveTest do
     assert row.coverage.api_24h == nil
   end
 
+  test "a channel added while the long coverage is cached shows at once" do
+    Application.put_env(:kick_tracker, :cache, true)
+    on_exit(fn -> Application.put_env(:kick_tracker, :cache, false) end)
+    KickTracker.Cache.clear()
+    now = DateTime.utc_now()
+
+    # Cached with no channels (a new instance, before an import).
+    assert Health.long_coverage(now) == %{}
+
+    channel = Fixtures.channel!(tracked_since: DateTime.add(now, -2, :hour))
+    assert %{api_all: +0.0} = Health.long_coverage(now)[channel.id]
+  end
+
   test "shows the collectors: who collects, who stands by, who is down, writes waiting", %{
     conn: conn
   } do

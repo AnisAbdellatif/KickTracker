@@ -85,12 +85,15 @@ defmodule KickTracker.Health do
   Poll and chat coverage over the last 30 days and since each channel was
   added, by channel id, for the health page (the alerts don't need it).
   It reads every period since the oldest channel was added, and moves
-  slowly, so it is kept for five minutes.
+  slowly, so it is kept for five minutes, for as long as the channels stay
+  the same (a channel just added shows at once).
   """
   @spec long_coverage(DateTime.t()) :: %{integer() => map()}
   def long_coverage(now \\ DateTime.utc_now()) do
-    KickTracker.Cache.fetch({__MODULE__, :long_coverage}, 300, fn ->
-      channels = Channels.list_all()
+    channels = Channels.list_all()
+    key = {__MODULE__, :long_coverage, Enum.map(channels, &{&1.id, &1.tracked_since})}
+
+    KickTracker.Cache.fetch(key, 300, fn ->
       month_ago = DateTime.add(now, -30, :day)
 
       periods =
