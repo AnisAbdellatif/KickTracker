@@ -8,7 +8,8 @@ defmodule Sim.Fixtures.LeakCheck do
   What counts as sensitive here is deliberately simpler than the
   anonymizer's rules, so a gap in those rules shows up as a leak:
 
-    * strings under `username`, `slug`, `channel_slug`, `display_name`;
+    * strings under `username`, `slug`, `channel_slug`, `display_name`,
+      `host_username`;
     * strings of 6+ characters under `content`;
     * integers of 4+ digits under `id` or any `*_id` key;
     * strings of 8+ characters under `id`, `uuid` or any `*_id` key (UUIDs,
@@ -22,7 +23,7 @@ defmodule Sim.Fixtures.LeakCheck do
 
   @keep_contexts ~w(category categories subcategory subcategories recent_categories
                     parent_category emote emotes badge badges badges_v2 gift reward)
-  @name_keys ~w(username slug channel_slug display_name)
+  @name_keys ~w(username slug channel_slug display_name host_username)
   @safe_id_keys ~w(category_id subcategory_id parent_category_id emote_id badge_id
                    gift_id reward_id subscription_id message_id)
 
