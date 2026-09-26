@@ -165,11 +165,17 @@ defmodule KickTrackerWeb.SiteComponents do
   def event_label("host"), do: gettext("Host")
   def event_label("host_in"), do: gettext("Hosted by")
   def event_label("host_out"), do: gettext("Hosting")
+  def event_label("hosted_by"), do: gettext("Hosted by")
+  def event_label("hosting"), do: gettext("Hosting")
   def event_label(_), do: gettext("Event")
 
   @doc "Labels for every event kind, for charts that name them (§13.6)."
   def event_labels,
-    do: Map.new(~w(raid_in raid_out host host_in host_out), &{&1, event_label(&1)})
+    do:
+      Map.new(
+        ~w(raid_in raid_out host host_in host_out hosted_by hosting),
+        &{&1, event_label(&1)}
+      )
 
   @doc """
   The sum of figures that may be unknown (`nil`): unknown if any part is,

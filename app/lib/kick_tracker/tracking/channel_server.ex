@@ -179,11 +179,10 @@ defmodule KickTracker.Tracking.ChannelServer do
       else: {:noreply, state}
   end
 
-  # A host, sent or received (project.md §16): kept as sent until real ones
-  # show what to parse.
+  # A host, sent or received (project.md §16).
   def handle_info({:pusher_raw, name, pusher_channel, data, at}, state) do
     record(state, [
-      {:channel_event, state.channel.id, ChannelEvents.raw(name, pusher_channel, data, at)}
+      {:channel_event, state.channel.id, ChannelEvents.row(name, pusher_channel, data, at)}
     ])
 
     {:noreply, state}

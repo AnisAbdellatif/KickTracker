@@ -359,30 +359,37 @@ defmodule KickTracker.Tracking.ChatSimTest do
     end
   end
 
-  test "a host is stored as sent; other unknown events are not", %{channel: c} do
+  test "a host is stored with who and how many; other unknown events are not", %{channel: c} do
     topic = "chatrooms.#{c.chatroom_id}.v2"
 
-    frame = fn name ->
-      Jason.encode!(%{"event" => name, "channel" => topic, "data" => ~s({"opaque":"a host"})})
+    frame = fn name, data ->
+      Jason.encode!(%{"event" => name, "channel" => topic, "data" => Jason.encode!(data)})
     end
 
+    host = %{
+      "chatroom_id" => c.chatroom_id,
+      "host_username" => "SomeHost",
+      "number_viewers" => 42,
+      "optional_message" => "hello"
+    }
+
     Sim.Pusher.Hub.broadcast(topic, [
-      frame.("App\\Events\\StreamHostEvent"),
-      frame.("App\\Events\\SomethingElse")
+      frame.("App\\Events\\StreamHostEvent", host),
+      frame.("App\\Events\\SomethingElse", %{"x" => 1})
     ])
 
     assert eventually(fn -> rows("channel_events", ["id"]) != [] end)
     settle()
 
-    assert [%{channel_id: id, kind: "hosted_by", viewers: nil, payload: payload}] =
+    assert [%{channel_id: id, kind: "hosted_by", other_channel: "SomeHost", viewers: 42} = row] =
              rows("channel_events", ["id"])
 
     assert id == c.id
 
-    assert payload == %{
+    assert row.payload == %{
              "event" => "App\\Events\\StreamHostEvent",
              "pusher_channel" => topic,
-             "data" => %{"opaque" => "a host"}
+             "data" => Map.delete(host, "optional_message")
            }
   end
 

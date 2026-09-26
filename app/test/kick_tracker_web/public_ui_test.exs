@@ -157,6 +157,39 @@ defmodule KickTrackerWeb.PublicUITest do
       refute html =~ "somegifter"
     end
 
+    test "notable hosts say who hosted whom, with the viewers taken along", %{
+      conn: conn,
+      channel: c
+    } do
+      at = DateTime.add(DateTime.utc_now(), -3600)
+
+      for {name, data} <- [
+            {"App\\Events\\StreamHostEvent",
+             %{"host_username" => "SomeHost", "number_viewers" => 542}},
+            {"App\\Events\\ChatMoveToSupportedChannelEvent",
+             %{"slug" => "otherstreamer", "hosted" => %{"viewers_count" => 1}}},
+            {"App\\Events\\StreamHostEvent", %{}}
+          ] do
+        row = KickTracker.ChannelEvents.row(name, "x", data, at)
+        :ok = KickTracker.Stats.insert_channel_event(Map.put(row, :channel_id, c.id))
+      end
+
+      {:ok, view, _} = live(conn, "/")
+
+      text =
+        view
+        |> element("#notable")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.text()
+        |> String.replace(~r/\s+/, " ")
+
+      assert text =~ "somestreamer hosted by SomeHost · 542 viewers"
+      assert text =~ "somestreamer hosting otherstreamer · 1 viewer"
+      # Who and how many unknown: said as much, no number made up.
+      assert text =~ "somestreamer was hosted"
+    end
+
     test "sparklines come from cacheable JSON, and move with each minute", %{
       conn: conn,
       channel: c

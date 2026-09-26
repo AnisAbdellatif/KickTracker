@@ -226,7 +226,16 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
   receiving channel's `chatrooms.<id>.v2` and
   `App\Events\ChatMoveToSupportedChannelEvent` on the hosting channel's
   `channel.<id>`, half a second apart for a host between two tracked
-  channels. Their fields are still unseen.
+  channels.
+- Seen in the sandbox's real-Kick mode (2026-09-26, 4 hosts, fixtures in
+  `fixtures/pusher/20260926T203429Z-pusher__*.jsonl`): `StreamHostEvent`
+  carries `chatroom_id`, `host_username` (a username, not a slug or id),
+  `number_viewers` and `optional_message` (free text, may be null);
+  `ChatMoveToSupportedChannelEvent` carries the hosted channel's `slug` and
+  a `hosted` object (`slug`, `username`, `viewers_count`, picture,
+  thumbnail, category) plus the whole hosting `channel` (with its playback
+  URL and livestream). Both counts were the hosting channel's own viewers.
+  Neither carries a time.
 - Chat stays here rather than on the chat webhook: a webhook is one HTTP
   request per message, heavy on busy channels, and capped at 1 000 channels
   for an unverified app. The webhook is the official fallback if Pusher stops.
@@ -1185,9 +1194,11 @@ channel_events     (id, channel_id, occurred_at,
                     kind: hosted_by | hosting,
                     other_channel NULL, viewers NULL, dedup_key, payload jsonb,
                     UNIQUE (channel_id, dedup_key))
-                   -- hosts as received (occurred_at: our receive time),
-                   -- payload {event, pusher_channel, data} as sent; other
-                   -- figures unknown until parsed from real ones (§16).
+                   -- hosts (occurred_at: our receive time); other_channel:
+                   -- the host's username (hosted_by) or the hosted slug
+                   -- (hosting), viewers: the viewers taken along; payload
+                   -- {event, pusher_channel, data} with only the fields
+                   -- read (§2.4)
                    -- Other unknown chat-feed events are logged by name only
 ```
 
@@ -1252,7 +1263,8 @@ channel_events     (id, channel_id, occurred_at,
   `webhook_events`) and usernames (`kick_users`, event bodies) count as
   personal data even without message text. Chat text is stored only by chat
   logging (§12.8). Usernames live in one table, so deletion requests touch
-  one place plus the raw event bodies.
+  one place plus the raw event bodies, and hosts, which name the other
+  channel by its owner's username or slug (`channel_events.other_channel`).
 - Nothing from v2 beyond `followers_count` and the chatroom id (which
   chat needs) is stored.
 
@@ -1781,8 +1793,7 @@ Still open:
    from a datacenter and this isn't, it becomes the follower source. Run
    `mix record.probe` and `mix record.v2` from the VPS.
 3. **Pusher from a datacenter IP**, any limit on subscriptions per
-   connection. Host event names: answered (§2.4); their fields: stored raw
-   in production until parsed.
+   connection. Host events: answered and parsed (§2.4).
 4. **Outgoing raids:** answered: the hosting channel's `channel.<id>` feed
    carries `ChatMoveToSupportedChannelEvent`.
 
