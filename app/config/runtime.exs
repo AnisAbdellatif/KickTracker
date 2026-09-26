@@ -163,6 +163,8 @@ config :kick_tracker, :alerts,
   webhook_url: System.get_env("ALERT_WEBHOOK_URL"),
   telegram_bot_token: System.get_env("TELEGRAM_BOT_TOKEN"),
   telegram_chat_id: System.get_env("TELEGRAM_CHAT_ID"),
+  ntfy_url: System.get_env("NTFY_URL"),
+  ntfy_token: System.get_env("NTFY_TOKEN"),
   heartbeat_url: System.get_env("HEARTBEAT_URL")
 
 # Where privacy and removal requests go (project.md §18.3).

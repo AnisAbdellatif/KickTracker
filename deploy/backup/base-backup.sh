@@ -9,10 +9,10 @@
 #
 # Needs nothing from cron's environment: WAL-G's storage settings are the
 # database container's own (secrets/db.env); BACKUP_HEARTBEAT_URL (pinged
-# on success) is read from secrets/db.env, and ALERT_WEBHOOK_URL / TELEGRAM_*
-# (told about any failure) from secrets/collector.env or app.env. Each can
-# be overridden from the environment, as can COMPOSE_FILE (default
-# compose.single.yml) and KEEP_FULL (default 7).
+# on success) is read from secrets/db.env, and ALERT_WEBHOOK_URL /
+# TELEGRAM_* / NTFY_* (told about any failure) from secrets/collector.env or
+# app.env. Each can be overridden from the environment, as can COMPOSE_FILE
+# (default compose.single.yml) and KEEP_FULL (default 7).
 set -eu
 
 DEPLOY_DIR=$(cd "$(dirname "$0")/.." && pwd)

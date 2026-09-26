@@ -19,8 +19,8 @@ defmodule KickTracker.Alerts do
   Web nodes and the leading collector both check; a transaction lock lets
   one check at a time, and a check that finds another running skips.
   """
-  @spec run(DateTime.t(), (String.t() -> term())) :: [map()]
-  def run(now \\ DateTime.utc_now(), notify \\ &Notifier.send/1) do
+  @spec run(DateTime.t(), (String.t(), Notifier.priority() -> term())) :: [map()]
+  def run(now \\ DateTime.utc_now(), notify \\ &Notifier.send/2) do
     {:ok, open} =
       Repo.transaction(
         fn ->
@@ -51,11 +51,11 @@ defmodule KickTracker.Alerts do
       case problems[a.key] do
         nil ->
           Repo.update_all(from(x in "alerts", where: x.id == ^a.id), set: [resolved_at: now])
-          notify.("✅ resolved: " <> a.message)
+          notify.("✅ resolved: " <> a.message, :low)
 
         p ->
           remind? = a.notified_at == nil or DateTime.diff(now, a.notified_at) > @remind_s
-          if remind?, do: notify.("🔴 still: " <> p.message)
+          if remind?, do: notify.("🔴 still: " <> p.message, :default)
 
           Repo.update_all(from(x in "alerts", where: x.id == ^a.id),
             set:
@@ -65,7 +65,7 @@ defmodule KickTracker.Alerts do
     end
 
     for {key, p} <- problems, not MapSet.member?(open_keys, key) do
-      notify.("🔴 " <> p.message)
+      notify.("🔴 " <> p.message, :high)
 
       Repo.insert_all(
         "alerts",

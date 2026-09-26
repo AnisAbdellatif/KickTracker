@@ -3,8 +3,8 @@
 # certificate expiry. Run from cron every 15 minutes, as the user that
 # deploys (it reads the decrypted secrets):
 #   */15 * * * *  /srv/kick_tracker/deploy/ops/check-host.sh
-# Tells ALERT_WEBHOOK_URL / Telegram (from secrets/collector.env or app.env)
-# about problems; checks the certificates of SITE_HOST and INGRESS_HOST
+# Tells ALERT_WEBHOOK_URL / Telegram / ntfy (from secrets/collector.env or
+# app.env) about problems; checks the certificates of SITE_HOST and INGRESS_HOST
 # (secrets/stack.env), or of HOSTS if set.
 set -u
 

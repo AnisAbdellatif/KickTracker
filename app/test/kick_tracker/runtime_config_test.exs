@@ -7,7 +7,7 @@ defmodule KickTracker.RuntimeConfigTest do
 
   use ExUnit.Case, async: false
 
-  @empty ~w(HEARTBEAT_URL ALERT_WEBHOOK_URL SHADOW_DATABASE_URL MAIN_DATABASE_URL KICK_PUBLIC_KEY BACKFILL_DAYS COLLECTOR_STATUS_PORT)
+  @empty ~w(HEARTBEAT_URL ALERT_WEBHOOK_URL NTFY_URL NTFY_TOKEN SHADOW_DATABASE_URL MAIN_DATABASE_URL KICK_PUBLIC_KEY BACKFILL_DAYS COLLECTOR_STATUS_PORT)
 
   setup do
     saved = Map.new(@empty, &{&1, System.get_env(&1)})
@@ -27,6 +27,8 @@ defmodule KickTracker.RuntimeConfigTest do
 
     assert app[:alerts][:heartbeat_url] == nil
     assert app[:alerts][:webhook_url] == nil
+    assert app[:alerts][:ntfy_url] == nil
+    assert app[:alerts][:ntfy_token] == nil
     assert app[:kick][:public_key] == nil
     assert app[:collector][:shadow_database_url] == nil
     assert app[:collector][:main_database_url] == nil

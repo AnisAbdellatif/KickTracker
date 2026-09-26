@@ -40,11 +40,13 @@ load_alert_settings() {
   ALERT_WEBHOOK_URL=$(setting ALERT_WEBHOOK_URL "$SECRETS_DIR/collector.env" "$SECRETS_DIR/app.env")
   TELEGRAM_BOT_TOKEN=$(setting TELEGRAM_BOT_TOKEN "$SECRETS_DIR/collector.env" "$SECRETS_DIR/app.env")
   TELEGRAM_CHAT_ID=$(setting TELEGRAM_CHAT_ID "$SECRETS_DIR/collector.env" "$SECRETS_DIR/app.env")
+  NTFY_URL=$(setting NTFY_URL "$SECRETS_DIR/collector.env" "$SECRETS_DIR/app.env")
+  NTFY_TOKEN=$(setting NTFY_TOKEN "$SECRETS_DIR/collector.env" "$SECRETS_DIR/app.env")
 }
 
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' '; }
 
-# alert MESSAGE: logs it, and sends it to the webhook and/or Telegram.
+# alert MESSAGE: logs it, and sends it to the webhook, Telegram and/or ntfy.
 # Never fails (a broken alert channel mustn't hide the original error).
 alert() {
   echo "$(date -u +%FT%TZ) ALERT: $1" >&2
@@ -60,8 +62,14 @@ alert() {
       "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" >/dev/null 2>&1 ||
       echo "could not reach Telegram" >&2
   fi
-  if [ -z "${ALERT_WEBHOOK_URL:-}" ] && [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
-    echo "no ALERT_WEBHOOK_URL or TELEGRAM_BOT_TOKEN set: this alert went nowhere" >&2
+  if [ -n "${NTFY_URL:-}" ]; then
+    # The token goes to curl on stdin, not on its command line (ps).
+    { if [ -n "${NTFY_TOKEN:-}" ]; then printf 'header = "Authorization: Bearer %s"\n' "$NTFY_TOKEN"; fi; } |
+      curl -fsS -m 20 -K - -H 'Priority: high' --data-binary "$_msg" "$NTFY_URL" >/dev/null 2>&1 ||
+      echo "could not reach NTFY_URL" >&2
+  fi
+  if [ -z "${ALERT_WEBHOOK_URL:-}" ] && [ -z "${TELEGRAM_BOT_TOKEN:-}" ] && [ -z "${NTFY_URL:-}" ]; then
+    echo "no ALERT_WEBHOOK_URL, TELEGRAM_BOT_TOKEN or NTFY_URL set: this alert went nowhere" >&2
   fi
   return 0
 }
