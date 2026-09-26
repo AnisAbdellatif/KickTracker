@@ -96,6 +96,26 @@ defmodule KickTracker.PrivacyTest do
     assert Enum.any?(bodies, &(&1.body =~ "\"x\""))
   end
 
+  test "a host's stored payload naming the person is scrubbed; the host stays" do
+    c = channel!()
+
+    row =
+      KickTracker.ChannelEvents.raw(
+        "App\\Events\\StreamHostEvent",
+        "chatrooms.1.v2",
+        %{"by" => TestKick.user(@person, "someone")},
+        DateTime.utc_now()
+      )
+
+    :ok = KickTracker.Stats.insert_channel_event(Map.put(row, :channel_id, c.id))
+    assert Privacy.find(@person).channel_events == 1
+
+    assert %{channel_events: 1} = Privacy.delete(@person)
+    assert [%{kind: "hosted_by", payload: payload}] = rows("channel_events", ["id"])
+    refute Jason.encode!(payload) =~ "someone"
+    assert Privacy.find(@person).channel_events == 0
+  end
+
   test "a deletion forgets whom earlier privacy searches named in the audit log" do
     Repo.insert_all("kick_users", [
       %{id: @person, username: "someone", seen_at: DateTime.utc_now()},

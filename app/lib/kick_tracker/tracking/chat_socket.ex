@@ -285,6 +285,10 @@ defmodule KickTracker.Tracking.ChatSocket do
         Logger.warning("chat feed error for channel #{state.channel.id}: #{code} #{message}")
         state
 
+      {:raw, name, topic, data} ->
+        to_channel(state, {:pusher_raw, name, topic, data, DateTime.utc_now()})
+        state
+
       {:other, name, topic} ->
         to_channel(state, {:pusher_other, name, topic})
         state

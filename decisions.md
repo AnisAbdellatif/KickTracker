@@ -115,9 +115,9 @@ Our own GenServer over Mint rather than WebSockex: the process owns the connecti
 
 ## Raids and Hosts
 
-**Current:** Not parsed yet. Their Pusher event names were never recorded, so nothing guesses them: every chat-feed event the parser doesn't know is reported to the `ChannelServer` by name only (its data is dropped) and logged once per name per channel. `channel_events` exists (with a `dedup_key` unique per channel, and `other_channel` as text) for when a recording shows the names and fields. (updated 2026-09-24 13:40)
+**Current:** Kick's hosts (its raids) are stored raw. `StreamHostEvent` (receiving channel's chatroom) and `ChatMoveToSupportedChannelEvent` (hosting channel's feed) become `channel_events` rows on the channel whose feed carried them, kinds `hosted_by` and `hosting`, with the event, Pusher channel and data as sent in `payload`, `occurred_at` our receive time, `other_channel` and `viewers` null, through the journal like every collected write. The key is a hash of the time and the payload. Privacy deletions scrub these payloads. Every other chat-feed event the parser doesn't know is still logged by name only. Next: a parser written from the stored payloads (anonymized into `fixtures/`), then the stream chart markers, the hosting channel's change log and the channel page's host lists. (updated 2026-09-26 18:10)
 
-AGENTS.md forbids writing payload shapes from memory or documentation. Logging unknown names means the first real raid seen in production (or a recording) says what to parse, without having stored anything it carried.
+The names were learnt from production's logs (four hosts in one night, one of them between two tracked channels, both sides half a second apart), but the logging kept names only, so no host's fields have been seen. AGENTS.md forbids writing a parser from guesses, and a recording session would have to catch a host live; storing what arrives costs nothing (a few a night) and lets the parser be written from real payloads, which then fill the rows already stored. Kept on the channel whose feed carried the event rather than matched into one row per host: both sides aren't always tracked, and matching needs the fields we haven't seen. Not scrubbed of text before storing: the fields are unknown; a host isn't a chat message, and the payload is revisited when the parser is written.
 
 ## Frontend
 

@@ -221,6 +221,12 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
     Message ids are UUIDs. Senders carry `identity.badges_v2`.
   - Nothing arrived on `channel.<id>` in 20 minutes besides the subscription
     confirmation. No raid or host seen yet.
+- Observed in production (2026-09-25, event names only, from the logs):
+  hosts (Kick's raids) come as `App\Events\StreamHostEvent` in the
+  receiving channel's `chatrooms.<id>.v2` and
+  `App\Events\ChatMoveToSupportedChannelEvent` on the hosting channel's
+  `channel.<id>`, half a second apart for a host between two tracked
+  channels. Their fields are still unseen.
 - Chat stays here rather than on the chat webhook: a webhook is one HTTP
   request per message, heavy on busy channels, and capped at 1 000 channels
   for an unverified app. The webhook is the official fallback if Pusher stops.
@@ -855,9 +861,10 @@ old one and retries every minute.
   `channel.<kick channel id>`; answers pings, pings after the activity
   timeout, reconnects if no pong comes, or if the upgrade doesn't complete
   within 15s. Waits until the chatroom id is known (from v2).
-- Sends `{:chat, message}` (sender, id, time) to its `ChannelServer`, and
-  the names of events it doesn't know (raids and hosts, until recorded).
-  No message text is kept.
+- Sends `{:chat, message}` (sender, id, time) to its `ChannelServer`, the
+  two host events with their data as sent (stored raw in `channel_events`
+  until a parser is written from real ones), and the names of other events
+  it doesn't know. No message text is kept.
 - Reconnects with exponential backoff (1s up to 30s, with jitter), reset
   only after a connection stayed up for a minute, and records chat
   coverage when connected and disconnected. A chatroom id that changes
@@ -1175,12 +1182,13 @@ support_events     (message_id PK, channel_id, occurred_at,
                     tier, payload jsonb)     -- giftee ids, expiry, gift type;
                                              -- never message text or usernames
 channel_events     (id, channel_id, occurred_at,
-                    kind: raid_in | raid_out | host | ...,
+                    kind: hosted_by | hosting,
                     other_channel NULL, viewers NULL, dedup_key, payload jsonb,
                     UNIQUE (channel_id, dedup_key))
-                   -- created; filled once raid/host event names are
-                   -- recorded (§16). Unknown chat-feed events are logged
-                   -- by name only meanwhile
+                   -- hosts as received (occurred_at: our receive time),
+                   -- payload {event, pusher_channel, data} as sent; other
+                   -- figures unknown until parsed from real ones (§16).
+                   -- Other unknown chat-feed events are logged by name only
 ```
 
 - Follows and support events carry **no stream id**: which stream they
@@ -1692,9 +1700,10 @@ Still open:
    from a datacenter and this isn't, it becomes the follower source. Run
    `mix record.probe` and `mix record.v2` from the VPS.
 3. **Pusher from a datacenter IP**, any limit on subscriptions per
-   connection, and the exact raid/host event names.
-4. **Outgoing raids:** visible from the raiding channel's feed, or only in the
-   target's?
+   connection. Host event names: answered (§2.4); their fields: stored raw
+   in production until parsed.
+4. **Outgoing raids:** answered: the hosting channel's `channel.<id>` feed
+   carries `ChatMoveToSupportedChannelEvent`.
 
 ## 17. Development: recorded payloads and a fake Kick
 
@@ -1793,8 +1802,8 @@ minute, and a Pusher websocket carrying each stream's chat (with the
 handshake, pings, and the disconnect codes real Pusher uses). The recorder
 drives all of it unchanged, and its payload shapes (API, webhooks, chat
 frames) are checked against `fixtures/` by tests, so a shape Kick changes
-shows up when we re-record. Raids and hosts wait for a recording (their
-event names are unknown). A control API (`/_sim`) and CLI (`mix sim.ctl`)
+shows up when we re-record. Hosts wait for real payloads (stored raw in
+production, §16) before the simulator sends them. A control API (`/_sim`) and CLI (`mix sim.ctl`)
 drive it by hand: start or end a stream now, change title or category,
 send any event, move or speed up the clock, drop the next N webhooks, set
 faults, disconnect Pusher clients, expire tokens. Manual changes are

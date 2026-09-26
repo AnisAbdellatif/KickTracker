@@ -7,11 +7,17 @@ defmodule KickTracker.Kick.Pusher do
   sender, the message id and the time are read: **never the text**
   (AGENTS.md §7). Chat times end in `+00:00`, not `Z`.
 
-  Raid and host events haven't been recorded yet, so their names are
-  unknown (project.md §16): every event this module doesn't know comes out
-  as `{:other, name, channel}`, without its data, so the caller can notice
+  Hosts (Kick's raids) come as two events whose shape hasn't been seen
+  yet: `StreamHostEvent` in the receiving channel's chatroom and
+  `ChatMoveToSupportedChannelEvent` on the hosting channel's feed. They
+  come out as `{:raw, name, channel, data}` with their data as sent, to be
+  stored and parsed once real ones show their fields (project.md §16).
+  Every other event this module doesn't know comes out as
+  `{:other, name, channel}`, without its data, so the caller can notice
   new names without keeping what they carry.
   """
+
+  @raw ["App\\Events\\StreamHostEvent", "App\\Events\\ChatMoveToSupportedChannelEvent"]
 
   @type frame ::
           {:connected, activity_timeout_s :: pos_integer()}
@@ -26,6 +32,7 @@ defmodule KickTracker.Kick.Pusher do
                at: DateTime.t()
              }}
           | {:error, integer() | nil, String.t() | nil}
+          | {:raw, String.t(), String.t() | nil, term()}
           | {:other, String.t(), String.t() | nil}
           | :invalid
 
@@ -74,7 +81,14 @@ defmodule KickTracker.Kick.Pusher do
     end
   end
 
+  defp decode(event, frame) when event in @raw,
+    do: {:raw, event, frame["channel"], data(frame) || frame["data"]}
+
   defp decode(event, frame), do: {:other, event, frame["channel"]}
+
+  @doc "The events kept as sent, for their channel's `channel_events`."
+  @spec raw_events() :: [String.t()]
+  def raw_events, do: @raw
 
   # `data` arrives as a JSON string (sometimes already an object).
   defp data(%{"data" => d}) when is_binary(d) do

@@ -39,7 +39,7 @@ defmodule KickTracker.Tracking.ChannelServer do
   @held_meta_window_s 300
   @max_catch_up_attempts 3
 
-  alias KickTracker.{Collector, Events, Stats, Tracking}
+  alias KickTracker.{ChannelEvents, Collector, Events, Stats, Tracking}
   alias KickTracker.Channels.Channel
   alias KickTracker.Collector.{Journal, Tracked}
   alias KickTracker.Collector.Sources.{Followers, Viewers}
@@ -166,8 +166,18 @@ defmodule KickTracker.Tracking.ChannelServer do
     {:noreply, %{state | chat: ChatMinutes.add(state.chat, message)}}
   end
 
-  # A chat-feed event we don't know (raids and hosts aren't recorded yet,
-  # project.md §16): its name is logged once, its data never kept.
+  # A host, sent or received (project.md §16): kept as sent until real ones
+  # show what to parse.
+  def handle_info({:pusher_raw, name, pusher_channel, data, at}, state) do
+    record(state, [
+      {:channel_event, state.channel.id, ChannelEvents.raw(name, pusher_channel, data, at)}
+    ])
+
+    {:noreply, state}
+  end
+
+  # A chat-feed event we don't know: its name is logged once, its data
+  # never kept.
   def handle_info({:pusher_other, name, pusher_channel}, state) do
     if MapSet.member?(state.unknown_events, name) do
       {:noreply, state}

@@ -48,6 +48,19 @@ defmodule KickTracker.Kick.PusherTest do
     assert Pusher.decode("nope") == :invalid
   end
 
+  test "hosts come out with their data as sent; their fields are not assumed" do
+    for name <- Pusher.raw_events() do
+      frame =
+        Jason.encode!(%{"event" => name, "channel" => "x.1", "data" => ~s({"opaque":[1,2]})})
+
+      assert Pusher.decode(frame) == {:raw, name, "x.1", %{"opaque" => [1, 2]}}
+    end
+
+    # Data that isn't JSON is kept as it came.
+    frame = Jason.encode!(%{"event" => hd(Pusher.raw_events()), "data" => "not json"})
+    assert {:raw, _, nil, "not json"} = Pusher.decode(frame)
+  end
+
   test "subscribing, as Kick's own chat does: no auth" do
     assert Jason.decode!(Pusher.subscribe(Pusher.chatroom(5))) == %{
              "event" => "pusher:subscribe",

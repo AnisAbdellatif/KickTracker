@@ -290,6 +290,33 @@ defmodule KickTracker.Tracking.ChatSimTest do
     refute inspect(dump) =~ "secret"
   end
 
+  test "a host is stored as sent; other unknown events are not", %{channel: c} do
+    topic = "chatrooms.#{c.chatroom_id}.v2"
+
+    frame = fn name ->
+      Jason.encode!(%{"event" => name, "channel" => topic, "data" => ~s({"opaque":"a host"})})
+    end
+
+    Sim.Pusher.Hub.broadcast(topic, [
+      frame.("App\\Events\\StreamHostEvent"),
+      frame.("App\\Events\\SomethingElse")
+    ])
+
+    assert eventually(fn -> rows("channel_events", ["id"]) != [] end)
+    settle()
+
+    assert [%{channel_id: id, kind: "hosted_by", viewers: nil, payload: payload}] =
+             rows("channel_events", ["id"])
+
+    assert id == c.id
+
+    assert payload == %{
+             "event" => "App\\Events\\StreamHostEvent",
+             "pusher_channel" => topic,
+             "data" => %{"opaque" => "a host"}
+           }
+  end
+
   test "a dropped connection is a recorded gap, then chat resumes", %{channel: c, socket: socket} do
     sim_ctl(:post, "/pusher/disconnect")
     assert eventually(fn -> not ChatSocket.subscribed?(socket) end)
