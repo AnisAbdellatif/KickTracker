@@ -524,3 +524,64 @@ a.card-surface:hover, .card-surface.is-link:hover {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+/* Short pages: the canvas reaches the bottom of the window. */
+body { min-height: 100dvh; }
+
+/* Admin sidebar (§13.8): sections with a small title, items with an icon;
+   the current page on the accent's soft ground. */
+.admin-nav-title {
+  padding: 0 .75rem .375rem;
+  color: var(--ink-subtle, var(--ink-muted));
+  font-size: .6875rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: .625rem;
+  padding: .4375rem .75rem;
+  border-radius: var(--radius-field);
+  color: var(--ink-muted);
+  font-size: .875rem;
+  font-weight: 500;
+  transition: background-color .15s, color .15s;
+}
+.admin-nav-item:hover { background: var(--surface-hover); color: var(--color-base-content); }
+.admin-nav-item.is-active {
+  background: color-mix(in oklab, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* A state in a word (admin): a dot and a soft ground in the state's colour. */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .375rem;
+  padding: .0625rem .5rem;
+  border-radius: 999px;
+  font-size: .75rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--tone, var(--ink-muted));
+  background: color-mix(in oklab, var(--tone, var(--ink-muted)) 14%, transparent);
+}
+.status-dot { width: .375rem; height: .375rem; border-radius: 999px; background: currentColor; }
+.tone-ok { --tone: var(--color-success); }
+.tone-warn { --tone: var(--color-warning); }
+.tone-error { --tone: var(--color-error); }
+.tone-info { --tone: var(--color-primary); }
+.tone-neutral { --tone: var(--ink-muted); }
+
+/* A stat tile's icon in its state's colour (neutral: the plain tile). */
+.stat-tile.tone-ok .icon-tile,
+.stat-tile.tone-warn .icon-tile,
+.stat-tile.tone-error .icon-tile {
+  color: var(--tone);
+  background: color-mix(in oklab, var(--tone) 14%, transparent);
+}
+.stat-tile.tone-error { border-color: color-mix(in oklab, var(--color-error) 45%, var(--color-base-300)); }
