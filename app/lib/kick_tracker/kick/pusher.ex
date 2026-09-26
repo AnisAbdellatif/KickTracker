@@ -9,11 +9,11 @@ defmodule KickTracker.Kick.Pusher do
   which only a channel with chat logging on keeps (§12.8, AGENTS.md §7).
   Chat times end in `+00:00`, not `Z`.
 
-  Hosts (Kick's raids) come as two events whose shape hasn't been seen
-  yet: `StreamHostEvent` in the receiving channel's chatroom and
-  `ChatMoveToSupportedChannelEvent` on the hosting channel's feed. They
-  come out as `{:raw, name, channel, data}` with their data as sent, to be
-  stored and parsed once real ones show their fields (project.md §16).
+  Hosts (Kick's raids) come as two events: `StreamHostEvent` in the
+  receiving channel's chatroom and `ChatMoveToSupportedChannelEvent` on the
+  hosting channel's feed. They come out as `{:raw, name, channel, data}`
+  with their data as sent; `KickTracker.ChannelEvents` reads them (KICK.md
+  §6.3).
   Every other event this module doesn't know comes out as
   `{:other, name, channel, data}`: the caller logs the name, and keeps the
   data only for a channel with chat logging on.

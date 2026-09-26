@@ -96,6 +96,7 @@ understanding their intent first.
 | Path | What | Notes |
 |---|---|---|
 | `project.md` | The design | Keep in sync with reality |
+| `KICK.md` | Everything known about Kick as a source: API, webhooks, website endpoints, Pusher, each fact with where it was seen | Correct it first when Kick behaves differently; new facts go here |
 | `app/` | Phoenix app, roles `collector` and `web` (§10) | One image, role chosen by `ROLE`. `app/AGENTS.md` holds Phoenix's own framework guidelines: follow them in `app/`; this file wins on conflict |
 | `ingress/receiver/` | Webhook receiver (§8.4) | Separate deployable, rarely changed, **never touches the database** |
 | `sim/` | The fake Kick + the recorder (§17) | All development and tests run against it |

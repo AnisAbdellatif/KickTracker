@@ -29,7 +29,9 @@ continuously and without gaps from day one; the website is the easy part.
 
 ## 2. Where the data comes from
 
-Four sources, each used for what only it does well.
+Four sources, each used for what only it does well. The full reference of
+what is known about each (fields, quirks, what production has received)
+is [KICK.md](KICK.md); this section is the part the design rests on.
 
 ### 2.1 Official public API: polling
 
@@ -1776,9 +1778,9 @@ Answered:
 
 Partly answered:
 
-- **Sub, gift and Kicks webhooks with the app token:** subscriptions are
-  accepted for a channel that hasn't authorized us; no delivery of those
-  types observed yet. Seven of the ten event types are still uncaptured:
+- **Sub, gift and Kicks webhooks with the app token:** delivered in
+  production for channels that never authorized us (KICK.md §4.1), but
+  not recorded into fixtures yet. Seven of the ten event types are still uncaptured:
   `channel.subscription.new`, `.renewal`, `.gifts`, `kicks.gifted`,
   `moderation.banned`, `channel.reward.redemption.updated` and
   `chat.message.sent`. Record a busy channel where people subscribe, gift
@@ -1792,12 +1794,11 @@ Still open:
 1. **Kick's webhook retry policy:** stop the ingress, trigger an event, watch
    whether and when it is delivered again. Decides how urgent stages 2 and 3
    are.
-2. **Does v2 answer from the VPS** (datacenter IP), not just from home?
-   And `api.kick.com/private/v1/channels/{slug}` (§2.3b): if v2 is blocked
-   from a datacenter and this isn't, it becomes the follower source. Run
-   `mix record.probe` and `mix record.v2` from the VPS.
-3. **Pusher from a datacenter IP**, any limit on subscriptions per
-   connection. Host events: answered and parsed (§2.4).
+2. ~~Does v2 answer from the VPS?~~ Yes: production has read followers
+   from the VPS since 2026-09-24 without a failed reading (KICK.md §5.1).
+3. **Pusher limits** per connection or IP. From a datacenter IP it works:
+   production keeps every channel's socket up from the VPS. Host events:
+   answered and parsed (§2.4).
 4. **Outgoing raids:** answered: the hosting channel's `channel.<id>` feed
    carries `ChatMoveToSupportedChannelEvent`.
 
