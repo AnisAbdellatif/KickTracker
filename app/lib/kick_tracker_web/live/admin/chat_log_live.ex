@@ -690,47 +690,45 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
               <ol :if={@tab == "messages"} id="chat-log-messages" class="pb-2">
                 <%= for {day, messages} <- by_day(@messages) do %>
                   <li class="day-divider">{day}</li>
-                  <li
-                    :for={m <- messages}
-                    id={"msg-#{m.channel_id}-#{m.message_id}"}
-                    class="chat-row"
-                  >
-                    <.avatar name={m.username || to_string(m.user_id)} class="mt-0.5 size-8 text-sm" />
-                    <div class="min-w-0 flex-1">
-                      <div class="flex flex-wrap items-baseline gap-x-2 text-xs">
-                        <.link
-                          patch={page_path(assigns, %{"users" => to_string(m.user_id)})}
-                          class="text-sm font-semibold hover:underline"
-                        >
-                          {m.username || m.user_id}
-                        </.link>
-                        <.link
-                          patch={page_path(assigns, %{"channels" => to_string(m.channel_id)})}
-                          class={["channel-pill", "avatar-#{hue(m.slug)}"]}
-                        >
-                          {m.slug}
-                        </.link>
-                        <time
-                          class="text-subtle tabular-nums"
-                          datetime={DateTime.to_iso8601(m.sent_at)}
-                          title={DateTime.to_iso8601(m.sent_at)}
-                        >
-                          {Calendar.strftime(m.local_at, "%H:%M:%S")}
-                        </time>
-                      </div>
-                      <p :if={m.reply_to_message_id} class="text-muted mt-0.5 text-xs">
-                        <.icon name="hero-arrow-uturn-left" class="size-3" />
-                        {gettext("reply")}
-                        <span :if={m.reply_to_user_id}>
-                          {gettext("to")}
-                          <.link
-                            patch={page_path(assigns, %{"users" => to_string(m.reply_to_user_id)})}
-                            class="hover:underline"
-                          >{m.reply_to_username || m.reply_to_user_id}</.link>
-                        </span>
-                      </p>
-                      <.message_content content={m.content} />
+                  <li :for={m <- messages} id={"msg-#{m.channel_id}-#{m.message_id}"} class="chat-msg">
+                    <div :if={m.reply_to_message_id} class="chat-reply">
+                      <.icon name="hero-arrow-uturn-left-mini" class="size-3.5 shrink-0" />
+                      <span class="shrink-0">{gettext("Replying to")}</span>
+                      <.link
+                        patch={
+                          m.reply_to_user_id &&
+                            page_path(assigns, %{"users" => to_string(m.reply_to_user_id)})
+                        }
+                        class="chat-reply-user shrink-0"
+                        style={user_hue(m.reply_to_user_id)}
+                      >@{m.reply_to_username || m.reply_to_user_id || "?"}</.link>
+                      <span
+                        :if={m.reply_to_content}
+                        class="min-w-0 truncate"
+                        title={m.reply_to_content}
+                      >
+                        : <.message_content content={m.reply_to_content} />
+                      </span>
                     </div>
+                    <p class="chat-line">
+                      <time
+                        class="chat-ts"
+                        datetime={DateTime.to_iso8601(m.sent_at)}
+                        title={DateTime.to_iso8601(m.sent_at)}
+                      >{Calendar.strftime(m.local_at, "%H:%M:%S")}</time>
+                      <.link
+                        patch={page_path(assigns, %{"channels" => to_string(m.channel_id)})}
+                        class={["channel-pill", "avatar-#{hue(m.slug)}"]}
+                        title={gettext("This channel's messages")}
+                      >{m.slug}</.link>
+                      <.link
+                        patch={page_path(assigns, %{"users" => to_string(m.user_id)})}
+                        class="chat-user"
+                        style={user_hue(m.user_id)}
+                        title={gettext("This user's messages")}
+                      >{m.username || m.user_id}</.link><span class="chat-sep">:</span>
+                      <.message_content content={m.content} />
+                    </p>
                   </li>
                 <% end %>
               </ol>
@@ -898,7 +896,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
     assigns = assign(assigns, :parts, ChatLog.parse_content(assigns.content))
 
     ~H"""
-    <p class="chat-text whitespace-pre-wrap break-words text-sm" phx-no-format><span :for={p <- @parts} class={p.type == :emote && "emote-combo"}><%= if p.type == :text do %>{p.text}<% else %><img class="emote" src={ChatLog.emote_url(p.id)} alt={p.name} title={p.name} loading="lazy" decoding="async" /><span :if={p.count > 1} class="combo-count">×{p.count}</span><% end %></span></p>
+    <span class="chat-text" phx-no-format><span :for={p <- @parts} class={p.type == :emote && "emote-combo"}><%= if p.type == :text do %>{p.text}<% else %><img class="emote" src={ChatLog.emote_url(p.id)} alt={p.name} title={p.name} loading="lazy" decoding="async" /><span :if={p.count > 1} class="combo-count">×{p.count}</span><% end %></span></span>
     """
   end
 
@@ -923,6 +921,11 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
   end
 
   defp hue(name), do: :erlang.phash2(name, 7) + 1
+
+  # A sender's colour, as in a chat: a hue drawn from their id, so the
+  # same person keeps it on every line and every visit.
+  defp user_hue(nil), do: nil
+  defp user_hue(user_id), do: "--u: #{:erlang.phash2(user_id, 360)}"
 
   defp period_label("1h"), do: gettext("1h")
   defp period_label("24h"), do: gettext("24h")
