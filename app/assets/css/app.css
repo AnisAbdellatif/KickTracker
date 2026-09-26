@@ -585,3 +585,30 @@ body { min-height: 100dvh; }
   background: color-mix(in oklab, var(--tone) 14%, transparent);
 }
 .stat-tile.tone-error { border-color: color-mix(in oklab, var(--color-error) 45%, var(--color-base-300)); }
+
+/* A coverage meter (admin health): a thin bar filled to its level. */
+.coverage-bar {
+  position: relative;
+  width: .3125rem;
+  height: 1rem;
+  border-radius: 2px;
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+.coverage-bar::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: var(--level);
+  background: var(--tone);
+}
+
+/* Label and value pairs in a card. */
+.kv-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .375rem 1rem;
+  font-size: .875rem;
+}
+.kv-list dt { color: var(--ink-muted); }
+.kv-list dd { text-align: end; font-variant-numeric: tabular-nums; }
