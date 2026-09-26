@@ -28,6 +28,15 @@ defmodule KickTrackerWeb.Router do
     plug KickTrackerWeb.Plugs.RateLimit
   end
 
+  # JSON for admin pages' charts: the admin's session, no page around it
+  # (the controller answers 401 without an admin).
+  pipeline :admin_api do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    plug KickTrackerWeb.Plugs.RateLimit
+    plug :fetch_current_admin
+  end
+
   ## Public site (project.md §13.2)
 
   scope "/", KickTrackerWeb do
@@ -108,6 +117,8 @@ defmodule KickTrackerWeb.Router do
       live "/subscriptions", SubscriptionsLive
       live "/dead-letters", DeadLettersLive
       live "/data", DataLive
+      live "/anomalies", AnomaliesLive, :index
+      live "/anomalies/:id", AnomaliesLive, :show
       live "/transfer", TransferLive
       live "/privacy", PrivacyLive
       live "/chat-log", ChatLogLive
@@ -136,6 +147,12 @@ defmodule KickTrackerWeb.Router do
       on_mount: [{KickTrackerWeb.AdminAuth, :require_admin}],
       csp_nonce_assign_key: :csp_nonce
     )
+  end
+
+  scope "/admin", KickTrackerWeb.Admin do
+    pipe_through :admin_api
+
+    get "/anomalies/:id/chart", AnomaliesController, :chart
   end
 
   # The Swoosh mailbox preview in development.

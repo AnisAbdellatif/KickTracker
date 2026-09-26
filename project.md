@@ -2005,6 +2005,50 @@ Done after everything else is set up and working (§20, phase 6).
 - Secrets encrypted in the repo (sops + age), never committed in clear.
 - Admin behind the private network in production, TOTP enforced.
 
+### 19.4 Audience anomalies (admin only, proof of concept)
+
+Signs that a stream's audience may not be what its viewer count says
+(viewbots), for an admin to review: `/admin/anomalies`, never on the
+public site. None is proof: a front-page placement, a followers-only chat
+or a watch party can look the same, so the page says what was seen and
+the figures it rests on, not a verdict.
+
+- **Rules, not a model** (`Metrics.Anomalies`, pure): each finding is a
+  plain rule with its evidence, so it can be checked and argued with.
+  - *Jump without chat*: the median of the 5 readings after a point is
+    at least 100 viewers and 30% above the 5 before, and chatters per
+    minute rose by less than a quarter as much. Not in the first 15
+    minutes (the start's ramp), nor within 5 minutes of an incoming host
+    (`hosted_by`).
+  - *Drop without chat*: the same downwards, with chat carrying on. Not
+    in the last 10 minutes, nor near an outgoing host (`hosting`).
+  - *Flat viewer count*: for 20 minutes or more, at 100 viewers or more,
+    the median change between readings is under a quarter of the
+    channel's usual (at most 1%, and always under 0.2%).
+  - *Full audience at the start*: the first three readings are at least
+    60% of the level after the first 15 minutes, well above the channel's
+    usual start, with no host and no stream ending in the 30 minutes
+    before.
+  - *Little chat for the viewers*: chatters per minute per viewer under
+    half the channel's usual.
+  - *Few follows for the hours watched*: under a third of the channel's
+    usual follows per 1 000 hours watched (only when follows are known
+    and the stream had 50 hours watched or more).
+- **Against the channel's own streams**: "usual" is the median over its
+  30 earlier ended, not excluded streams, and is unknown with fewer than
+  5 that have the figure. There's no comparison across channels yet.
+- **Only what was observed**: chat is compared only in minutes chat
+  coverage covers, windows never cross a gap in the readings, and a
+  figure that can't be computed is shown as "–".
+- **Computed when the page is opened**, from tables kept forever
+  (`viewer_samples`, `chat_minutes`, `channel_events`, `coverage`,
+  `stream_stats`); nothing is stored, so a changed rule applies to every
+  stream at once.
+- **Not yet**: per-chatter signals (one-message accounts, returning
+  chatters, chatting in several channels at once, account age from user
+  ids), comparison with similar channels, and admin verdicts on streams
+  to tune the rules against.
+
 ## 20. Next steps
 
 Tests are written alongside every step (§17.3), not as a step of their own.
