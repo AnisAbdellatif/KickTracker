@@ -40,9 +40,10 @@ defmodule KickTrackerWeb.Admin.DataLive do
   end
 
   @impl true
-  def handle_event("pick", %{"channel" => id}, socket),
+  def handle_info({KickTrackerWeb.Admin.ChannelPicker, "pick-channel", id}, socket),
     do: {:noreply, push_patch(socket, to: ~p"/admin/data?channel=#{id}")}
 
+  @impl true
   def handle_event("exclude", %{"stream" => id, "note" => note}, socket) do
     result(socket, Corrections.exclude(String.to_integer(id), note, socket.assigns.current_admin))
   end
@@ -165,20 +166,13 @@ defmodule KickTrackerWeb.Admin.DataLive do
             )}
           </:subtitle>
           <:actions>
-            <form id="pick-channel" phx-change="pick" class="flex items-center gap-2">
-              <.avatar
-                :if={@channel}
-                name={@channel.slug}
-                channel_id={@channel.id}
-                class="size-8 text-sm"
-              />
-              <label class="sr-only" for="pick-channel-select">{gettext("Channel")}</label>
-              <select id="pick-channel-select" name="channel" class="select select-sm w-64">
-                <option :for={c <- @channels} value={c.id} selected={@channel && @channel.id == c.id}>
-                  {c.slug}
-                </option>
-              </select>
-            </form>
+            <.live_component
+              :if={@channels != []}
+              module={KickTrackerWeb.Admin.ChannelPicker}
+              id="pick-channel"
+              channels={@channels}
+              selected={@channel}
+            />
           </:actions>
         </.page_header>
 

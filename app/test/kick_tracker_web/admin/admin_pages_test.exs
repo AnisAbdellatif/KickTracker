@@ -94,6 +94,19 @@ defmodule KickTrackerWeb.Admin.AdminPagesTest do
     assert Enum.sort(ids) == Enum.sort([c.id, other.id])
   end
 
+  test "the corrections page's channel is searched for and picked", %{conn: conn} do
+    a = channel!(slug: "somestreamer")
+    b = channel!(slug: "otherstreamer")
+    {:ok, view, _} = live(conn, ~p"/admin/data?channel=#{a.id}")
+
+    view |> element("#pick-channel-button") |> render_click()
+    view |> element("#pick-channel-search") |> render_change(%{"q" => "other"})
+    refute has_element?(view, "#pick-channel-option-#{a.id}")
+    view |> element("#pick-channel-option-#{b.id}") |> render_click()
+    assert_patch(view, ~p"/admin/data?channel=#{b.id}")
+    assert has_element?(view, "#pick-channel-button", "otherstreamer")
+  end
+
   test "an exclusion from the data page queues the recomputation", %{conn: conn} do
     c = channel!(slug: "somestreamer")
     s = stream!(c, ~U[2026-03-02 20:00:00Z], ~U[2026-03-02 21:00:00Z])
