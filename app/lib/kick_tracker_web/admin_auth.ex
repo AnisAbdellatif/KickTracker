@@ -42,10 +42,70 @@ defmodule KickTrackerWeb.AdminAuth do
     |> redirect(to: ~p"/admin/login")
   end
 
-  @doc "Plug: assigns `current_admin` (or nil)."
+  @doc """
+  Plug: assigns `current_admin` (or nil). In the sandbox, with
+  `ADMIN_AUTOLOGIN` set, a visitor without a session is signed in as that
+  admin (see `autologin_config!/2`).
+  """
   def fetch_current_admin(conn, _opts) do
     admin = if token = get_session(conn, :admin_token), do: Admins.get_by_session_token(token)
-    assign(conn, :current_admin, admin)
+
+    case {admin, autologin(conn)} do
+      {nil, %{email: email}} -> autologin(conn, email)
+      _ -> assign(conn, :current_admin, admin)
+    end
+  end
+
+  @local_hosts ~w(localhost 127.0.0.1)
+
+  @doc """
+  The sandbox's automatic sign-in (`ADMIN_AUTOLOGIN=<email>`), checked at
+  boot: nil when unset, and refused unless the site's host is this
+  machine (`PHX_HOST` localhost or 127.0.0.1). Production's host is its
+  domain, so the setting there stops the node instead of opening the
+  admin.
+  """
+  @spec autologin_config!(String.t() | nil, String.t()) :: map() | nil
+  def autologin_config!(email, host) do
+    case email && String.trim(email) do
+      nil ->
+        nil
+
+      "" ->
+        nil
+
+      email ->
+        if host not in @local_hosts,
+          do:
+            raise(
+              "ADMIN_AUTOLOGIN is for the sandbox only: PHX_HOST must be localhost or 127.0.0.1, not #{inspect(host)}"
+            )
+
+        %{email: email, host: host}
+    end
+  end
+
+  # On for this request: configured, and the request is for the local host
+  # it was allowed for (a tunnel to the ingress arrives as another host).
+  defp autologin(conn) do
+    case Application.get_env(:kick_tracker, :admin_autologin) do
+      %{host: host} = config when host in @local_hosts ->
+        if conn.host == host, do: config
+
+      _ ->
+        nil
+    end
+  end
+
+  defp autologin(conn, email) do
+    admin = Admins.ensure_autologin_admin(email)
+    token = Admins.create_session_token(admin)
+
+    conn
+    |> put_session(:admin_token, token)
+    |> put_session(:live_socket_id, Admins.live_socket_id(token))
+    |> assign(:current_admin, admin)
+    |> Phoenix.Controller.put_flash(:info, "Sandbox: signed in automatically as #{admin.email}.")
   end
 
   @doc "Plug: only admins get through."

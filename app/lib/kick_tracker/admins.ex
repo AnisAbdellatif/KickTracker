@@ -167,6 +167,32 @@ defmodule KickTracker.Admins do
     Map.new(keys, fn k -> {k, if(is_binary(attrs[k]), do: attrs[k])} end)
   end
 
+  @doc """
+  The sandbox's automatic admin (`KickTrackerWeb.AdminAuth`), created the
+  first time with a random password and TOTP secret nobody holds: it can
+  only be used through the automatic sign-in.
+  """
+  @spec ensure_autologin_admin(String.t()) :: Admin.t()
+  def ensure_autologin_admin(email) do
+    Repo.get_by(Admin, email: email) ||
+      (
+        password = Base.url_encode64(:crypto.strong_rand_bytes(32))
+
+        %Admin{totp_secret: TOTP.new_secret()}
+        |> Admin.invite_changeset(%{
+          email: email,
+          password: password,
+          password_confirmation: password
+        })
+        |> Repo.insert()
+        # Two first requests at once: the other one made it.
+        |> case do
+          {:ok, admin} -> admin
+          {:error, _taken} -> Repo.get_by!(Admin, email: email)
+        end
+      )
+  end
+
   ## Sessions
 
   @doc "A new session token for the cookie."

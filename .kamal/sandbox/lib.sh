@@ -60,8 +60,10 @@ stop_sim() {
 
 # site_settings: what the site needs to be served on this machine, none of
 # it secret, so applied on every `up` too (a sandbox made before a change
-# here gets it without a reset): Caddy's hosts and /admin allowlist, and the
-# public URL the app builds links with (invitations: http://localhost:8080).
+# here gets it without a reset): Caddy's hosts and /admin allowlist, the
+# public URL the app builds links with (invitations: http://localhost:8080),
+# and the admin signing in by itself (web nodes only; the app refuses it
+# unless PHX_HOST is localhost, and lets in only requests for localhost).
 site_settings() {
   local secrets=$SERVER_DIR/secrets file
   # Plain HTTP on 127.0.0.1:8080 (compose.sandbox.yml): the site on
@@ -75,6 +77,7 @@ site_settings() {
     set_env "$file" PHX_URL_SCHEME http
     set_env "$file" PHX_URL_PORT 8080
   done
+  set_env "$secrets/app.env" ADMIN_AUTOLOGIN admin@sandbox.localhost
 }
 
 # set_env FILE NAME VALUE: NAME=VALUE in an env file, replaced or added.

@@ -265,6 +265,12 @@ A generic "anonymize every string" approach was rejected: it would destroy event
 
 The owner wanted to watch the sandbox run on real data. Webhook subscriptions belong to the Kick app, and `SubscriptionSync` (on boot and every 15 minutes) removes subscriptions of channels the running instance doesn't track, so a sandbox on production's app would unsubscribe production's channels, and the webhooks missed meanwhile can't be recovered. A switch turning the sync off in the sandbox was the alternative, rejected: one missed setting and a laptop rewrites production's subscriptions, while a separate app makes that impossible and brings its own rate limits. Webhooks reach the sandbox only if the owner points that app's webhook URL at a tunnel to its ingress; polls and chat work without one.
 
+
+## Sandbox Admin
+
+**Current:** In the sandbox the admin needs no account: with `ADMIN_AUTOLOGIN=<email>` (set by the sandbox's `site_settings`, web nodes only) a visitor without a session is signed in as that admin, created on first use with a random password and TOTP secret nobody holds. The app refuses to start with the setting unless `PHX_HOST` is `localhost` or `127.0.0.1`, and signs in only requests whose host is that one. (updated 2026-09-26 20:30)
+
+The owner asked for the sandbox's admin without an account. A switch in the app is the only way (the login lives there), so it is fenced to what the sandbox is: production's host is its domain, so the setting copied there stops the node rather than opening the admin; a request must be for `localhost`, which the webhook tunnel (rewriting the host to `127.0.0.1`) never is; and Caddy's `/admin` allowlist and its listening on 127.0.0.1 are unchanged. A real admin row rather than an anonymous one keeps the audit log and every page that uses the current admin working. Alternatives: a seeded admin with a known password and a helper printing TOTP codes (still a login, which is what the owner wanted gone); turning auth off by `MIX_ENV` (the sandbox runs the production release, so it would be the same switch in production).
 ## Undocumented Endpoints
 
 **Current:** Probed once each (`mix record.probe`); none is part of the design yet. The follower count on `api.kick.com/private/v1/channels/{slug}` is the candidate replacement for v2 if v2 is blocked from the VPS; a channel's follower history uses one source only. Past streams (`api/v2/.../videos`, ~27 days, no viewer figures) and gift leaderboards are noted as possible later imports. (updated 2026-09-24 06:10)

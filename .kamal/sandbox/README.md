@@ -27,7 +27,7 @@ Where things are:
 
 | | |
 |---|---|
-| The site | http://localhost:8080 (through Caddy; the admin at `/admin`) |
+| The site | http://localhost:8080 (through Caddy; the admin at `/admin`, signed in automatically, below) |
 | The ingress | http://127.0.0.1:8080 (webhooks, as Kick reaches them) |
 | The fake Kick | http://127.0.0.1:4050/_sim/state |
 | The web nodes, directly | http://127.0.0.1:4110, http://127.0.0.1:4111 |
@@ -56,10 +56,8 @@ meanwhile are gone for good).
 The secrets hook refuses a `kick.env` that isn't filled in, or that holds
 production's client id (read with your sops key; without one it says it
 couldn't check). The fake Kick isn't started. Polls (viewers, followers,
-titles, categories) and chat work as soon as channels are tracked; the
-admin needs an invitation, as in production:
-
-    .kamal/kit/bin/kit sandbox exec web_a /app/bin/invite you@example.org
+titles, categories) and chat work as soon as channels are tracked; add
+them in the admin.
 
 Webhooks go where the sandbox's Kick app says, which by default is
 nowhere. To receive them, tunnel the sandbox's ingress to a public URL and
@@ -70,6 +68,20 @@ tunnel (Caddy routes the ingress by host, hence the header):
 
 Rate limits are per Kick app, so the sandbox's don't eat into
 production's. The deploy rehearsal always uses the fake Kick.
+
+## The admin
+
+The admin at http://localhost:8080/admin needs no account: the web nodes
+sign every visitor in as `admin@sandbox.localhost` (`ADMIN_AUTOLOGIN` in
+the generated `app.env`, set by `site_settings` in `lib.sh` on every `up`;
+a sandbox made before it gets it on its next `kit sandbox up` and web
+deploy). Its actions are audited under that name. Fenced so it can't reach
+production: the app refuses to start with `ADMIN_AUTOLOGIN` unless
+`PHX_HOST` is `localhost` or `127.0.0.1`, and signs in only requests for
+`localhost` (a tunnel to the ingress arrives as `127.0.0.1` and isn't let
+in); Caddy's `/admin` allowlist and its listening on 127.0.0.1 still apply.
+With the real Kick, the admin shows real chatters (and logged chat, where
+turned on) to anything that can reach 127.0.0.1:8080 on this machine.
 
 ## What is where
 
