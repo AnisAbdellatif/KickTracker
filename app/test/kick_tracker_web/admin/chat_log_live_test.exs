@@ -24,20 +24,22 @@ defmodule KickTrackerWeb.Admin.ChatLogLiveTest do
   test "turning logging on and off, and the retention, per channel; audited", %{conn: conn} do
     c = channel!(slug: "somestreamer")
     {:ok, view, html} = live(conn, ~p"/admin/chat-log")
-    assert html =~ "Logging per channel"
+    assert html =~ "chat-log-settings"
 
-    view |> element("#chat-log-toggle-#{c.id}") |> render_submit()
+    view |> element("#chat-log-toggle-#{c.id}") |> render_click()
     assert KickTracker.Repo.reload(c).chat_log
 
     view
     |> element("#chat-log-config-#{c.id}")
-    |> render_submit(%{"retention_days" => "30"})
+    |> render_change(%{"channel_id" => c.id, "days" => "30"})
 
     c = KickTracker.Repo.reload(c)
     assert {c.chat_log, c.chat_log_retention_days} == {true, 30}
 
     html =
-      view |> element("#chat-log-config-#{c.id}") |> render_submit(%{"retention_days" => "0"})
+      view
+      |> element("#chat-log-config-#{c.id}")
+      |> render_change(%{"channel_id" => c.id, "days" => "0"})
 
     assert html =~ "from 1 to"
     assert KickTracker.Repo.reload(c).chat_log_retention_days == 30
@@ -46,6 +48,61 @@ defmodule KickTrackerWeb.Admin.ChatLogLiveTest do
              %{action: "chat_log.configure", details: %{"retention_days" => 30}},
              %{action: "chat_log.configure", details: %{"enabled" => true}} | _
            ] = Audit.recent()
+
+    assert render(element(view, "#chat-log-summary")) =~ "1"
+  end
+
+  test "a long channel list is searched and filtered by logging", %{conn: conn} do
+    for n <- 1..40, do: channel!(slug: "streamer#{n}")
+    logged = channel!(slug: "somestreamer")
+    {:ok, _} = ChatLog.configure(logged, true, 90)
+    {:ok, view, _} = live(conn, ~p"/admin/chat-log")
+
+    assert render(element(view, "#chat-log-settings-count")) =~ "41 of 41"
+
+    view |> element("#chat-log-settings-search") |> render_change(%{"q" => "STREAMER1"})
+    assert render(element(view, "#chat-log-settings-count")) =~ "11 of 41"
+    refute has_element?(view, "#chat-log-channel-#{logged.id}")
+
+    view |> element("#chat-log-settings-search") |> render_change(%{"q" => ""})
+    view |> element("#chat-log-show-on") |> render_click()
+    assert render(element(view, "#chat-log-settings-count")) =~ "1 of 41"
+    assert has_element?(view, "#chat-log-channel-#{logged.id}")
+  end
+
+  test "the channel picker searches channels with a log and puts the choice in the URL",
+       %{conn: conn} do
+    a = channel!(slug: "somestreamer")
+    b = channel!(slug: "otherstreamer")
+    _never = channel!(slug: "quietstreamer")
+    {:ok, _} = ChatLog.configure(a, true, 90)
+    logged!(b, "b1", 7, "hello", 0)
+    {:ok, view, _} = live(conn, ~p"/admin/chat-log")
+
+    view |> element("#chat-log-picker-button") |> render_click()
+    assert has_element?(view, "#chat-log-pick-#{a.id}")
+    assert has_element?(view, "#chat-log-pick-#{b.id}")
+    refute render(element(view, "#chat-log-picker")) =~ "quietstreamer"
+
+    view |> element("#chat-log-picker-search") |> render_change(%{"q" => "other"})
+    refute has_element?(view, "#chat-log-pick-#{a.id}")
+
+    view |> element("#chat-log-pick-#{b.id}") |> render_click()
+    assert_patch(view, ~p"/admin/chat-log?#{%{"channels" => "#{b.id}"}}")
+    assert has_element?(view, "#chat-log-chips", "otherstreamer")
+  end
+
+  test "users and a preset period become chips; a chip removes its filter", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/admin/chat-log")
+    view |> form("#chat-log-user", %{"user" => "someone"}) |> render_submit()
+    assert_patch(view, ~p"/admin/chat-log?#{%{"users" => "someone"}}")
+
+    view |> element("#chat-log-period-7d") |> render_click()
+    assert_patch(view, ~p"/admin/chat-log?#{%{"period" => "7d", "users" => "someone"}}")
+    assert has_element?(view, "#chat-log-chips", "last 7d")
+
+    view |> element("#chat-log-chips a", "someone") |> render_click()
+    assert_patch(view, ~p"/admin/chat-log?#{%{"period" => "7d"}}")
   end
 
   test "a user's history across channels, text escaped; the audit says a user was looked up, not whom",
@@ -72,37 +129,29 @@ defmodule KickTrackerWeb.Admin.ChatLogLiveTest do
     refute html =~ "on b"
   end
 
-  test "a filter form submit puts the filters in the URL", %{conn: conn} do
-    a = channel!(slug: "somestreamer")
-    b = channel!(slug: "otherstreamer")
-    {:ok, view, _} = live(conn, ~p"/admin/chat-log")
-
-    view
-    |> form("#chat-log-filter", f: %{channels: [a.id, b.id], users: "someone"})
-    |> render_submit()
-
-    assert_patch(
-      view,
-      ~p"/admin/chat-log?#{%{"channels" => "#{a.id},#{b.id}", "users" => "someone"}}"
-    )
-  end
-
-  test "deleting a period asks for the slug, then queues the collector's job; audited",
+  test "deleting a period: a dialog that starts from the view, checked, then the collector's job; audited",
        %{conn: conn} do
     c = channel!(slug: "somestreamer")
-    {:ok, view, _} = live(conn, ~p"/admin/chat-log")
-    view |> element("button", "Delete a period") |> render_click()
 
-    period = %{channel_id: c.id, from: "2026-06-01T10:00", to: "2026-06-01T11:00"}
+    {:ok, view, _} =
+      live(conn, ~p"/admin/chat-log?#{%{"channels" => c.id, "from" => "2026-06-01T10:00"}}")
 
-    html =
-      view |> form("#chat-log-delete", d: Map.put(period, :confirm, "wrong")) |> render_submit()
+    view |> element("#chat-log-ask-delete") |> render_click()
+    assert has_element?(view, "#chat-log-delete input[name='d[slug]'][value='somestreamer']")
 
-    assert html =~ "Type the slug exactly"
+    period = %{slug: "somestreamer", from: "2026-06-01T10:00", to: "2026-06-01T11:00"}
+
+    html = view |> form("#chat-log-delete", d: period) |> render_submit()
+    assert html =~ "deleted for good"
     refute_enqueued(worker: KickTracker.Workers.ChatLog)
 
+    html =
+      view |> form("#chat-log-delete", d: %{period | slug: "nosuchstreamer"}) |> render_submit()
+
+    assert html =~ "No channel with that slug"
+
     view
-    |> form("#chat-log-delete", d: Map.put(period, :confirm, "somestreamer"))
+    |> form("#chat-log-delete", d: Map.put(period, :understood, "true"))
     |> render_submit()
 
     assert_enqueued(
@@ -114,6 +163,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLiveTest do
       }
     )
 
+    refute has_element?(view, "#chat-log-delete-dialog")
     assert [%{action: "chat_log.delete", target: "somestreamer"} | _] = Audit.recent()
   end
 

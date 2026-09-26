@@ -6,10 +6,17 @@ defmodule KickTrackerWeb.Admin.ChatLogFilters do
 
     * `channels` — channel ids, comma-separated;
     * `users` — usernames or Kick user ids, comma- or space-separated;
-    * `from`, `to` — UTC, `YYYY-MM-DDTHH:MM` (`[from, to)`).
+    * `from`, `to` — UTC, `YYYY-MM-DDTHH:MM` (`[from, to)`);
+    * `period` — `1h`, `24h`, `7d` or `30d` back from now, instead of
+      `from` and `to`.
   """
 
   alias KickTracker.ChatLog
+
+  @periods %{"1h" => 3600, "24h" => 86_400, "7d" => 7 * 86_400, "30d" => 30 * 86_400}
+
+  @doc "The preset periods, shortest first."
+  def periods, do: ~w(1h 24h 7d 30d)
 
   @doc """
   The filters for `ChatLog.messages/1` and the form's values. Users that
@@ -18,16 +25,37 @@ defmodule KickTrackerWeb.Admin.ChatLogFilters do
   """
   @spec parse(map()) :: {map(), map()}
   def parse(params) do
-    form = Map.new(~w(channels users from to), &{&1, String.trim(params[&1] || "")})
+    form = Map.new(~w(channels users from to period), &{&1, String.trim(params[&1] || "")})
+
+    {from, to, form} =
+      case @periods[form["period"]] do
+        nil ->
+          {time(form["from"]), time(form["to"]), %{form | "period" => ""}}
+
+        seconds ->
+          {DateTime.add(DateTime.utc_now(), -seconds), nil, %{form | "from" => "", "to" => ""}}
+      end
 
     filters =
       %{}
       |> put(:channel_ids, ids(form["channels"]))
       |> put(:user_ids, users(form["users"]))
-      |> put(:from, time(form["from"]))
-      |> put(:to, time(form["to"]))
+      |> put(:from, from)
+      |> put(:to, to)
 
     {filters, form}
+  end
+
+  @doc "The items of a comma-separated value (channel ids, users)."
+  @spec items(String.t() | nil) :: [String.t()]
+  def items(nil), do: []
+  def items(text), do: String.split(text, ~r/[\s,]+/, trim: true)
+
+  @doc "The value with `item` added, or removed if it was there."
+  @spec toggle(String.t() | nil, String.t()) :: String.t()
+  def toggle(text, item) do
+    list = items(text)
+    if item in list, do: Enum.join(list -- [item], ","), else: Enum.join(list ++ [item], ",")
   end
 
   @doc "The query string for these form values (empty ones left out)."

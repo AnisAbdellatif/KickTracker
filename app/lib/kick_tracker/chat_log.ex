@@ -234,6 +234,22 @@ defmodule KickTracker.ChatLog do
   end
 
   @doc """
+  For the admin page's header: channels with logging on, out of all;
+  messages kept (TimescaleDB's estimate, which doesn't scan the table);
+  chat events kept.
+  """
+  @spec summary() :: map()
+  def summary do
+    [[on, all, messages, events]] =
+      Repo.query!("""
+      SELECT (SELECT count(*) FROM channels WHERE chat_log), (SELECT count(*) FROM channels),
+             approximate_row_count('chat_messages'), (SELECT count(*) FROM chat_log_events)
+      """).rows
+
+    %{logging: on, channels: all, messages: messages, events: events}
+  end
+
+  @doc """
   The channels logging is on for, for the privacy page: public ones by
   slug with their retention, hidden ones only counted.
   """
@@ -275,6 +291,8 @@ defmodule KickTracker.ChatLog do
       on: c.id == m.channel_id,
       left_join: k in "kick_users",
       on: k.id == m.user_id,
+      left_join: r in "kick_users",
+      on: r.id == m.reply_to_user_id,
       select: %{
         channel_id: m.channel_id,
         slug: c.slug,
@@ -285,7 +303,8 @@ defmodule KickTracker.ChatLog do
         type: m.type,
         content: m.content,
         reply_to_message_id: m.reply_to_message_id,
-        reply_to_user_id: m.reply_to_user_id
+        reply_to_user_id: m.reply_to_user_id,
+        reply_to_username: r.username
       }
     )
     |> where_in(:channel_id, filters[:channel_ids])
