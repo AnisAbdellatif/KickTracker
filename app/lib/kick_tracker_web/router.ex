@@ -28,6 +28,18 @@ defmodule KickTrackerWeb.Router do
     plug KickTrackerWeb.Plugs.RateLimit
   end
 
+  # JSON for admin pages' charts: the admin's session, no page around it
+  # (the controller answers 401 without an admin).
+  pipeline :admin_api do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    # Checks only requests that change something: the GETs here pass, and
+    # anything added later that writes is covered.
+    plug :protect_from_forgery
+    plug KickTrackerWeb.Plugs.RateLimit
+    plug :fetch_current_admin
+  end
+
   ## Public site (project.md §13.2)
 
   scope "/", KickTrackerWeb do
@@ -53,6 +65,16 @@ defmodule KickTrackerWeb.Router do
 
   scope "/", KickTrackerWeb do
     get "/healthz", HealthzController, :show
+  end
+
+  # Channels' pictures, our copies (§12.9).
+  pipeline :images do
+    plug KickTrackerWeb.Plugs.RateLimit
+  end
+
+  scope "/img", KickTrackerWeb do
+    pipe_through :images
+    get "/channels/:id/avatar", AvatarController, :show
   end
 
   # History as cacheable JSON (§13.5), versioned from the start.
@@ -98,8 +120,11 @@ defmodule KickTrackerWeb.Router do
       live "/subscriptions", SubscriptionsLive
       live "/dead-letters", DeadLettersLive
       live "/data", DataLive
+      live "/anomalies", AnomaliesLive, :index
+      live "/anomalies/:id", AnomaliesLive, :show
       live "/transfer", TransferLive
       live "/privacy", PrivacyLive
+      live "/chat-log", ChatLogLive
       live "/settings", SettingsLive
       live "/admins", AdminsLive
       live "/audit", AuditLive
@@ -111,6 +136,7 @@ defmodule KickTrackerWeb.Router do
     pipe_through [:browser, :require_admin]
 
     get "/transfers/:id/download", KickTrackerWeb.Admin.TransferController, :download
+    get "/chat-log/export.csv", KickTrackerWeb.Admin.ChatLogController, :export
 
     live_dashboard "/dashboard",
       metrics: KickTrackerWeb.Telemetry,
@@ -124,6 +150,12 @@ defmodule KickTrackerWeb.Router do
       on_mount: [{KickTrackerWeb.AdminAuth, :require_admin}],
       csp_nonce_assign_key: :csp_nonce
     )
+  end
+
+  scope "/admin", KickTrackerWeb.Admin do
+    pipe_through :admin_api
+
+    get "/anomalies/:id/chart", AnomaliesController, :chart
   end
 
   # The Swoosh mailbox preview in development.

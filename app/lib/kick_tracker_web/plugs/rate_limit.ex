@@ -4,6 +4,7 @@ defmodule KickTrackerWeb.Plugs.RateLimit do
 
     * pages: 120 a minute;
     * `/data`: 600 a minute (a channel page loads several series);
+    * channels' pictures (`/img`): 600 a minute (a page shows many);
     * admin login attempts: 10 a minute per address, and after 20 failures
       in 10 minutes the address is shut out for an hour.
 
@@ -34,6 +35,17 @@ defmodule KickTrackerWeb.Plugs.RateLimit do
       throttle({:data, conn.remote_ip},
         period: 60_000,
         limit: limit(:data, 600),
+        storage: @storage
+      )
+    end
+  end
+
+  # A page shows many channels' pictures at once.
+  rule "images", conn do
+    if match?(["img" | _], conn.path_info) do
+      throttle({:images, conn.remote_ip},
+        period: 60_000,
+        limit: limit(:images, 600),
         storage: @storage
       )
     end

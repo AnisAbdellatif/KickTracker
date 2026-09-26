@@ -120,6 +120,13 @@ defmodule Sim.Http.Router do
     |> halt()
   end
 
+  # Channels' pictures and thumbnails: a solid colour per name.
+  get "/assets/:kind/:file" do
+    conn
+    |> put_resp_content_type("image/png", nil)
+    |> send_resp(200, Sim.Png.solid(64, Sim.Png.colour(kind <> "/" <> file)))
+  end
+
   get "/api/v2/channels/:slug" do
     case Scenario.channel(Server.scenario(), slug) do
       nil -> json(conn, 404, %{"message" => "Not Found"})

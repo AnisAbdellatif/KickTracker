@@ -117,6 +117,44 @@ _performer() {
 # <sha>_uncommitted_<hash> as soon as `git status` shows anything, even an
 # untracked file, and no image has that tag. Changes to tracked files are
 # refused: the image of this commit doesn't contain them.
+# _check_image VERSION: with images built elsewhere (CI), the registry has
+# this one, before anything is deployed or notified. Missing, it would fail
+# late: as Kamal's pull on the servers, or as a missing attestation. Stops
+# only when the registry says it isn't there; carries on when it can't tell.
+_check_image() {
+  local version=$1 out repository image why status=0
+  [ -z "${KIT_SANDBOX:-}" ] || return 0
+  kit_is_true "$(kit_conf KIT_CHECK_IMAGE true)" || return 0
+  out=$(kit_kamal config 2>/dev/null) || out=""
+  repository=$(kit_kamal_config_get repository "$out") || exit 1
+  if [ -z "$repository" ]; then
+    kit_info "couldn't tell the image from \`kamal config\`: not checked"
+    return 0
+  fi
+  image="$repository:$version"
+  why=$(_image_status "$image") || status=$?
+  case $status in
+    0) kit_ok "image $image is in the registry" ;;
+    1) kit_die "no image $image in the registry: nothing to deploy for ${version:0:12}. The images come from elsewhere (KIT_DEPLOY_SKIP_PUSH): has CI built this commit? It may build only some branches, or not have finished (docs/branches.md). KIT_CHECK_IMAGE=false skips this check" ;;
+    *) kit_info "couldn't check that $image is in the registry (${why:-no answer}): carrying on" ;;
+  esac
+}
+
+# _image_status IMAGE: 0 the registry has IMAGE, 1 it says it hasn't, 2
+# can't tell (no docker, no access, no answer: why, on stdout). Uses this
+# machine's registry logins.
+_image_status() {
+  local docker=() out
+  read -r -a docker <<<"${KIT_DOCKER:-docker}"
+  command -v "${docker[0]:-docker}" >/dev/null 2>&1 || { echo "no docker here"; return 2; }
+  out=$(kit_timeout 30 kit_docker manifest inspect "$1" 2>&1 >/dev/null) && return 0
+  case $out in
+    *"manifest unknown"* | *"no such manifest"* | *"MANIFEST_UNKNOWN"*) return 1 ;;
+  esac
+  printf '%s\n' "$out" | sed '/^[[:space:]]*$/d' | head -n 1 | cut -c 1-160
+  return 2
+}
+
 _pull_version() {
   local changes
   changes=$(git -C "$KIT_PROJECT_DIR" status --porcelain --untracked-files=no 2>/dev/null) || true
@@ -161,6 +199,8 @@ cmd_deploy() {
   done
   kit_load_config "$DEST"
   kit_require_kamal
+  # A skip that needs a reason is refused now, not after the first group.
+  kit_skip_reason_check || exit 1
   # Without curl every smoke check fails, which would roll back a good
   # deploy: missing, it's said now, before anything is deployed.
   if [ "$smoke" = true ] && [ -n "$(kit_conf KIT_SMOKE_URLS "")" ]; then
@@ -178,6 +218,7 @@ cmd_deploy() {
       version=$(kit_kamal_config_get version "$(kit_kamal config 2>/dev/null || true)") || exit 1
     fi
   fi
+  [ "$skip_push" = true ] && _check_image "$version"
 
   KIT_RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kit-run.XXXXXX")
   export KIT_RUN_DIR

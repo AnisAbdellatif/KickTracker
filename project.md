@@ -221,6 +221,12 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
     Message ids are UUIDs. Senders carry `identity.badges_v2`.
   - Nothing arrived on `channel.<id>` in 20 minutes besides the subscription
     confirmation. No raid or host seen yet.
+- Observed in production (2026-09-25, event names only, from the logs):
+  hosts (Kick's raids) come as `App\Events\StreamHostEvent` in the
+  receiving channel's `chatrooms.<id>.v2` and
+  `App\Events\ChatMoveToSupportedChannelEvent` on the hosting channel's
+  `channel.<id>`, half a second apart for a host between two tracked
+  channels. Their fields are still unseen.
 - Chat stays here rather than on the chat webhook: a webhook is one HTTP
   request per message, heavy on busy channels, and capped at 1 000 channels
   for an unverified app. The webhook is the official fallback if Pusher stops.
@@ -855,9 +861,10 @@ old one and retries every minute.
   `channel.<kick channel id>`; answers pings, pings after the activity
   timeout, reconnects if no pong comes, or if the upgrade doesn't complete
   within 15s. Waits until the chatroom id is known (from v2).
-- Sends `{:chat, message}` (sender, id, time) to its `ChannelServer`, and
-  the names of events it doesn't know (raids and hosts, until recorded).
-  No message text is kept.
+- Sends `{:chat, message}` (sender, id, time) to its `ChannelServer`, the
+  two host events with their data as sent (stored raw in `channel_events`
+  until a parser is written from real ones), and the names of other events
+  it doesn't know. No message text is kept.
 - Reconnects with exponential backoff (1s up to 30s, with jitter), reset
   only after a connection stayed up for a minute, and records chat
   coverage when connected and disconnected. A chatroom id that changes
@@ -1175,12 +1182,13 @@ support_events     (message_id PK, channel_id, occurred_at,
                     tier, payload jsonb)     -- giftee ids, expiry, gift type;
                                              -- never message text or usernames
 channel_events     (id, channel_id, occurred_at,
-                    kind: raid_in | raid_out | host | ...,
+                    kind: hosted_by | hosting,
                     other_channel NULL, viewers NULL, dedup_key, payload jsonb,
                     UNIQUE (channel_id, dedup_key))
-                   -- created; filled once raid/host event names are
-                   -- recorded (§16). Unknown chat-feed events are logged
-                   -- by name only meanwhile
+                   -- hosts as received (occurred_at: our receive time),
+                   -- payload {event, pusher_channel, data} as sent; other
+                   -- figures unknown until parsed from real ones (§16).
+                   -- Other unknown chat-feed events are logged by name only
 ```
 
 - Follows and support events carry **no stream id**: which stream they
@@ -1242,11 +1250,65 @@ channel_events     (id, channel_id, occurred_at,
   policy). Everything else is kept.
 - Kick user ids (in the chat tables, `follows`, `support_events`,
   `webhook_events`) and usernames (`kick_users`, event bodies) count as
-  personal data even without message text. Chat text is never stored.
-  Usernames live in one table, so deletion requests touch one place plus the
-  raw event bodies.
+  personal data even without message text. Chat text is stored only by chat
+  logging (§12.8). Usernames live in one table, so deletion requests touch
+  one place plus the raw event bodies.
 - Nothing from v2 beyond `followers_count` and the chatroom id (which
   chat needs) is stored.
+
+### 12.8 Chat logging (opt-in, per channel)
+
+Off by default. An admin turns it on for a channel (`channels.chat_log`)
+and sets how long its log is kept (`chat_log_retention_days`, 90 by
+default, 1 to 3 650). Only then is message text stored:
+
+- `chat_messages` (hypertable on `sent_at`, 1-day chunks, not compressed):
+  channel, time, Kick's message id, sender id, type, text, and for a reply
+  the message and sender it answers (not its text). Usernames come from
+  `kick_users`. Unique on `(channel_id, message_id, sent_at)`.
+- `chat_log_events`: every other chat-feed event on the channel (bans,
+  unbans, deleted messages, clears, pins, polls...) as sent, until parsers
+  are written from them.
+
+The socket passes a message's text (and other events' data) to the
+channel's process only while logging is on; for every other channel it
+stops there. Turning logging on or off reaches the running channel at
+once when the nodes are connected, and through the Manager's sync within a
+minute otherwise. Writes go through the journal like every collected
+write (`{:chat_messages, …}`, `{:chat_log_event, …}`).
+
+Kept per channel for its retention (`Workers.ChatLog`, hourly), whether
+logging is still on or not. An admin can view a channel's or a user's log
+(across channels), export a selection, and delete a channel's log for a
+period (a collector job, audited). Privacy deletions remove a person's
+messages and scrub events naming them; replies to them keep their text
+but no longer say whom they answered. Never shown on the public site or
+the data API; not in exports between instances; the shadow collector
+never logs (it doesn't copy the setting).
+
+Storage at production's volume (~270 000 messages a day across 42
+channels, the busiest ~117 000): about 150 bytes per message with
+indexes, so ~6.5 GB a year for the busiest channel and ~15 GB for all of
+them, at 365 days' retention; 90 days is a quarter of that.
+
+### 12.9 Channel pictures
+
+A channel's picture comes from what Kick already sends: `profile_picture`
+in `/livestreams` answers (every poll of a live channel) and in stream
+status and metadata events (`broadcaster.profile_picture`). The channel's
+process records it in `channels.avatar_url` when it changes (a journaled
+`{:avatar_url, …}`), which queues `Workers.ChannelAvatar`; the job
+downloads it (PNG, JPEG, GIF or WebP by their first bytes, up to 1 MB,
+streamed and dropped past that) into `channel_avatars` (one row per
+channel: source URL, type, bytes, hash). A daily sweep retries any not
+copied. The site serves the copy at `/img/channels/:id/avatar?v=<hash>`
+(a year's cache, `nosniff`, a sandboxing CSP; rate-limited like `/data`),
+so a visitor's browser never contacts Kick; hidden channels' pictures
+aren't served. The avatar component shows the picture where a copy
+exists and the channel's initial otherwise. Not exported between
+instances (re-fetched from the next poll or event); deleted with the
+channel. The fake Kick serves solid-colour PNGs for its channels
+(`--asset-url` sets the address the code under test reaches it at).
 
 ## 13. Frontend
 
@@ -1462,7 +1524,8 @@ auth check.
     leaderboards and the compare page.
 - **Health:** per channel, live status, last poll, chat socket connected,
   webhook subscriptions per event type, last event received, last follower
-  reading, coverage % for 24h and 7 days. System-wide: RabbitMQ queue depth
+  reading, poll and chat coverage % for 24h, 7 days, 30 days and since the
+  channel was added (each counted from when it was added). System-wide: RabbitMQ queue depth
   and dead letters, consumer lag, receivers last seen, Oban queues and
   failures (Oban Web), LiveDashboard.
 - **Dead letters:** list, inspect the envelope, replay into the queue, or
@@ -1488,6 +1551,14 @@ auth check.
 - **Privacy:** find everything held about a Kick user id; delete it
   (per-user rows, username, raw event bodies redacted). Searches are
   audited without what was searched for.
+- **Chat log** (`/admin/chat-log`, §12.8): turn chat logging on or off
+  per channel and set its retention; read the log by channels, users
+  (across channels) and UTC period, filters in the URL, with the chat-feed
+  events beside it; export the selection as CSV (streamed; formula-like
+  cells get a leading apostrophe); delete one channel's log over a period
+  (typing its slug confirms; the collector's `Workers.ChatLog` runs it).
+  Views, exports, deletions and setting changes are audited, without the
+  users looked up.
 - **Export / import:** download chosen channels, alone or with their
   history over an optional date range, as a `.zip` of CSVs (one per table,
   local ids kept so they join, plus `manifest.json`); upload one from
@@ -1496,7 +1567,8 @@ auth check.
   corrections travel; derived tables are rebuilt afterwards. Imports only
   add, matching rows on natural keys (Kick ids, `(channel, started_at)`,
   `message_id`), so rows already here win and a second import changes
-  nothing. Removal requests travel with the data (`removals`): a channel or
+  nothing. A channel's "tracked since" comes only with its history: the
+  channel list alone tracks new channels from the import. Removal requests travel with the data (`removals`): a channel or
   user removed on either side stays removed. The collector does the work
   (`Workers.Transfer`, its own queue); the files live in `TRANSFER_DIR`,
   shared by both roles, for 7 days.
@@ -1690,9 +1762,10 @@ Still open:
    from a datacenter and this isn't, it becomes the follower source. Run
    `mix record.probe` and `mix record.v2` from the VPS.
 3. **Pusher from a datacenter IP**, any limit on subscriptions per
-   connection, and the exact raid/host event names.
-4. **Outgoing raids:** visible from the raiding channel's feed, or only in the
-   target's?
+   connection. Host event names: answered (§2.4); their fields: stored raw
+   in production until parsed.
+4. **Outgoing raids:** answered: the hosting channel's `channel.<id>` feed
+   carries `ChatMoveToSupportedChannelEvent`.
 
 ## 17. Development: recorded payloads and a fake Kick
 
@@ -1791,8 +1864,8 @@ minute, and a Pusher websocket carrying each stream's chat (with the
 handshake, pings, and the disconnect codes real Pusher uses). The recorder
 drives all of it unchanged, and its payload shapes (API, webhooks, chat
 frames) are checked against `fixtures/` by tests, so a shape Kick changes
-shows up when we re-record. Raids and hosts wait for a recording (their
-event names are unknown). A control API (`/_sim`) and CLI (`mix sim.ctl`)
+shows up when we re-record. Hosts wait for real payloads (stored raw in
+production, §16) before the simulator sends them. A control API (`/_sim`) and CLI (`mix sim.ctl`)
 drive it by hand: start or end a stream now, change title or category,
 send any event, move or speed up the clock, drop the next N webhooks, set
 faults, disconnect Pusher clients, expire tokens. Manual changes are
@@ -1931,6 +2004,50 @@ Done after everything else is set up and working (§20, phase 6).
   dependencies) in CI.
 - Secrets encrypted in the repo (sops + age), never committed in clear.
 - Admin behind the private network in production, TOTP enforced.
+
+### 19.4 Audience anomalies (admin only, proof of concept)
+
+Signs that a stream's audience may not be what its viewer count says
+(viewbots), for an admin to review: `/admin/anomalies`, never on the
+public site. None is proof: a front-page placement, a followers-only chat
+or a watch party can look the same, so the page says what was seen and
+the figures it rests on, not a verdict.
+
+- **Rules, not a model** (`Metrics.Anomalies`, pure): each finding is a
+  plain rule with its evidence, so it can be checked and argued with.
+  - *Jump without chat*: the median of the 5 readings after a point is
+    at least 100 viewers and 30% above the 5 before, and chatters per
+    minute rose by less than a quarter as much. Not in the first 15
+    minutes (the start's ramp), nor within 5 minutes of an incoming host
+    (`hosted_by`).
+  - *Drop without chat*: the same downwards, with chat carrying on. Not
+    in the last 10 minutes, nor near an outgoing host (`hosting`).
+  - *Flat viewer count*: for 20 minutes or more, at 100 viewers or more,
+    the median change between readings is under a quarter of the
+    channel's usual (at most 1%, and always under 0.2%).
+  - *Full audience at the start*: the first three readings are at least
+    60% of the level after the first 15 minutes, well above the channel's
+    usual start, with no host and no stream ending in the 30 minutes
+    before.
+  - *Little chat for the viewers*: chatters per minute per viewer under
+    half the channel's usual.
+  - *Few follows for the hours watched*: under a third of the channel's
+    usual follows per 1 000 hours watched (only when follows are known
+    and the stream had 50 hours watched or more).
+- **Against the channel's own streams**: "usual" is the median over its
+  30 earlier ended, not excluded streams, and is unknown with fewer than
+  5 that have the figure. There's no comparison across channels yet.
+- **Only what was observed**: chat is compared only in minutes chat
+  coverage covers, windows never cross a gap in the readings, and a
+  figure that can't be computed is shown as "–".
+- **Computed when the page is opened**, from tables kept forever
+  (`viewer_samples`, `chat_minutes`, `channel_events`, `coverage`,
+  `stream_stats`); nothing is stored, so a changed rule applies to every
+  stream at once.
+- **Not yet**: per-chatter signals (one-message accounts, returning
+  chatters, chatting in several channels at once, account age from user
+  ids), comparison with similar channels, and admin verdicts on streams
+  to tune the rules against.
 
 ## 20. Next steps
 

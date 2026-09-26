@@ -58,15 +58,21 @@ defmodule KickTracker.Kick.API do
     request(:post, "/events/subscriptions", json: body)
   end
 
-  @doc "Removes subscriptions by id."
+  @doc """
+  Removes subscriptions by id, #{@max_batch} per request: Kick answered 400
+  to one request removing a few hundred. Stops at the first batch that
+  fails; the ones before it are removed.
+  """
   @spec unsubscribe([String.t()]) :: :ok | {:error, term()}
-  def unsubscribe([]), do: :ok
-
   def unsubscribe(ids) do
-    case request(:delete, "/events/subscriptions", params: Enum.map(ids, &{"id", &1})) do
-      {:ok, _} -> :ok
-      error -> error
-    end
+    ids
+    |> Enum.chunk_every(@max_batch)
+    |> Enum.reduce_while(:ok, fn batch, :ok ->
+      case request(:delete, "/events/subscriptions", params: Enum.map(batch, &{"id", &1})) do
+        {:ok, _} -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
   end
 
   defp get(path, params), do: request(:get, path, params: params)

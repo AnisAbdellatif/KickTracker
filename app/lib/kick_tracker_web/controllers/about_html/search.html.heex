@@ -17,7 +17,7 @@
         navigate={~p"/c/#{c.slug}"}
         class="flex items-center gap-3 px-4 py-3 hover:bg-base-200"
       >
-        <.avatar name={c.slug} class="size-8 text-sm" />
+        <.avatar name={c.slug} channel_id={c.id} class="size-8 text-sm" />
         <span class="font-medium">{c.slug}</span>
         <span class="flex-1"></span>
         <.icon name="hero-chevron-right-micro" class="size-4 opacity-40 rtl:rotate-180" />

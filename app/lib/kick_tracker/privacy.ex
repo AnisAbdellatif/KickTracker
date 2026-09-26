@@ -6,10 +6,13 @@ defmodule KickTracker.Privacy do
   Removing is the one exception to "raw facts are append-only", because
   the law asks for it. What identifies the person goes; what doesn't stays:
 
-    * their username (`kick_users`) and per-person chat rows are deleted;
+    * their username (`kick_users`) and per-person chat rows are deleted,
+      and so are their logged messages (§12.8), with replies to them no
+      longer saying whom they answered;
     * their follows and support events keep being counted, without their id;
     * raw event bodies naming them are redacted (and marked, since they no
-      longer verify against Kick's signature).
+      longer verify against Kick's signature), and so are hosts' payloads
+      (`channel_events`).
 
   `find/1` is read-only (the web role); `delete/1` runs in the collector's
   `Workers.Privacy` job.
@@ -36,6 +39,17 @@ defmodule KickTracker.Privacy do
           "SELECT count(*) FROM support_events WHERE user_id = $1::text::bigint OR payload::text ~ ('\\m' || $1 || '\\M')",
           id
         ),
+      chat_messages: count.("SELECT count(*) FROM chat_messages WHERE user_id = $1", user_id),
+      chat_log_events:
+        count.(
+          "SELECT count(*) FROM chat_log_events WHERE payload::text ~ ('\\m' || $1 || '\\M')",
+          id
+        ),
+      channel_events:
+        count.(
+          "SELECT count(*) FROM channel_events WHERE payload::text ~ ('\\m' || $1 || '\\M')",
+          id
+        ),
       # Bodies mentioning the id (possibly inside a longer number).
       webhook_events:
         count.(
@@ -57,6 +71,14 @@ defmodule KickTracker.Privacy do
           %{num_rows: streams} =
             Repo.query!("DELETE FROM chat_stream_users WHERE user_id = $1", [user_id])
 
+          %{num_rows: messages} =
+            Repo.query!("DELETE FROM chat_messages WHERE user_id = $1", [user_id])
+
+          Repo.query!(
+            "UPDATE chat_messages SET reply_to_user_id = NULL WHERE reply_to_user_id = $1",
+            [user_id]
+          )
+
           %{num_rows: follows} =
             Repo.query!("UPDATE follows SET user_id = NULL WHERE user_id = $1", [user_id])
 
@@ -65,6 +87,8 @@ defmodule KickTracker.Privacy do
 
           # Giftee lists and similar keep the gift, not the person.
           support_payloads = scrub_support_payloads(user_id)
+          channel_events = scrub_payloads("channel_events", user_id)
+          chat_log_events = scrub_payloads("chat_log_events", user_id)
           audit = redact_audit_log(user_id)
           %{num_rows: names} = Repo.query!("DELETE FROM kick_users WHERE id = $1", [user_id])
           bodies = redact_bodies(user_id)
@@ -75,6 +99,9 @@ defmodule KickTracker.Privacy do
             chat_streams: streams,
             follows: follows,
             support_events: support + support_payloads,
+            channel_events: channel_events,
+            chat_messages: messages,
+            chat_log_events: chat_log_events,
             usernames: names,
             webhook_events: bodies,
             audit_entries: audit
@@ -114,6 +141,21 @@ defmodule KickTracker.Privacy do
 
     for [id, payload] <- rows, (scrubbed = scrub(payload, user_id)) != payload do
       Repo.query!("UPDATE support_events SET payload = $2 WHERE message_id = $1", [id, scrubbed])
+    end
+    |> length()
+  end
+
+  # Hosts' and logged chat events' payloads, kept as sent.
+  # sobelow_skip ["SQL.Query"]
+  defp scrub_payloads(table, user_id) when table in ~w(channel_events chat_log_events) do
+    rows =
+      Repo.query!(
+        "SELECT id, payload FROM #{table} WHERE payload::text ~ ('\\m' || $1 || '\\M')",
+        [Integer.to_string(user_id)]
+      ).rows
+
+    for [id, payload] <- rows, (scrubbed = scrub(payload, user_id)) != payload do
+      Repo.query!("UPDATE #{table} SET payload = $2 WHERE id = $1", [id, scrubbed])
     end
     |> length()
   end

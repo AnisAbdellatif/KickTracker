@@ -6,7 +6,17 @@ defmodule KickTrackerWeb.AboutController do
   def methodology(conn, _params),
     do: render(conn, :methodology, page_title: gettext("Methodology"))
 
-  def privacy(conn, _params), do: render(conn, :privacy, page_title: gettext("Privacy"))
+  # What the page says is shown about people follows the settings that
+  # show it (top chatters and supporters; the support page).
+  def privacy(conn, _params) do
+    render(conn, :privacy,
+      page_title: gettext("Privacy"),
+      chat_log: KickTracker.ChatLog.disclosed(),
+      top_people: KickTracker.Settings.get("top_people_public"),
+      support_page: KickTracker.Settings.get("support_page_public")
+    )
+  end
+
   def removal(conn, _params), do: render(conn, :removal, page_title: gettext("Removal requests"))
 
   def search(conn, %{"q" => q}) when is_binary(q) and q != "" do

@@ -35,6 +35,8 @@ KIT_HOOK_POST_PROXY_REBOOT=
 KIT_HOOK_DOCKER_SETUP=
 
 KIT_SKIP=                        # steps to skip this once: KIT_SKIP=ci-green kit deploy
+KIT_SKIP_REASON=                 # why (in the warning and the notification)
+KIT_SKIP_REASON_REQUIRED=false   # refuse a skip without a reason (e.g. KIT_SKIP_REASON_REQUIRED_PRODUCTION=true)
 KIT_STEP_TIMEOUT=600             # seconds per step; 0: none
 KIT_CACHED_STEPS="require-branch require-clean require-pushed ci-green attestation confirm freeze"
 
@@ -75,6 +77,7 @@ KIT_SMOKE_CURL_ARGS=
 # --- kit deploy
 KIT_AUTO_ROLLBACK=true           # roll back when smoke tests fail after a deploy
 KIT_DEPLOY_SKIP_PUSH=false       # always -P: images are built elsewhere (by CI)
+KIT_CHECK_IMAGE=true             # with -P: check the registry has the image before deploying (docker manifest inspect)
 KIT_GROUP_ORDER=                 # groups deployed in this order; empty: alphabetical
 KIT_PRIMARY_ROLE=                # the role whose version is "the" version; empty: first plain role
 

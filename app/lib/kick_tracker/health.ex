@@ -61,9 +61,7 @@ defmodule KickTracker.Health do
         end
       end
 
-      cov = fn s, from ->
-        Coverage.fraction(Map.get(periods, {c.id, s}, []), from, now, pad_s(s))
-      end
+      cov = fn s, from -> coverage(Map.get(periods, {c.id, s}, []), c, s, from, now) end
 
       %{
         channel: c,
@@ -81,6 +79,52 @@ defmodule KickTracker.Health do
         }
       }
     end
+  end
+
+  @doc """
+  Poll and chat coverage over the last 30 days and since each channel was
+  added, by channel id, for the health page (the alerts don't need it).
+  It reads every period since the oldest channel was added, and moves
+  slowly, so it is kept for five minutes, for as long as the channels stay
+  the same (a channel just added shows at once).
+  """
+  @spec long_coverage(DateTime.t()) :: %{integer() => map()}
+  def long_coverage(now \\ DateTime.utc_now()) do
+    channels = Channels.list_all()
+    key = {__MODULE__, :long_coverage, Enum.map(channels, &{&1.id, &1.tracked_since})}
+
+    KickTracker.Cache.fetch(key, 300, fn ->
+      month_ago = DateTime.add(now, -30, :day)
+
+      periods =
+        case channels do
+          [] -> []
+          _ -> periods_since(Enum.min_by(channels, & &1.tracked_since, DateTime).tracked_since)
+        end
+        |> Enum.group_by(&{&1.channel_id, &1.source})
+
+      Map.new(channels, fn c ->
+        cov = fn s, from -> coverage(Map.get(periods, {c.id, s}, []), c, s, from, now) end
+
+        {c.id,
+         %{
+           api_30d: cov.("api", month_ago),
+           api_all: cov.("api", c.tracked_since),
+           chat_30d: cov.("chat", month_ago),
+           chat_all: cov.("chat", c.tracked_since)
+         }}
+      end)
+    end)
+  end
+
+  # The covered share of `[from, now)`, counted from when the channel was
+  # added: time before it was tracked isn't a gap. nil when nothing of the
+  # window is left.
+  defp coverage(periods, channel, source, from, now) do
+    from = Enum.max([from, channel.tracked_since], DateTime)
+
+    if DateTime.compare(from, now) == :lt,
+      do: Coverage.fraction(periods, from, now, pad_s(source))
   end
 
   defp state(true, true), do: :ok

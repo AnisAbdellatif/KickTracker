@@ -393,3 +393,114 @@ a.card-surface:hover, .card-surface.is-link:hover {
 .table :where(thead tr, tbody tr:not(:last-child)) { border-color: var(--color-base-300); }
 .table thead tr { border-bottom: 0; }
 .table tbody tr:hover { background: var(--surface-hover); }
+
+/* Admin chat log (§12.8). A panel that scrolls inside a card: a thin
+   scrollbar in the card's border colour, and no scroll chaining. */
+.scroll-panel {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-base-300) transparent;
+  overscroll-behavior: contain;
+}
+.scroll-panel::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-panel::-webkit-scrollbar-thumb { background: var(--color-base-300); border-radius: 999px; }
+.scroll-panel::-webkit-scrollbar-track { background: transparent; }
+
+/* A dropdown panel over the page. */
+.popover-panel { box-shadow: var(--shadow-pop); }
+
+/* A multi-select list: an option and its check box. */
+.picker-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: .5rem;
+  padding: .375rem .5rem;
+  border-radius: var(--radius-field);
+  font-size: .875rem;
+  text-align: start;
+}
+.picker-option:hover, .picker-option:focus-visible { background: var(--surface-hover); outline: none; }
+.picker-check {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: .25rem;
+}
+.picker-check.is-checked {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-primary-content);
+}
+
+/* A removable filter. */
+.filter-chip {
+  display: inline-flex;
+  max-width: 14rem;
+  align-items: center;
+  gap: .25rem;
+  padding: .25rem .375rem .25rem .5rem;
+  border-radius: 999px;
+  background: var(--surface-raised);
+  border: 1px solid var(--color-base-300);
+  font-size: .75rem;
+  line-height: 1rem;
+}
+.filter-chip:hover { border-color: var(--color-error); }
+
+/* A channel's name on its avatar hue (use with .avatar-N). */
+.channel-pill {
+  display: inline-block;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 .5rem;
+  border-radius: 999px;
+  background: var(--m-soft);
+  color: var(--m);
+  font-size: .6875rem;
+  line-height: 1.125rem;
+  font-weight: 600;
+}
+
+/* A chat feed: a row per message, a sticky header per day. */
+.chat-row {
+  display: flex;
+  gap: .75rem;
+  padding: .375rem .5rem;
+  border-radius: var(--radius-field);
+}
+.chat-row:hover { background: var(--surface-hover); }
+.day-divider {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: .5rem .5rem .375rem;
+  background: color-mix(in oklab, var(--color-base-100) 92%, transparent);
+  backdrop-filter: blur(6px);
+  color: var(--ink-muted);
+  font-size: .6875rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+/* A number edited in place: plain text until hovered or focused. */
+.retention-input {
+  width: 2.75rem;
+  appearance: textfield;
+  -moz-appearance: textfield;
+  padding: 0 .25rem;
+  border: 1px solid transparent;
+  border-radius: .25rem;
+  background: transparent;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+.retention-input::-webkit-outer-spin-button,
+.retention-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.retention-input:hover { border-color: var(--color-base-300); }
+.retention-input:focus { border-color: var(--color-primary); background: var(--surface-raised); outline: none; }

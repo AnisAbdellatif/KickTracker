@@ -267,6 +267,14 @@ if config_env() == :prod do
       port -> String.to_integer(port)
     end
 
+  # The sandbox only (.kamal/sandbox/README.md): the admin signs in by
+  # itself as this admin. Refused unless the site is served on this
+  # machine, so a production copied with it fails to start rather than
+  # opening its admin (see `KickTrackerWeb.AdminAuth.autologin_config!/2`).
+  config :kick_tracker,
+         :admin_autologin,
+         KickTrackerWeb.AdminAuth.autologin_config!(System.get_env("ADMIN_AUTOLOGIN"), host)
+
   config :kick_tracker, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :kick_tracker, KickTrackerWeb.Endpoint,

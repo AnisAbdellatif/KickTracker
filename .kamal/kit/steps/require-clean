@@ -16,6 +16,6 @@ kit_is_true "$(kit_conf KIT_CLEAN_IGNORE_UNTRACKED true)" && args+=(--untracked-
 changes=$(git -C "$KIT_PROJECT_DIR" status "${args[@]}")
 if [ -n "$changes" ]; then
   printf '%s\n' "$changes" >&2
-  kit_die "uncommitted changes (above): commit or stash them first"
+  kit_gate_die "uncommitted changes (above): commit or stash them first"
 fi
 kit_ok "working tree clean"

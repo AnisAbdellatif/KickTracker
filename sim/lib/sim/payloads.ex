@@ -438,7 +438,11 @@ defmodule Sim.Payloads do
     }
   end
 
-  defp asset(channel, kind), do: "https://sim.invalid/#{kind}/#{channel.slug}.webp"
+  # A picture the fake Kick serves itself (`/assets`, solid PNGs), at the
+  # address the code under test reaches it.
+  defp asset(channel, kind),
+    do:
+      "#{Application.get_env(:sim, :asset_url, "https://sim.invalid")}/assets/#{kind}/#{channel.slug}.png"
 
   @doc "A UUID shaped like Kick's (version 4 layout), stable for the same term."
   @spec uuid(term()) :: String.t()

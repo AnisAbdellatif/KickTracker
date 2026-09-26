@@ -16,6 +16,11 @@ defmodule KickTracker.Transfer.Import do
 
   Imported open coverage periods are closed at the export's time: the
   other collector stopped vouching for them then.
+
+  `tracked_since` travels only with history. The channel list alone brings
+  none, so its new channels are tracked from the import and channels
+  already here keep their date; claiming the other instance's date would
+  make the time between read as a gap.
   """
 
   alias KickTracker.{Privacy, Repo, Transfer}
@@ -181,6 +186,8 @@ defmodule KickTracker.Transfer.Import do
   # {table, sql, params}, in order. `:new_channels` stands for the ids of
   # the channels this import created.
   defp statements(manifest) do
+    history? = manifest["scope"] == "data"
+
     [
       {"removals",
        "INSERT INTO removals (kind, kick_user_id, removed_at) SELECT kind, kick_user_id, removed_at FROM s_removals ON CONFLICT DO NOTHING",
@@ -190,16 +197,18 @@ defmodule KickTracker.Transfer.Import do
       {"channels",
        """
        INSERT INTO channels (kick_user_id, kick_channel_id, chatroom_id, slug, timezone, tracked_since, active, public, inserted_at, updated_at)
-       SELECT s.kick_user_id, s.kick_channel_id, s.chatroom_id, s.slug, s.timezone, s.tracked_since,
+       SELECT s.kick_user_id, s.kick_channel_id, s.chatroom_id, s.slug, s.timezone,
+              #{if history?, do: "s.tracked_since", else: "now()"},
               s.active AND NOT EXISTS (SELECT 1 FROM channels a WHERE a.active AND lower(a.slug) = lower(s.slug)),
               s.public, now(), now()
        FROM s_channels s
        WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.kick_user_id = s.kick_user_id) AND #{@not_removed_channel}
        RETURNING id
        """, []},
+      # History from before a channel was tracked here moves its start back.
       {"channels_tracked_since",
-       "UPDATE channels c SET tracked_since = s.tracked_since FROM s_channels s WHERE c.kick_user_id = s.kick_user_id AND s.tracked_since < c.tracked_since",
-       []},
+       "UPDATE channels c SET tracked_since = s.tracked_since FROM s_channels s WHERE c.kick_user_id = s.kick_user_id AND s.tracked_since < c.tracked_since AND $1",
+       [history?]},
       {"map",
        "CREATE TEMP TABLE m_channels ON COMMIT DROP AS SELECT s.id AS old_id, c.id AS new_id FROM s_channels s JOIN channels c ON c.kick_user_id = s.kick_user_id WHERE #{@not_removed_channel}",
        []},

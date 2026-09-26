@@ -13,8 +13,9 @@ fi
 if kit_is_rollback && kit_is_true "$(kit_conf KIT_FREEZE_ALLOWS_ROLLBACK true)"; then exit 0; fi
 for file in "$KIT_CONFIG_DIR/FREEZE" ${KIT_DESTINATION:+"$KIT_CONFIG_DIR/FREEZE.$KIT_DESTINATION"}; do
   if [ -f "$file" ]; then
-    kit_die "deploys are frozen (${file#"$KIT_PROJECT_DIR"/}): $(head -c 500 "$file" | tr '\n' ' ')"
+    reason=$(head -c 500 "$file" | tr '\n' ' ' | sed 's/ *$//')
+    kit_gate_die "deploys are frozen (${file#"$KIT_PROJECT_DIR"/})${reason:+: $reason}; kit unfreeze lifts it"
   fi
 done
-kit_is_true "$(kit_conf KIT_FREEZE false)" && kit_die "deploys are frozen (KIT_FREEZE)"
+kit_is_true "$(kit_conf KIT_FREEZE false)" && kit_gate_die "deploys are frozen (KIT_FREEZE)"
 exit 0

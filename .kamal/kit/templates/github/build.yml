@@ -10,6 +10,8 @@ name: Build
 
 on:
   push:
+    # The branches you deploy from (KIT_DEPLOY_BRANCH, per destination):
+    # add dev for a staging that deploys it (docs/branches.md).
     branches: [main]
 
 permissions: {}

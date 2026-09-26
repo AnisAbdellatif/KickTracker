@@ -1,25 +1,23 @@
 <Layouts.app flash={@flash} wide={false} active={:about}>
   <article class="space-y-4 text-sm leading-relaxed">
     <h1 class="text-2xl font-semibold">{gettext("Privacy")}</h1>
-    <p class="opacity-70">
-      {gettext("Draft: to be reviewed before this site collects real data.")}
-    </p>
+    <p class="opacity-70">{gettext("Last updated 26 September 2026.")}</p>
 
     <h2 class="text-lg font-semibold">{gettext("What we store")}</h2>
     <ul class="list-disc ps-5 space-y-1">
       <li>
         {gettext(
-          "About tracked channels: public statistics (viewers, streams, titles, categories, follower totals, subscriptions, gifted subscriptions, Kicks, raids)."
+          "About tracked channels: public statistics (viewers, streams, titles, categories, follower totals, subscriptions, gifted subscriptions, Kicks), hosts sent or received, with the other channel as Kick reports it, and a copy of the channel's profile picture, served from this site so your browser never contacts Kick."
         )}
       </li>
       <li>
         {gettext(
-          "About people in a channel's audience: their public Kick user id and username, and when they chatted, followed, subscribed, gifted or sent Kicks. Never the text of a chat message."
+          "About people in a channel's audience: their public Kick user id and username, and when they chatted, followed, subscribed, gifted or sent Kicks."
         )}
       </li>
       <li>
         {gettext(
-          "Who chatted in which minute is deleted after 90 days. Per-stream counts are kept."
+          "The text of chat messages only on channels where chat logging is turned on (below). Everywhere else, we count messages and never keep what they say."
         )}
       </li>
       <li>
@@ -29,17 +27,81 @@
       </li>
     </ul>
 
+    <h2 id="chat-logging" class="text-lg font-semibold">{gettext("Chat logging")}</h2>
+    <p>
+      {gettext(
+        "Chat logging is off unless we turn it on for a channel, which we do only with the streamer's agreement. On those channels we keep every chat message (its text, who sent it, when, and which message it answered) and other chat events such as bans, deleted messages and pins. The log is kept for a set time per channel, then deleted. It is never published: only this site's administrators can read it."
+      )}
+    </p>
+    <%= if @chat_log.listed == [] and @chat_log.hidden == 0 do %>
+      <p>{gettext("Chat logging is not turned on for any channel.")}</p>
+    <% else %>
+      <p>{gettext("Chat is logged on:")}</p>
+      <ul :if={@chat_log.listed != []} id="logged-channels" class="list-disc ps-5 space-y-1">
+        <li :for={c <- @chat_log.listed}>
+          <.link navigate={~p"/c/#{c.slug}"} class="link">{c.slug}</.link>
+          ({ngettext("kept %{count} day", "kept %{count} days", c.retention_days)})
+        </li>
+      </ul>
+      <p :if={@chat_log.hidden > 0}>
+        {ngettext(
+          "and %{count} channel not listed on this site.",
+          "and %{count} channels not listed on this site.",
+          @chat_log.hidden
+        )}
+      </p>
+    <% end %>
+
+    <h2 class="text-lg font-semibold">{gettext("How long we keep it")}</h2>
+    <ul class="list-disc ps-5 space-y-1">
+      <li>{gettext("Who chatted in which minute: 90 days. Per-stream counts are kept.")}</li>
+      <li>{gettext("Logged chat: the time set for its channel (listed above).")}</li>
+      <li>
+        {gettext(
+          "Statistics, follows, subscriptions, gifts and Kicks: kept, as the history this site exists to show."
+        )}
+      </li>
+      <li>
+        {gettext(
+          "Encrypted backups, stored away from our server, are kept for about a week, so what we delete leaves them within that time. A standby copy on a second server keeps the last 30 days and follows deletions within minutes."
+        )}
+      </li>
+    </ul>
+
     <h2 class="text-lg font-semibold">{gettext("Why")}</h2>
     <p>
       {gettext(
-        "Our legal basis is legitimate interest: publishing statistics about public live streams, built only from public information, with the least personal data that makes them possible."
+        "Our legal basis is legitimate interest: publishing statistics about public live streams, built only from public information, with the least personal data that makes them possible; and, on channels whose streamer agreed, keeping a record of their chat."
+      )}
+    </p>
+    <p id="shown-people">
+      <%= cond do %>
+        <% @top_people and @support_page -> %>
+          {gettext(
+            "What this site shows about people in an audience: a stream's top chatters and supporters, and a channel's top supporters, by Kick username, with how many messages, subscriptions, gifts or Kicks. Nothing else about a person is published."
+          )}
+        <% @top_people -> %>
+          {gettext(
+            "What this site shows about people in an audience: a stream's top chatters and supporters, by Kick username, with how many messages, subscriptions, gifts or Kicks. Nothing else about a person is published."
+          )}
+        <% @support_page -> %>
+          {gettext(
+            "What this site shows about people in an audience: a channel's top supporters, by Kick username, with how many subscriptions, gifts or Kicks. Nothing else about a person is published."
+          )}
+        <% true -> %>
+          {gettext(
+            "Nothing that identifies a person in a channel's audience is shown on this site."
+          )}
+      <% end %>
+      {gettext(
+        "Logged chat is never published. We don't sell personal data or share it with anyone."
       )}
     </p>
 
     <h2 class="text-lg font-semibold">{gettext("Your rights")}</h2>
     <p>
       {gettext(
-        "You can ask what we hold about your Kick account, and ask us to delete it: your username, the per-person rows, and the raw event records naming you. Aggregate counts that no longer identify you stay. Write to %{contact} with your Kick username.",
+        "You can ask what we hold about your Kick account, object to it, and ask us to delete it: your username, the per-person rows, your logged chat messages, and the raw records naming you. Aggregate counts that no longer identify you stay. Write to %{contact} with your Kick username.",
         contact: contact()
       )}
     </p>

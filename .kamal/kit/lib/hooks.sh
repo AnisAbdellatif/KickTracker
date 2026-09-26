@@ -16,7 +16,7 @@
 # kit_hook_run NAME: runs hook NAME. Unknown hook names work too (a hook
 # Kamal adds later just needs a shim and a KIT_HOOK_ list).
 kit_hook_run() {
-  local hook=$1 var steps step path skip rc started
+  local hook=$1 var steps step path skip reason rc started
 
   # A kamal command run from inside a step (a migration through `kamal app
   # exec`, say) would run pre-connect again: the outer command's hooks
@@ -29,11 +29,16 @@ kit_hook_run() {
   var="KIT_HOOK_$(kit_upper "$hook")"
   steps=$(kit_conf "$var" "")
   skip=$(kit_conf KIT_SKIP "")
+  reason=$(kit_conf KIT_SKIP_REASON "")
 
   for step in $(kit_words "$steps") $(_kit_hook_local_steps "$hook"); do
     if kit_in_list "$(basename "$step")" "$skip"; then
-      kit_warn "$hook: skipping $step (KIT_SKIP)"
-      kit_notify warning "$hook: step $step skipped by KIT_SKIP (performer: ${KAMAL_PERFORMER:-unknown})"
+      kit_skip_reason_check || return 1
+      kit_warn "$hook: skipping $step (KIT_SKIP${reason:+: $reason})"
+      # Once per kit run: each group's deploy runs the hooks again.
+      if _kit_skip_first "$(basename "$step")"; then
+        kit_notify warning "$hook: step $(basename "$step") skipped by KIT_SKIP${reason:+ (\"$reason\")}, by ${KAMAL_PERFORMER:-${USER:-unknown}}"
+      fi
       continue
     fi
 
@@ -63,6 +68,24 @@ kit_hook_run() {
     _kit_hook_cache "$hook" "$step"
   done
   return 0
+}
+
+# kit_skip_reason_check: when KIT_SKIP skips anything, KIT_SKIP_REASON must
+# say why if KIT_SKIP_REASON_REQUIRED (e.g. _PRODUCTION) is on.
+kit_skip_reason_check() {
+  [ -n "$(kit_conf KIT_SKIP "")" ] || return 0
+  [ -z "$(kit_conf KIT_SKIP_REASON "")" ] || return 0
+  kit_is_true "$(kit_conf KIT_SKIP_REASON_REQUIRED false)" || return 0
+  kit_error "skipping steps${KIT_DESTINATION:+ on $KIT_DESTINATION} needs a reason: KIT_SKIP_REASON=\"why\" (KIT_SKIP_REASON_REQUIRED)"
+  return 1
+}
+
+# _kit_skip_first STEP: true the first time STEP is skipped in this kit run
+# (always, outside one).
+_kit_skip_first() {
+  [ -n "${KIT_RUN_DIR:-}" ] && [ -d "$KIT_RUN_DIR" ] || return 0
+  [ ! -f "$KIT_RUN_DIR/skipped-$1" ] || return 1
+  : >"$KIT_RUN_DIR/skipped-$1"
 }
 
 # The project's own scripts for this hook, in name order.

@@ -33,7 +33,9 @@ config :kick_tracker, Oban,
        {"17 3 * * *", KickTracker.Workers.Rollups, args: %{"hours" => 48}},
        {"42 4 * * *", KickTracker.Workers.Transfer, args: %{"kind" => "prune"}},
        # Fills our gaps from the shadow collector, when one is configured.
-       {"*/5 * * * *", KickTracker.Workers.Backfill}
+       {"*/5 * * * *", KickTracker.Workers.Backfill},
+       {"37 * * * *", KickTracker.Workers.ChatLog, args: %{"prune" => true}},
+       {"13 5 * * *", KickTracker.Workers.ChannelAvatar, args: %{"sweep" => true}}
      ]}
   ]
 

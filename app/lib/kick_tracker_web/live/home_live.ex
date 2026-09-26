@@ -186,7 +186,7 @@ defmodule KickTrackerWeb.HomeLive do
                 class="card-surface block p-4"
               >
                 <div class="flex items-center gap-3">
-                  <.avatar name={l.slug} />
+                  <.avatar name={l.slug} channel_id={l.channel_id} />
                   <div class="min-w-0 flex-1">
                     <div class="flex items-center gap-2">
                       <span class="truncate font-semibold">{l.slug}</span>
@@ -290,7 +290,7 @@ defmodule KickTrackerWeb.HomeLive do
                       navigate={~p"/c/#{r.slug}?#{Period.to_params(@period)}"}
                       class="flex items-center gap-2.5 font-medium hover:underline"
                     >
-                      <.avatar name={r.slug} class="size-7 text-xs" />
+                      <.avatar name={r.slug} channel_id={r.channel_id} class="size-7 text-xs" />
                       <span class="truncate">{r.slug}</span>
                     </.link>
                     <div class={["meter ms-9.5 mt-1.5 max-w-48", "m-#{board_metric(@metric)}"]}>

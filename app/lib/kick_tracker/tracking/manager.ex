@@ -181,6 +181,13 @@ defmodule KickTracker.Tracking.Manager do
         state -> start(state, channel)
       end
 
+    # Chat logging is turned on and off from the admin (a web node): its
+    # broadcast reaches running channels at once when the nodes are
+    # connected; this makes sure they have it within a minute.
+    for channel <- active,
+        MapSet.member?(running_ids, channel.id),
+        do: Channels.announce(channel.id, %{chat_log: channel.chat_log})
+
     publish(state)
   end
 

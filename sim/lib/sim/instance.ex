@@ -13,7 +13,14 @@ defmodule Sim.Instance do
   alias Sim.{Clock, Scenario}
 
   @spec start_link(keyword()) :: Supervisor.on_start()
-  def start_link(opts \\ []), do: Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(opts \\ []) do
+    with {:ok, pid} <- Supervisor.start_link(__MODULE__, opts, name: __MODULE__) do
+      # Where the pictures it hands out are fetched from: itself, unless the
+      # code under test reaches it at another address (`--asset-url`).
+      Application.put_env(:sim, :asset_url, Keyword.get(opts, :asset_url) || base_url())
+      {:ok, pid}
+    end
+  end
 
   @impl true
   def init(opts) do

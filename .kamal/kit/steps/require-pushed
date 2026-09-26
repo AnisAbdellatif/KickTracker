@@ -14,14 +14,14 @@ kit_is_rollback && exit 0
 remote=$(kit_conf KIT_GIT_REMOTE origin)
 mode=$(kit_conf KIT_PUSHED_MODE contained)
 branch=$(git -C "$KIT_PROJECT_DIR" symbolic-ref --quiet --short HEAD || true)
-[ -n "$branch" ] || kit_die "not on a branch (detached HEAD)"
+[ -n "$branch" ] || kit_gate_die "not on a branch (detached HEAD)"
 git -C "$KIT_PROJECT_DIR" fetch --quiet "$remote" "$branch" || kit_die "could not fetch $remote/$branch"
 head=$(git -C "$KIT_PROJECT_DIR" rev-parse HEAD)
 tip=$(git -C "$KIT_PROJECT_DIR" rev-parse "$remote/$branch")
 case $mode in
-  tip) [ "$head" = "$tip" ] || kit_die "HEAD ($head) isn't the tip of $remote/$branch ($tip): push or pull first" ;;
+  tip) [ "$head" = "$tip" ] || kit_gate_die "HEAD ($head) isn't the tip of $remote/$branch ($tip): push or pull first" ;;
   contained) git -C "$KIT_PROJECT_DIR" merge-base --is-ancestor "$head" "$tip" ||
-    kit_die "HEAD ($head) isn't on $remote/$branch: push it first" ;;
+    kit_gate_die "HEAD ($head) isn't on $remote/$branch: push it first" ;;
   *) kit_die "KIT_PUSHED_MODE must be contained or tip (is '$mode')" ;;
 esac
 kit_ok "pushed to $remote/$branch"

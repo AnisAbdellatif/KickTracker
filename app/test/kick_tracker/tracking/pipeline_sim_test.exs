@@ -128,6 +128,22 @@ defmodule KickTracker.Tracking.PipelineSimTest do
     assert length(subs) == length(SubscriptionSync.events())
     assert eventually(fn -> ChannelServer.whereis(off.kick_user_id) == nil end)
   end
+
+  test "a sync removes more subscriptions than one request takes", %{live: live, off: off} do
+    # What a fresh instance on an app with a previous instance's
+    # subscriptions sees: hundreds to remove at once.
+    for user_id <- 1..20, do: {:ok, _} = API.subscribe(user_id, SubscriptionSync.events())
+    {:ok, subs} = API.subscriptions()
+    assert length(subs) > 100
+
+    :ok = SubscriptionSync.perform(%Oban.Job{})
+    {:ok, subs} = API.subscriptions()
+
+    assert length(subs) == 2 * length(SubscriptionSync.events())
+
+    assert subs |> Enum.map(& &1["broadcaster_user_id"]) |> Enum.uniq() |> Enum.sort() ==
+             Enum.sort([live.kick_user_id, off.kick_user_id])
+  end
 end
 
 defmodule KickTracker.Tracking.FollowersSimTest do
@@ -272,6 +288,102 @@ defmodule KickTracker.Tracking.ChatSimTest do
       Repo.query!("SELECT * FROM chat_minutes, chat_minute_users, chat_stream_users, kick_users")
 
     refute inspect(dump) =~ "secret"
+  end
+
+  describe "chat logging (§12.8)" do
+    test "off by default: no message text anywhere; on: messages and other events as sent",
+         %{channel: c} do
+      say(@a, "a secret message")
+      assert eventually(fn -> flush(c) && mine("chat_minute_users", "user_id") != [] end)
+      settle()
+      assert rows("chat_messages", ["sent_at"]) == []
+      refute inspect(Repo.query!("SELECT * FROM chat_minute_users, kick_users").rows) =~ "secret"
+
+      # Turned on: the running processes hear it.
+      {:ok, _} = KickTracker.ChatLog.configure(c, true, 90)
+      pid = ChannelServer.whereis(c.kick_user_id)
+      assert eventually(fn -> :sys.get_state(pid).channel.chat_log end)
+
+      assert eventually(fn ->
+               :sys.get_state(KickTracker.Tracking.whereis({:chat, c.id})).channel.chat_log
+             end)
+
+      say(@a, "first logged")
+      say(@b, "second logged")
+
+      topic = "chatrooms.#{c.chatroom_id}.v2"
+
+      Sim.Pusher.Hub.broadcast(topic, [
+        Jason.encode!(%{
+          "event" => "App\\Events\\SomethingElse",
+          "channel" => topic,
+          "data" => ~s({"opaque":1})
+        })
+      ])
+
+      assert eventually(fn ->
+               flush(c)
+               settle()
+
+               rows("chat_messages", ["sent_at"])
+               |> Enum.filter(&(&1.user_id in [@a, @b]))
+               |> Enum.map(& &1.content)
+               |> Enum.sort() == ["first logged", "second logged"]
+             end)
+
+      assert [%{channel_id: id, event: "App\\Events\\SomethingElse", payload: payload}] =
+               rows("chat_log_events", ["id"])
+
+      assert id == c.id
+      assert payload == %{"data" => %{"opaque" => 1}}
+
+      # Turned off: nothing more is kept.
+      {:ok, _} = KickTracker.ChatLog.configure(c, false, 90)
+      assert eventually(fn -> not :sys.get_state(pid).channel.chat_log end)
+      say(@a, "not logged")
+
+      assert eventually(fn ->
+               flush(c) && Enum.sum_by(mine("chat_minute_users", "user_id"), & &1.messages) == 4
+             end)
+
+      settle()
+      refute Enum.any?(rows("chat_messages", ["sent_at"]), &(&1.content == "not logged"))
+    end
+
+    test "a change made only in the database reaches the channel within a sync", %{channel: c} do
+      Repo.query!("UPDATE channels SET chat_log = true WHERE id = $1", [c.id])
+      KickTracker.Collector.Tracked.refresh()
+      Manager.sync()
+      pid = ChannelServer.whereis(c.kick_user_id)
+      assert eventually(fn -> :sys.get_state(pid).channel.chat_log end)
+    end
+  end
+
+  test "a host is stored as sent; other unknown events are not", %{channel: c} do
+    topic = "chatrooms.#{c.chatroom_id}.v2"
+
+    frame = fn name ->
+      Jason.encode!(%{"event" => name, "channel" => topic, "data" => ~s({"opaque":"a host"})})
+    end
+
+    Sim.Pusher.Hub.broadcast(topic, [
+      frame.("App\\Events\\StreamHostEvent"),
+      frame.("App\\Events\\SomethingElse")
+    ])
+
+    assert eventually(fn -> rows("channel_events", ["id"]) != [] end)
+    settle()
+
+    assert [%{channel_id: id, kind: "hosted_by", viewers: nil, payload: payload}] =
+             rows("channel_events", ["id"])
+
+    assert id == c.id
+
+    assert payload == %{
+             "event" => "App\\Events\\StreamHostEvent",
+             "pusher_channel" => topic,
+             "data" => %{"opaque" => "a host"}
+           }
   end
 
   test "a dropped connection is a recorded gap, then chat resumes", %{channel: c, socket: socket} do

@@ -188,9 +188,9 @@ kit_sandbox_server_up() {
     kit_die "the sandbox server didn't answer on 127.0.0.1:$SANDBOX_SSH_PORT (docker logs $SANDBOX_SERVER)"
 }
 
-# sshd greets with "SSH-2.0-…" as soon as it accepts connections. (Read over
-# bash's /dev/tcp: OpenSSH's client refuses to run as a user with no
-# passwd entry, which the deployer's is; Kamal's own SSH library doesn't.)
+# sshd greets with "SSH-2.0-…" as soon as it accepts connections. (Read
+# here over bash's /dev/tcp: no client, key or container needed for each
+# try, only whether sshd is up.)
 _sbx_sshd_answers() {
   local banner=""
   { exec 3<>"/dev/tcp/127.0.0.1/$SANDBOX_SSH_PORT"; } 2>/dev/null || return 1

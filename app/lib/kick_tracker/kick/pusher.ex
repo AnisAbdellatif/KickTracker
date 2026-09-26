@@ -3,15 +3,23 @@ defmodule KickTracker.Kick.Pusher do
   Frames of Kick's chat websocket (Pusher protocol 7), in and out
   (project.md §2.4). Pure.
 
-  A frame's `data` is itself a JSON string. From a chat message only the
-  sender, the message id and the time are read: **never the text**
-  (AGENTS.md §7). Chat times end in `+00:00`, not `Z`.
+  A frame's `data` is itself a JSON string. A chat message comes out in
+  two parts: the counted part (sender, message id, time), which is all
+  that goes further for most channels, and its text and reply target,
+  which only a channel with chat logging on keeps (§12.8, AGENTS.md §7).
+  Chat times end in `+00:00`, not `Z`.
 
-  Raid and host events haven't been recorded yet, so their names are
-  unknown (project.md §16): every event this module doesn't know comes out
-  as `{:other, name, channel}`, without its data, so the caller can notice
-  new names without keeping what they carry.
+  Hosts (Kick's raids) come as two events whose shape hasn't been seen
+  yet: `StreamHostEvent` in the receiving channel's chatroom and
+  `ChatMoveToSupportedChannelEvent` on the hosting channel's feed. They
+  come out as `{:raw, name, channel, data}` with their data as sent, to be
+  stored and parsed once real ones show their fields (project.md §16).
+  Every other event this module doesn't know comes out as
+  `{:other, name, channel, data}`: the caller logs the name, and keeps the
+  data only for a channel with chat logging on.
   """
+
+  @raw ["App\\Events\\StreamHostEvent", "App\\Events\\ChatMoveToSupportedChannelEvent"]
 
   @type frame ::
           {:connected, activity_timeout_s :: pos_integer()}
@@ -24,10 +32,19 @@ defmodule KickTracker.Kick.Pusher do
                sender_id: integer(),
                username: String.t() | nil,
                at: DateTime.t()
-             }}
+             }, text()}
           | {:error, integer() | nil, String.t() | nil}
-          | {:other, String.t(), String.t() | nil}
+          | {:raw, String.t(), String.t() | nil, term()}
+          | {:other, String.t(), String.t() | nil, term()}
           | :invalid
+
+  @typedoc "A message's text and what it replies to, for chat logging only."
+  @type text :: %{
+          content: String.t() | nil,
+          type: String.t() | nil,
+          reply_to_message_id: String.t() | nil,
+          reply_to_user_id: integer() | nil
+        }
 
   @doc "Decodes one text frame from the server."
   @spec decode(String.t()) :: frame()
@@ -62,19 +79,48 @@ defmodule KickTracker.Kick.Pusher do
     with %{"sender" => %{"id" => sender_id} = sender, "created_at" => created_at}
          when is_integer(sender_id) <- data(frame),
          {:ok, at, _} <- DateTime.from_iso8601(created_at) do
+      data = data(frame)
+      metadata = if is_map(data["metadata"]), do: data["metadata"], else: %{}
+
       {:chat,
        %{
-         id: data(frame)["id"],
+         id: data["id"],
          sender_id: sender_id,
          username: sender["username"],
          at: KickTracker.Metrics.Sessionizer.norm(at)
+       },
+       %{
+         content: string(data["content"]),
+         type: string(data["type"]),
+         reply_to_message_id: string(dig(metadata, "original_message")),
+         reply_to_user_id: integer(dig(metadata, "original_sender"))
        }}
     else
       _ -> :invalid
     end
   end
 
-  defp decode(event, frame), do: {:other, event, frame["channel"]}
+  defp decode(event, frame) when event in @raw,
+    do: {:raw, event, frame["channel"], data(frame) || frame["data"]}
+
+  defp decode(event, frame), do: {:other, event, frame["channel"], data(frame) || frame["data"]}
+
+  # The id of an object inside the message's metadata, however it came.
+  defp dig(metadata, key) do
+    case metadata do
+      %{^key => %{"id" => id}} -> id
+      _ -> nil
+    end
+  end
+
+  defp string(v) when is_binary(v), do: v
+  defp string(_), do: nil
+  defp integer(v) when is_integer(v), do: v
+  defp integer(_), do: nil
+
+  @doc "The events kept as sent, for their channel's `channel_events`."
+  @spec raw_events() :: [String.t()]
+  def raw_events, do: @raw
 
   # `data` arrives as a JSON string (sometimes already an object).
   defp data(%{"data" => d}) when is_binary(d) do
