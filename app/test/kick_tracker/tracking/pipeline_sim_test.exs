@@ -128,6 +128,22 @@ defmodule KickTracker.Tracking.PipelineSimTest do
     assert length(subs) == length(SubscriptionSync.events())
     assert eventually(fn -> ChannelServer.whereis(off.kick_user_id) == nil end)
   end
+
+  test "a sync removes more subscriptions than one request takes", %{live: live, off: off} do
+    # What a fresh instance on an app with a previous instance's
+    # subscriptions sees: hundreds to remove at once.
+    for user_id <- 1..20, do: {:ok, _} = API.subscribe(user_id, SubscriptionSync.events())
+    {:ok, subs} = API.subscriptions()
+    assert length(subs) > 100
+
+    :ok = SubscriptionSync.perform(%Oban.Job{})
+    {:ok, subs} = API.subscriptions()
+
+    assert length(subs) == 2 * length(SubscriptionSync.events())
+
+    assert subs |> Enum.map(& &1["broadcaster_user_id"]) |> Enum.uniq() |> Enum.sort() ==
+             Enum.sort([live.kick_user_id, off.kick_user_id])
+  end
 end
 
 defmodule KickTracker.Tracking.FollowersSimTest do

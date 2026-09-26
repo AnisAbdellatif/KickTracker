@@ -327,9 +327,9 @@ An open period (`to_at` null) would keep claiming coverage after a collector die
 
 ## Webhook Subscriptions
 
-**Current:** `SubscriptionSync` (Oban, on every change to the tracked set and every 15 minutes) subscribes each active channel to the seven event types we use (status, metadata, follows, subs, resubs, gifts, Kicks), removes subscriptions of untracked channels, duplicates and unused types, and restores ones Kick cancelled. The delivery URL is set once in the Kick app's settings. (updated 2026-09-24 12:40)
+**Current:** `SubscriptionSync` (Oban, on every change to the tracked set and every 15 minutes) subscribes each active channel to the seven event types we use (status, metadata, follows, subs, resubs, gifts, Kicks), removes subscriptions of untracked channels, duplicates and unused types, and restores ones Kick cancelled. Removals go 50 ids per request. The delivery URL is set once in the Kick app's settings. (updated 2026-09-26 15:40)
 
-A sync also runs when the collector boots, so a fresh collector gets its webhooks at once (found in the live run: it waited for the next cron). Kick's subscription API takes a broadcaster, event types and `method: webhook`, with no URL, so "pointing at the ingress URL" in the plan is an app setting, not code. Bans, redemptions and chat aren't subscribed: nothing reads them (chat comes from Pusher).
+A sync also runs when the collector boots, so a fresh collector gets its webhooks at once (found in the live run: it waited for the next cron). Kick's subscription API takes a broadcaster, event types and `method: webhook`, with no URL, so "pointing at the ingress URL" in the plan is an app setting, not code. Bans, redemptions and chat aren't subscribed: nothing reads them (chat comes from Pusher). Removals were one request for every id until the sandbox, started on its own Kick app with no channels yet, removed a previous run's ~330 subscriptions in one `DELETE` and Kick answered 400 "Invalid request" on every attempt. Kick doesn't document a limit and no recording shows one; 50 is Kick's limit for the other batched calls, a guess that costs nothing if the real limit is higher. The simulator accepts any number, so it doesn't model a limit we haven't seen stated.
 
 ## Jobs
 
