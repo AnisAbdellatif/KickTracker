@@ -261,6 +261,42 @@ defmodule KickTrackerWeb.Admin.ChatLogLiveTest do
     assert public_csp =~ "img-src 'self' data: blob:;"
   end
 
+  test "refresh loads the messages logged since the page opened, with the same filters",
+       %{conn: conn} do
+    c = channel!(slug: "somestreamer")
+    other = channel!(slug: "otherstreamer")
+    now = DateTime.utc_now()
+
+    ChatLog.insert_messages(c.id, [
+      ChatLog.message_row(%{id: "m1", sender_id: 7, at: DateTime.add(now, -60)}, %{
+        content: "before",
+        type: "message"
+      })
+    ])
+
+    {:ok, view, _} = live(conn, ~p"/admin/chat-log?#{%{"channels" => c.id, "period" => "24h"}}")
+    assert has_element?(view, "#chat-log-messages", "before")
+
+    ChatLog.insert_messages(c.id, [
+      ChatLog.message_row(%{id: "m2", sender_id: 7, at: now}, %{
+        content: "just now",
+        type: "message"
+      })
+    ])
+
+    ChatLog.insert_messages(other.id, [
+      ChatLog.message_row(%{id: "m3", sender_id: 7, at: now}, %{
+        content: "elsewhere",
+        type: "message"
+      })
+    ])
+
+    refute has_element?(view, "#chat-log-messages", "just now")
+    view |> element("#chat-log-refresh") |> render_click()
+    assert has_element?(view, "#chat-log-messages", "just now")
+    refute has_element?(view, "#chat-log-messages", "elsewhere")
+  end
+
   test "the export is the filtered log as CSV, oldest first; audited", %{conn: conn} do
     a = channel!(slug: "somestreamer")
     b = channel!(slug: "otherstreamer")

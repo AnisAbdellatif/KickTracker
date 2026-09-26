@@ -133,7 +133,9 @@ export const Chart = {
     const src = (this.src = this.el.dataset.src)
     const seq = (this.seq = (this.seq || 0) + 1)
     if (!quiet) this.el.classList.add("chart-loading")
-    fetch(src, {headers: {accept: "application/json"}})
+    // A refresh asks for the data as it is now: the browser checks back with
+    // the server (a 304 when nothing changed) rather than reusing its copy.
+    fetch(src, {headers: {accept: "application/json"}, cache: quiet ? "no-cache" : "default"})
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((data) => {
         // A newer request was made while this was on its way: it draws.

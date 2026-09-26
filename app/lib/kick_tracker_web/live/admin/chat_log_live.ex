@@ -178,6 +178,19 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
      )}
   end
 
+  # The latest messages for the same filters. A preset period ("last
+  # 24h") is read again, so it ends now rather than when the page opened;
+  # older pages loaded with "Older messages" are dropped for the first one.
+  def handle_event("refresh", _params, socket) do
+    {filters, _form} = ChatLogFilters.parse(socket.assigns.form)
+
+    {:noreply,
+     socket
+     |> assign(filters: Map.put(filters, :tz, socket.assigns.tz))
+     |> assign(summary: ChatLog.summary(), logged: ChatLog.channels())
+     |> load()}
+  end
+
   def handle_event("more", _params, socket) do
     last = List.last(socket.assigns.messages)
 
@@ -462,6 +475,17 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
           <header class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 class="font-semibold">{gettext("Browse")}</h2>
             <div class="flex items-center gap-1">
+              <button
+                :if={@viewing?}
+                id="chat-log-refresh"
+                type="button"
+                phx-click="refresh"
+                class="btn btn-sm btn-ghost gap-1"
+                title={gettext("Load the latest messages")}
+              >
+                <.icon name="hero-arrow-path" class="size-4 in-[.phx-click-loading]:animate-spin" />
+                {gettext("Refresh")}
+              </button>
               <a
                 :if={@viewing?}
                 id="chat-log-export"

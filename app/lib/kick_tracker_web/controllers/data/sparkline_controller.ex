@@ -27,7 +27,7 @@ defmodule KickTrackerWeb.Data.SparklineController do
             Map.fetch!(Reports.sparklines([channel.id]), channel.id)
           end)
 
-        JSON.send(conn, %{values: values}, DateTime.utc_now())
+        JSON.send(conn, %{values: values}, DateTime.utc_now(), shared: true)
     end
   end
 end

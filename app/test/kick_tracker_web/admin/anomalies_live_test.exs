@@ -84,6 +84,30 @@ defmodule KickTrackerWeb.Admin.AnomaliesLiveTest do
     assert html =~ "median of 5 earlier streams"
   end
 
+  test "a live stream is followed: read again each minute, its chart refreshing, until it ends",
+       %{conn: conn, target: target} do
+    KickTracker.Repo.query!(
+      "UPDATE streams SET ended_at = NULL, end_source = NULL WHERE id = $1",
+      [target]
+    )
+
+    {:ok, view, _} = live(conn, ~p"/admin/anomalies/#{target}")
+
+    assert has_element?(view, "#anomaly-chart[data-refresh='60']")
+    assert :sys.get_state(view.pid).socket.assigns.refresh_ref
+
+    # The minute's timer reads it again; once it has ended, no more timers.
+    KickTracker.Repo.query!(
+      "UPDATE streams SET ended_at = now(), end_source = 'event' WHERE id = $1",
+      [target]
+    )
+
+    send(view.pid, :refresh)
+    render(view)
+    refute has_element?(view, "#anomaly-chart[data-refresh]")
+    refute :sys.get_state(view.pid).socket.assigns.refresh_ref
+  end
+
   test "the chart's data carries the findings as shaded stretches", %{conn: conn, target: target} do
     data =
       conn

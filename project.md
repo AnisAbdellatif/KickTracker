@@ -1408,7 +1408,11 @@ Kicks likewise with ingress coverage.
   Responses get an ETag and a `Cache-Control`, so Caddy or Cloudflare can
   serve repeat visitors without touching the app: a day for ranges ending
   more than two days ago, 30s for ranges reaching into the last two days
-  (rollups and late events can still change them).
+  (rollups and late events can still change them). A range that reaches
+  now (a live stream, a rolling period) is revalidated every time, so a
+  chart refreshing it (every minute while live) sees each new reading;
+  an unchanged answer is a 304. The admin's anomalies page reads a live
+  stream again every minute too, findings and chart.
 - **Live over LiveView:** the page subscribes to `"channel:<id>"`; new
   readings are pushed to the chart hook with `push_event` (append a point),
   at most every 60s. Chart data is **never kept in LiveView assigns**, so a

@@ -187,9 +187,21 @@ defmodule KickTrackerWeb.PublicSiteTest do
 
     assert conn2.status == 304
 
-    # A range reaching now is cached briefly.
+    # A range reaching now is checked back every time: a chart refreshing
+    # it sees each new reading (an unchanged answer is a 304).
     conn3 = get(conn, "/data/v1/channels/dailystreamer/viewers?period=7d")
-    assert get_resp_header(conn3, "cache-control") == ["public, max-age=30"]
+    assert get_resp_header(conn3, "cache-control") == ["public, max-age=0, must-revalidate"]
+    [etag3] = get_resp_header(conn3, "etag")
+
+    assert conn
+           |> put_req_header("if-none-match", etag3)
+           |> get("/data/v1/channels/dailystreamer/viewers?period=7d")
+           |> Map.fetch!(:status) == 304
+
+    # A recent range that has ended is cached briefly.
+    to = DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.to_unix()
+    conn4 = get(conn, "/data/v1/channels/dailystreamer/viewers?from=#{to - 86_400}&to=#{to}")
+    assert get_resp_header(conn4, "cache-control") == ["public, max-age=30"]
   end
 
   test "the home page updates live from the aggregated broadcast", %{conn: conn} do

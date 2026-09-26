@@ -6,11 +6,17 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
   shaded, and its figures against the channel's usual ones.
 
   Signs for review, never a verdict: nothing here reaches the public site.
+
+  A stream still live is read again every minute (its findings, and the
+  chart's data), so the page follows it as it goes; once it has ended the
+  page stops.
   """
 
   use KickTrackerWeb, :live_view
 
   alias KickTracker.{Anomalies, Channels, Reports}
+
+  @refresh_ms 60_000
 
   @impl true
   def mount(_params, _session, socket),
@@ -22,7 +28,10 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
          %{} = stream <- Reports.stream(id),
          channel = Channels.get!(stream.channel_id),
          %{} = result <- Anomalies.stream(channel, id) do
-      {:noreply, assign(socket, channel: channel, stream: stream, result: result)}
+      {:noreply,
+       socket
+       |> assign(channel: channel, stream: stream, result: result)
+       |> schedule(is_nil(stream.ended_at))}
     else
       _ -> raise KickTrackerWeb.NotFoundError, "no such stream"
     end
@@ -34,12 +43,31 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
     channel =
       Enum.find(channels, &(to_string(&1.id) == params["channel"])) || List.first(channels)
 
+    results = if(channel, do: Anomalies.channel_streams(channel), else: [])
+
     {:noreply,
-     assign(socket,
-       channels: channels,
-       channel: channel,
-       results: if(channel, do: Anomalies.channel_streams(channel), else: [])
-     )}
+     socket
+     |> assign(channels: channels, channel: channel, results: results)
+     |> schedule(Enum.any?(results, &is_nil(&1.stream.ended_at)))}
+  end
+
+  # Read again in a minute while a stream shown is live: its findings move
+  # as it goes. One timer at a time, whatever the page was patched to.
+  defp schedule(socket, live?) do
+    if ref = socket.assigns[:refresh_ref], do: Process.cancel_timer(ref)
+    ref = if live? and connected?(socket), do: Process.send_after(self(), :refresh, @refresh_ms)
+    assign(socket, refresh_ref: ref)
+  end
+
+  @impl true
+  def handle_info(:refresh, %{assigns: %{live_action: :show}} = socket) do
+    params = %{"id" => to_string(socket.assigns.stream.id)}
+    handle_params(params, nil, assign(socket, refresh_ref: nil))
+  end
+
+  def handle_info(:refresh, socket) do
+    params = %{"channel" => socket.assigns.channel && to_string(socket.assigns.channel.id)}
+    handle_params(params, nil, assign(socket, refresh_ref: nil))
   end
 
   @impl true
@@ -70,6 +98,7 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
           id="anomaly-chart"
           kind="stream"
           src={~p"/admin/anomalies/#{@stream.id}/chart"}
+          refresh={if is_nil(@stream.ended_at), do: 60}
           opts={%{labels: chart_labels()}}
           class="h-[30rem]"
           title={gettext("Viewers and chat, findings shaded")}
