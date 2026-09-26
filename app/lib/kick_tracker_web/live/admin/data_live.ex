@@ -14,7 +14,7 @@ defmodule KickTrackerWeb.Admin.DataLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, page_title: gettext("Data"), channels: Channels.list_all())}
+    {:ok, assign(socket, page_title: gettext("Corrections"), channels: Channels.list_all())}
   end
 
   @impl true
@@ -158,173 +158,252 @@ defmodule KickTrackerWeb.Admin.DataLive do
     ~H"""
     <Layouts.admin flash={@flash} current_admin={@current_admin} active={:data}>
       <div phx-hook="Format" id="data-page">
-        <.header>
-          {gettext("Data")}
+        <.page_header title={gettext("Corrections")} icon="hero-wrench-screwdriver">
           <:subtitle>
-            {gettext("Corrections are recorded on top of the raw data, never edits of it.")}
+            {gettext(
+              "Exclude or merge streams, annotate timelines and recompute figures. Corrections are recorded on top of the raw data, never edits of it, and can be revoked."
+            )}
           </:subtitle>
-        </.header>
-
-        <form id="pick-channel" phx-change="pick" class="mb-4">
-          <select name="channel" class="select select-sm w-64">
-            <option :for={c <- @channels} value={c.id} selected={@channel && @channel.id == c.id}>
-              {c.slug}
-            </option>
-          </select>
-        </form>
-
-        <div :if={@channel} class="grid gap-6 lg:grid-cols-2">
-          <section>
-            <h2 class="font-semibold">{gettext("Streams")}</h2>
-            <table id="data-streams" class="table table-xs mt-2">
-              <thead>
-                <tr>
-                  <th>{gettext("Start")}</th><th>{gettext("Duration")}</th><th>{gettext("Peak")}</th><th>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr :for={s <- @stream_rows} id={"data-stream-#{s.id}"}>
-                  <td>
-                    <.link navigate={~p"/c/#{@channel.slug}/streams/#{s.id}"} class="link"><.time at={
-                      s.started_at
-                    } /></.link>
-                    <span :if={s.excluded?} class="badge badge-warning badge-xs">{gettext("excluded")}</span>
-                    <span :if={merged?(@corrections, s.id)} class="badge badge-info badge-xs">{gettext(
-                      "merged"
-                    )}</span>
-                  </td>
-                  <td><.duration seconds={s.airtime_s} /></td>
-                  <td><.num value={s.peak_viewers} /></td>
-                  <td class="whitespace-nowrap">
-                    <form :if={!s.excluded?} phx-submit="exclude" class="inline-flex gap-1">
-                      <input type="hidden" name="stream" value={s.id} />
-                      <input name="note" class="input input-xs w-28" placeholder={gettext("why")} />
-                      <button
-                        class="btn btn-xs"
-                        data-confirm={gettext("Exclude this stream from every figure?")}
-                      >{gettext("Exclude")}</button>
-                    </form>
-                    <button
-                      phx-click="merge"
-                      phx-value-stream={s.id}
-                      class="btn btn-xs btn-ghost"
-                      data-confirm={gettext("Merge this stream into the one before it?")}
-                    >
-                      {gettext("Merge into previous")}
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <section>
-            <h2 class="font-semibold">{gettext("Corrections")}</h2>
-            <p :if={@corrections == []} class="text-sm opacity-60">{gettext("None.")}</p>
-            <ul id="corrections" class="mt-2 space-y-1 text-sm">
-              <li
-                :for={c <- @corrections}
-                class={[
-                  "flex flex-wrap items-center gap-2",
-                  c.revoked_at && "opacity-50 line-through"
-                ]}
-              >
-                <span class="badge badge-sm">{c.kind}</span>
-                <.time at={c.stream_at} />
-                <span :if={c.other_at}>← <.time at={c.other_at} /></span>
-                <span class="opacity-70">{c.note}</span>
-                <span class="text-xs opacity-50">{c.by}</span>
-                <button
-                  :if={!c.revoked_at}
-                  phx-click="revoke"
-                  phx-value-id={c.id}
-                  class="btn btn-xs btn-ghost"
-                >{gettext("Revoke")}</button>
-              </li>
-            </ul>
-
-            <h2 class="mt-8 font-semibold">{gettext("Annotations")}</h2>
-            <.form
-              for={%{}}
-              as={:annotation}
-              id="annotation-form"
-              phx-submit="annotate"
-              class="mt-2 grid gap-2 sm:grid-cols-2"
-            >
-              <input
-                name="annotation[text]"
-                class="input input-sm sm:col-span-2"
-                placeholder={gettext("e.g. collector outage, charity stream")}
-                required
+          <:actions>
+            <form id="pick-channel" phx-change="pick" class="flex items-center gap-2">
+              <.avatar
+                :if={@channel}
+                name={@channel.slug}
+                channel_id={@channel.id}
+                class="size-8 text-sm"
               />
-              <label class="text-xs">{gettext("From (UTC)")}<input
-                type="datetime-local"
-                name="annotation[from_at]"
-                class="input input-sm w-full"
-                required
-              /></label>
-              <label class="text-xs">{gettext("To (UTC, optional)")}<input
-                type="datetime-local"
-                name="annotation[to_at]"
-                class="input input-sm w-full"
-              /></label>
-              <select name="annotation[scope]" class="select select-sm">
-                <option value="channel">{gettext("This channel")}</option>
-                <option value="all">{gettext("Every channel")}</option>
+              <label class="sr-only" for="pick-channel-select">{gettext("Channel")}</label>
+              <select id="pick-channel-select" name="channel" class="select select-sm w-64">
+                <option :for={c <- @channels} value={c.id} selected={@channel && @channel.id == c.id}>
+                  {c.slug}
+                </option>
               </select>
-              <label class="flex items-center gap-2 text-sm"><input
-                type="checkbox"
-                name="annotation[public]"
-                class="checkbox checkbox-sm"
-              /> {gettext("Show on public charts")}</label>
-              <button class="btn btn-sm sm:col-span-2">{gettext("Add annotation")}</button>
-            </.form>
-            <ul id="annotations" class="mt-3 space-y-1 text-sm">
-              <li :for={a <- @annotations} class="flex gap-2">
-                <.time at={a.from_at} />
-                <span class="flex-1">{a.text}</span>
-                <span :if={a.public} class="badge badge-xs">{gettext("public")}</span>
-                <span :if={is_nil(a.channel_id)} class="badge badge-xs badge-ghost">{gettext(
-                  "all channels"
-                )}</span>
-                <button phx-click="delete_annotation" phx-value-id={a.id} class="btn btn-xs btn-ghost">×</button>
-              </li>
-            </ul>
+            </form>
+          </:actions>
+        </.page_header>
 
-            <h2 class="mt-8 font-semibold">{gettext("Reprocess")}</h2>
-            <.form
-              for={%{}}
-              as={:reprocess}
-              id="reprocess-form"
-              phx-submit="reprocess"
-              class="mt-2 grid gap-2 sm:grid-cols-2"
-            >
-              <label class="text-xs">{gettext("From (UTC)")}<input
-                type="datetime-local"
-                name="reprocess[from]"
-                class="input input-sm w-full"
-                required
-              /></label>
-              <label class="text-xs">{gettext("To (UTC)")}<input
-                type="datetime-local"
-                name="reprocess[to]"
-                class="input input-sm w-full"
-                required
-              /></label>
-              <select name="reprocess[kind]" class="select select-sm sm:col-span-2">
-                <option value="rollups">
-                  {gettext("Recompute rollups (all channels, the range)")}
-                </option>
-                <option value="replay">
-                  {gettext("Replay stored webhook events (this channel)")}
-                </option>
-              </select>
-              <button class="btn btn-sm sm:col-span-2" data-confirm={gettext("Queue this?")}>{gettext(
-                "Queue"
-              )}</button>
-            </.form>
-          </section>
+        <.panel :if={!@channel}>
+          <.empty_state icon="hero-tv" title={gettext("No channels yet.")} />
+        </.panel>
+
+        <div
+          :if={@channel}
+          class="grid items-start gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]"
+        >
+          <.panel title={gettext("Latest streams")} icon="hero-play-circle" flush>
+            <:subtitle>
+              {gettext("Exclude one from every figure, or merge it into the one before it.")}
+            </:subtitle>
+            <div class="overflow-x-auto">
+              <table id="data-streams" class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>{gettext("Start")}</th>
+                    <th>{gettext("Duration")}</th>
+                    <th class="text-end">{gettext("Peak")}</th>
+                    <th class="text-end">{gettext("Correct")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={s <- @stream_rows} id={"data-stream-#{s.id}"}>
+                    <td>
+                      <.link
+                        navigate={~p"/c/#{@channel.slug}/streams/#{s.id}"}
+                        class="font-medium hover:underline"
+                      ><.time at={s.started_at} /></.link>
+                      <div class="mt-0.5 flex gap-1">
+                        <.status_pill :if={s.excluded?} tone={:warn}>
+                          {gettext("excluded")}
+                        </.status_pill>
+                        <.status_pill :if={merged?(@corrections, s.id)} tone={:info}>
+                          {gettext("merged")}
+                        </.status_pill>
+                      </div>
+                    </td>
+                    <td class="text-sm"><.duration seconds={s.airtime_s} /></td>
+                    <td class="text-end"><.num value={s.peak_viewers} /></td>
+                    <td>
+                      <div class="flex items-center justify-end gap-1">
+                        <form :if={!s.excluded?} phx-submit="exclude" class="join">
+                          <input type="hidden" name="stream" value={s.id} />
+                          <input
+                            name="note"
+                            class="input input-xs join-item w-28"
+                            placeholder={gettext("why")}
+                            aria-label={gettext("Why exclude it")}
+                          />
+                          <button
+                            class="btn btn-xs join-item gap-1"
+                            data-confirm={gettext("Exclude this stream from every figure?")}
+                          >
+                            <.icon name="hero-no-symbol" class="size-3.5" />{gettext("Exclude")}
+                          </button>
+                        </form>
+                        <.icon_button
+                          icon="hero-arrows-pointing-in"
+                          label={gettext("Merge into previous")}
+                          phx-click="merge"
+                          phx-value-stream={s.id}
+                          data-confirm={gettext("Merge this stream into the one before it?")}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <.empty_state
+                :if={@stream_rows == []}
+                icon="hero-play-circle"
+                title={gettext("No streams recorded yet.")}
+              />
+            </div>
+          </.panel>
+
+          <div class="space-y-6">
+            <.panel title={gettext("Corrections")} icon="hero-wrench-screwdriver">
+              <p :if={@corrections == []} class="text-muted text-sm">
+                {gettext("None for this channel.")}
+              </p>
+              <ul id="corrections" class="space-y-2 text-sm">
+                <li
+                  :for={c <- @corrections}
+                  class={[
+                    "flex flex-wrap items-center gap-2",
+                    c.revoked_at && "opacity-50 line-through"
+                  ]}
+                >
+                  <.status_pill tone={if c.kind == "exclude", do: :warn, else: :info}>
+                    {c.kind}
+                  </.status_pill>
+                  <.time at={c.stream_at} />
+                  <span :if={c.other_at} class="text-muted">← <.time at={c.other_at} /></span>
+                  <span class="text-muted">{c.note}</span>
+                  <span class="text-muted text-xs">{c.by}</span>
+                  <span class="flex-1"></span>
+                  <button
+                    :if={!c.revoked_at}
+                    phx-click="revoke"
+                    phx-value-id={c.id}
+                    class="btn btn-xs btn-ghost gap-1"
+                  >
+                    <.icon name="hero-arrow-uturn-left" class="size-3.5" />{gettext("Revoke")}
+                  </button>
+                </li>
+              </ul>
+            </.panel>
+
+            <.panel title={gettext("Annotations")} icon="hero-chat-bubble-bottom-center-text">
+              <:subtitle>
+                {gettext("Notes on a timeline, optionally shown on public charts.")}
+              </:subtitle>
+              <.form
+                for={%{}}
+                as={:annotation}
+                id="annotation-form"
+                phx-submit="annotate"
+                class="grid gap-2 sm:grid-cols-2"
+              >
+                <input
+                  name="annotation[text]"
+                  class="input input-sm w-full sm:col-span-2"
+                  placeholder={gettext("e.g. collector outage, charity stream")}
+                  required
+                />
+                <label class="text-muted text-xs">
+                  {gettext("From (UTC)")}
+                  <input
+                    type="datetime-local"
+                    name="annotation[from_at]"
+                    class="input input-sm mt-1 w-full"
+                    required
+                  />
+                </label>
+                <label class="text-muted text-xs">
+                  {gettext("To (UTC, optional)")}
+                  <input
+                    type="datetime-local"
+                    name="annotation[to_at]"
+                    class="input input-sm mt-1 w-full"
+                  />
+                </label>
+                <select name="annotation[scope]" class="select select-sm w-full">
+                  <option value="channel">{gettext("This channel")}</option>
+                  <option value="all">{gettext("Every channel")}</option>
+                </select>
+                <label class="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="annotation[public]"
+                    class="toggle toggle-sm toggle-primary"
+                  />
+                  {gettext("Show on public charts")}
+                </label>
+                <button class="btn btn-sm btn-primary sm:col-span-2">{gettext("Add annotation")}</button>
+              </.form>
+              <ul
+                :if={@annotations != []}
+                id="annotations"
+                class="mt-4 space-y-2 border-t border-base-300 pt-3 text-sm"
+              >
+                <li :for={a <- @annotations} class="flex items-center gap-2">
+                  <span class="text-muted whitespace-nowrap text-xs"><.time at={a.from_at} /></span>
+                  <span class="flex-1">{a.text}</span>
+                  <.status_pill :if={a.public} tone={:ok}>{gettext("public")}</.status_pill>
+                  <.status_pill :if={is_nil(a.channel_id)}>{gettext("all channels")}</.status_pill>
+                  <.icon_button
+                    icon="hero-x-mark"
+                    label={gettext("Delete")}
+                    tone={:danger}
+                    phx-click="delete_annotation"
+                    phx-value-id={a.id}
+                  />
+                </li>
+              </ul>
+            </.panel>
+
+            <.panel title={gettext("Reprocess")} icon="hero-arrow-path">
+              <:subtitle>
+                {gettext("Recompute derived figures, or replay stored webhook events.")}
+              </:subtitle>
+              <.form
+                for={%{}}
+                as={:reprocess}
+                id="reprocess-form"
+                phx-submit="reprocess"
+                class="grid gap-2 sm:grid-cols-2"
+              >
+                <label class="text-muted text-xs">
+                  {gettext("From (UTC)")}
+                  <input
+                    type="datetime-local"
+                    name="reprocess[from]"
+                    class="input input-sm mt-1 w-full"
+                    required
+                  />
+                </label>
+                <label class="text-muted text-xs">
+                  {gettext("To (UTC)")}
+                  <input
+                    type="datetime-local"
+                    name="reprocess[to]"
+                    class="input input-sm mt-1 w-full"
+                    required
+                  />
+                </label>
+                <select name="reprocess[kind]" class="select select-sm w-full sm:col-span-2">
+                  <option value="rollups">
+                    {gettext("Recompute rollups (all channels, the range)")}
+                  </option>
+                  <option value="replay">
+                    {gettext("Replay stored webhook events (this channel)")}
+                  </option>
+                </select>
+                <button class="btn btn-sm sm:col-span-2" data-confirm={gettext("Queue this?")}>{gettext(
+                  "Queue"
+                )}</button>
+              </.form>
+            </.panel>
+          </div>
         </div>
       </div>
     </Layouts.admin>
