@@ -1,127 +1,72 @@
 #!/usr/bin/env bash
-# The deploy rehearsal (README.md here): runs the production stack on this
-# machine against the fake Kick, keeps it busy (a visitor on the site every
-# second, webhooks every few seconds, three live channels with chat), and
-# upgrades it the way production is upgraded, with deploy-kit and Kamal
-# (deploy/release.sh, .kamal/), measuring what each step costs:
+# The deploy rehearsal (README.md here): the sandbox (`kit sandbox`,
+# .kamal/sandbox/: the production stack on this machine, deployed by the
+# kit and Kamal as production is), kept busy (a visitor on the site every
+# second, webhooks every few seconds, three live channels with chat) and
+# upgraded the way production is upgraded, measuring what each step costs:
 #
 #   web deploy (with a migration on a live hypertable), collector deploy,
 #   receiver deploy, database restart, RabbitMQ restart, a collector
 #   killed, a rollback of web and collectors, and a whole release.
 #
 #   deploy/rehearsal/rehearse.sh         # all of it, then a report
-#   deploy/rehearsal/rehearse.sh down    # remove the stack and its volumes
+#   deploy/rehearsal/rehearse.sh report  # the report again, from the running sandbox
+#   deploy/rehearsal/rehearse.sh down    # remove the sandbox and its data
 #
-# Kamal deploys over SSH to a server: here a container ("the server": sshd
-# and a Docker CLI on this machine's Docker), and runs from another ("the
-# deployer": Kamal and the kit), both from tools/Dockerfile. Images go
-# through a local registry. Needs Docker (compose v2.24+) and Elixir (for
+# It starts from a fresh sandbox: one already running is reset, its data
+# with it. At the end the sandbox keeps running, to look around in
+# (`kit sandbox status`); `down` removes it. Needs Docker and Elixir (for
 # the fake Kick). Takes about 30 minutes, mostly waiting for polls to
-# happen. Writes everything under deploy/rehearsal/.work (git-ignored),
-# the report included.
+# happen. Writes its logs and the report under deploy/rehearsal/.work
+# (git-ignored).
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
+cd "$REPO"
 WORK=${REHEARSAL_DIR:-$REPO/deploy/rehearsal/.work}
-DEPLOY=$WORK/deploy
 LOG=$WORK/log
-export COMPOSE_PROJECT_NAME=kicktracker-rehearsal
-export COMPOSE_FILES="compose.single.yml compose.rehearsal.yml"
+KIT=$REPO/.kamal/kit/bin/kit
+SANDBOX_WORK=$REPO/.kamal/sandbox/.work
+export COMPOSE_PROJECT_NAME=kicktracker-sandbox
 
 REGISTRY=127.0.0.1:5555
-OWNER=anisabdellatif
-APP=$REGISTRY/$OWNER/kicktracker-app
-RECEIVER=$REGISTRY/$OWNER/kicktracker-receiver
-V1=rehearsal-v1
+APP=$REGISTRY/anisabdellatif/kicktracker-app
+RECEIVER=$REGISTRY/anisabdellatif/kicktracker-receiver
+V1="" # the sandbox's first deploy (sandbox-1), read after `kit sandbox up`
 V2=rehearsal-v2
-DB_IMAGE=kicktracker-db:rehearsal
-TOOLS=kicktracker-rehearsal-tools
-SERVER=kicktracker-rehearsal-server
-REGISTRY_CONTAINER=kicktracker-rehearsal-registry
-SSH_PORT=2222
-VOLUMES=kicktracker-rehearsal # the Kamal containers' volume prefix
 SIM=http://127.0.0.1:4050
 SITE=http://localhost:8080
-CHANNELS="rehearsalbig rehearsalmid rehearsalsmall"
+CHANNELS=$(grep -o 'slug: "[^"]*"' .kamal/sandbox/scenario.exs | cut -d'"' -f2 | tr '\n' ' ')
 
-dc() {
-  local args=()
-  for f in $COMPOSE_FILES; do args+=(-f "$f"); done
-  (cd "$DEPLOY" && docker compose "${args[@]}" "$@")
-}
+# dc ARGS...: compose, for the sandbox's stack (the database, RabbitMQ, Caddy).
+dc() { (cd "$SANDBOX_WORK/server" && docker compose -f compose.single.yml -f compose.sandbox.yml "$@"); }
 
-# The deployer: the kit and Kamal, as on the machine that deploys, with
-# the rehearsal's server, registry and volumes (deploy/kamal/*.yml read
-# KT_*) and the destination "rehearsal" (.kamal/kit.rehearsal.env,
-# deploy/kamal/*.rehearsal.yml). --userns=host: Docker refuses the host's
-# network to a container otherwise when user namespaces are on.
-#
-# The kit reads .kamal/kit.local.env last and over the environment for
-# anything but KIT_*: the real server's KT_HOST in it would win over the
-# rehearsal's, and the rehearsal would deploy to production. The deployer
-# sees an empty one instead (mounted only over a file that exists, so
-# Docker never creates one in the repo), and check_target stops the
-# rehearsal unless the kit resolves the server to this machine.
-deployer() {
-  local shadow=()
-  [ -f "$REPO/.kamal/kit.local.env" ] && shadow=(-v /dev/null:"$REPO/.kamal/kit.local.env":ro)
-  docker run --rm --network host --userns=host --user "$(id -u):$(id -g)" \
-    -e HOME=/tmp/home -e NO_COLOR=1 \
-    -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=user.email -e GIT_CONFIG_VALUE_0=rehearsal@localhost \
-    -v "$REPO:$REPO" -w "$REPO" ${shadow[@]+"${shadow[@]}"} -v "$WORK/ssh:/tmp/home/.ssh" \
-    -e KT_HOST=127.0.0.1 -e KT_SSH_PORT="$SSH_PORT" -e KT_SSH_USER=root \
-    -e KT_DEPLOY_DIR=/srv/kick_tracker -e KT_VOLUME_PREFIX="$VOLUMES" \
-    -e KT_REGISTRY="$REGISTRY" -e KT_IMAGE_OWNER="$OWNER" -e KT_REGISTRY_PASSWORD=rehearsal \
-    -e KIT_SMOKE_URLS="${SMOKE_URLS:-}" \
-    "$TOOLS" "$@"
-}
-
-# check_target: the server the kit would deploy to, as its own loader
-# resolves it for the rehearsal destination, must be the local one.
-check_target() {
-  local target
-  # shellcheck disable=SC2016 # expanded by the deployer's bash, after the kit's loader
-  target=$(deployer bash -c '. .kamal/kit/lib/core.sh && kit_load_config rehearsal && printf "%s:%s" "${KT_HOST:-}" "${KT_SSH_PORT:-22}"')
-  [ "$target" = "127.0.0.1:$SSH_PORT" ] || {
-    echo "the kit would deploy to $target, not this machine's rehearsal server (127.0.0.1:$SSH_PORT): stopping" >&2
-    exit 1
-  }
-}
-
-# kitd WORDS… ARGS…: the kit, for the rehearsal destination.
-kitd() {
-  case $1 in
-    group) deployer .kamal/kit/bin/kit group "$2" -d rehearsal "${@:3}" ;;
-    *) deployer .kamal/kit/bin/kit "$1" -d rehearsal "${@:2}" ;;
-  esac
-}
+# kitd ARGS...: the kit, aimed at the sandbox (which first checks, every
+# time, that Kamal would deploy only to this machine).
+kitd() { "$KIT" sandbox kit "$@"; }
 
 # role_container ROLE: the running container of a Kamal role.
 role_container() {
-  docker ps -q --filter "label=role=$1" --filter label=destination=rehearsal | head -1
+  docker ps -q --filter "label=role=$1" --filter label=destination=sandbox | head -1
 }
 
 say() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$LOG/steps.log"; }
 now() { date -u +%s; }
-rand() { head -c 256 /dev/urandom | base64 -w0 | tr -dc 'A-Za-z0-9' | head -c "${1:-32}"; }
 psql_q() { dc exec -T db psql -U kick_tracker -d kick_tracker -Atc "$1"; }
 
-# --- images -------------------------------------------------------------------
+# --- the sandbox, and a second build -----------------------------------------------
 
-build() {
-  say "building images (cached layers make this quick after the first time)"
-  # Labelled for Kamal (it refuses an image without its service's label),
-  # as CI labels them.
-  docker build -q -t "$APP:$V1" --label service=kicktracker -f "$REPO/app/Dockerfile" "$REPO/app" >/dev/null
-  docker build -q -t "$RECEIVER:$V1" --label service=kicktracker-receiver \
-    -f "$REPO/ingress/receiver/Dockerfile" "$REPO/ingress/receiver" >/dev/null
-  docker build -q -t "$DB_IMAGE" -f "$REPO/deploy/db/Dockerfile" "$REPO/deploy/db" >/dev/null
-  docker build -q -t "$TOOLS" "$REPO/deploy/rehearsal/tools" >/dev/null
+up() {
+  say "a fresh sandbox: reset, then up (the working tree built, the stack and the fake Kick started, everything deployed, the channels tracked)"
+  "$KIT" sandbox reset --yes
+  "$KIT" sandbox up
+  V1="sandbox-$(cat "$SANDBOX_WORK/version")"
 
   # v2: v1 plus a migration on a hypertable the collectors write to all
   # the time (expand only: a nullable column), to see what a migration
   # under load costs. The receiver's v2 is v1 under another tag: the
   # containers are still replaced.
+  say "building $V2: $V1 plus a migration on viewer_samples"
   local ctx=$WORK/v2
   rm -rf "$ctx" && mkdir -p "$ctx"
   cat > "$ctx/20990101000000_rehearsal_probe.exs" <<'EOS'
@@ -139,101 +84,14 @@ EOS
 FROM $APP:$V1
 COPY --chown=app 20990101000000_rehearsal_probe.exs /app/lib/kick_tracker-0.1.0/priv/repo/migrations/
 EOS
-  docker build -q -t "$APP:$V2" "$ctx" >/dev/null
+  docker build -q -t "$APP:$V2" --label service=kicktracker "$ctx" >/dev/null
   docker tag "$RECEIVER:$V1" "$RECEIVER:$V2"
-
-  say "starting a local registry on $REGISTRY and pushing the images to it"
-  docker run -d --name "$REGISTRY_CONTAINER" -p "$REGISTRY:5000" registry:2 >/dev/null
-  until curl -sf "http://$REGISTRY/v2/" >/dev/null; do sleep 1; done
-  for image in "$APP:$V1" "$APP:$V2" "$RECEIVER:$V1" "$RECEIVER:$V2"; do
-    docker push -q "$image" >/dev/null
-  done
-}
-
-# --- the stack ------------------------------------------------------------------
-
-setup() {
-  say "writing a working copy of deploy/ with local secrets in $DEPLOY"
-  rm -rf "$DEPLOY" && mkdir -p "$DEPLOY" "$LOG"
-  (cd "$REPO/deploy" && tar --exclude=rehearsal/.work -cf - .) | (cd "$DEPLOY" && tar -xf -)
-  cp "$REPO/deploy/rehearsal/compose.rehearsal.yml" "$DEPLOY/"
-
-  local db_pw app_pw receiver_pw ops_pw monitor_pw admin_pw cookie
-  db_pw=$(rand) app_pw=$(rand) receiver_pw=$(rand) ops_pw=$(rand) monitor_pw=$(rand) admin_pw=$(rand)
-  cookie=$(rand 48)
-  local kick="KICK_API_URL=http://host.docker.internal:4050
-KICK_ID_URL=http://host.docker.internal:4050
-KICK_V2_URL=http://host.docker.internal:4050/api/v2
-PUSHER_URL=ws://host.docker.internal:4050/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false
-KICK_CLIENT_ID=rehearsal
-KICK_CLIENT_SECRET=rehearsal"
-  local common="DATABASE_URL=ecto://kick_tracker:$db_pw@db/kick_tracker
-POOL_SIZE=10
-DNS_CLUSTER_QUERY=app
-RELEASE_COOKIE=$cookie
-SITE_NAME=Stream Tracker
-PHX_HOST=localhost
-CONTACT_EMAIL=ops@example.org
-$kick
-AMQP_URL=amqp://app:$app_pw@rabbitmq:5672
-DEAD_LETTERS_AMQP_URL=amqp://ops:$ops_pw@rabbitmq:5672
-RABBITMQ_MANAGEMENT_URL=http://monitor:$monitor_pw@rabbitmq:15672"
-
-  mkdir -p "$DEPLOY/secrets"
-  printf '%s\nSECRET_KEY_BASE=%s\n' "$common" "$(rand 64)" > "$DEPLOY/secrets/app.env"
-  printf '%s\n' "$common" > "$DEPLOY/secrets/collector.env"
-  printf 'PORT=4060\nAMQP_URL=amqp://receiver:%s@rabbitmq:5672\nKICK_API_URL=http://host.docker.internal:4050\n' \
-    "$receiver_pw" > "$DEPLOY/secrets/receiver.env"
-  printf 'POSTGRES_USER=kick_tracker\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=kick_tracker\nWALG_FILE_PREFIX=/var/lib/postgresql/walg-store\nWALG_COMPRESSION_METHOD=zstd\n' \
-    "$db_pw" > "$DEPLOY/secrets/db.env"
-  # Plain HTTP on 127.0.0.1:8080: the site on localhost, the ingress on 127.0.0.1.
-  printf 'SITE_HOST=http://localhost\nINGRESS_HOST=http://127.0.0.1\nACME_EMAIL=ops@example.org\nADMIN_ALLOW=127.0.0.1/32\n' \
-    > "$DEPLOY/secrets/stack.env"
-
-  RABBITMQ_ADMIN_PASSWORD=$admin_pw RABBITMQ_RECEIVER_PASSWORD=$receiver_pw RABBITMQ_APP_PASSWORD=$app_pw \
-    RABBITMQ_OPS_PASSWORD=$ops_pw RABBITMQ_MONITOR_PASSWORD=$monitor_pw "$DEPLOY/rabbitmq/make-prod-definitions.sh"
-
-  printf 'DB_IMAGE=%s\n' "$DB_IMAGE" > "$DEPLOY/.env"
-
-  say "starting the server (sshd on 127.0.0.1:$SSH_PORT, this machine's Docker and network, deploy/ at /srv/kick_tracker)"
-  mkdir -p "$WORK/ssh"
-  [ -f "$WORK/ssh/id_ed25519" ] || ssh-keygen -q -t ed25519 -N "" -f "$WORK/ssh/id_ed25519"
-  printf 'Host 127.0.0.1\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n' > "$WORK/ssh/config"
-  # On the host's network, as a real server's Docker CLI is: `docker login`
-  # runs in the CLI, and must reach the registry on 127.0.0.1 too. (Outside
-  # the user namespace the image's files aren't root's: sshd wants them so.)
-  docker run -d --name "$SERVER" --network host --userns=host \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v "$DEPLOY:/srv/kick_tracker/deploy" \
-    -v "$WORK/ssh/id_ed25519.pub:/keys/id.pub:ro" \
-    "$TOOLS" sh -c "chown -R root:root /var/empty /etc/ssh /root && install -m 600 /keys/id.pub /root/.ssh/authorized_keys \
-      && exec /usr/sbin/sshd -D -e -p $SSH_PORT -o ListenAddress=127.0.0.1" >/dev/null
-  until ssh -q -p "$SSH_PORT" -i "$WORK/ssh/id_ed25519" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    root@127.0.0.1 true; do sleep 1; done
-}
-
-start_sim() {
-  say "starting the fake Kick on :4050 (webhooks to the stack's ingress)"
-  (cd "$REPO/sim" && exec mix sim --ip 0.0.0.0 --port 4050 \
-    --scenario "$REPO/deploy/rehearsal/scenario.exs" --webhook-url http://127.0.0.1:8080/) \
-    > "$LOG/sim.log" 2>&1 &
-  echo $! > "$WORK/sim.pid"
-  until curl -sf "$SIM/_sim/state" >/dev/null; do sleep 1; done
-}
-
-up() {
-  say "starting the database and the queue (compose, on Kamal's network)"
-  docker network inspect kamal >/dev/null 2>&1 || docker network create kamal >/dev/null
-  dc up -d --wait db rabbitmq
-
-  say "first deploy with the kit: migrations, then the collectors (--bootstrap) and web; then the receivers"
-  check_target
-  kitd deploy --bootstrap --no-smoke --version "$V1"
-  kitd deploy -c deploy/kamal/receiver.yml --no-smoke --version "$V1"
-  dc up -d --wait caddy
+  docker push -q "$APP:$V2" >/dev/null
+  docker push -q "$RECEIVER:$V2" >/dev/null
 
   # Through Caddy, as visitors and Kick reach it: nothing else counts.
-  say "checking the site and the ingress answer through Caddy"
+  say "checking the site answers through Caddy"
+  local code=""
   for _ in $(seq 1 30); do
     code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' "$SITE/healthz" || true)
     [ "$code" = 200 ] && break
@@ -243,10 +101,7 @@ up() {
     say "the site doesn't answer through Caddy (HTTP $code): stopping"
     exit 1
   fi
-  say "tracking $CHANNELS"
-  docker exec "$(role_container web_a)" bin/kick_tracker rpc "
-    for slug <- ~w($CHANNELS), do: IO.inspect(KickTracker.Channels.add(slug) |> elem(0), label: slug)
-    IO.inspect(Node.list(), label: \"cluster\")"
+  echo "$V1" > "$WORK/v1"
 }
 
 # --- load and probes ---------------------------------------------------------------
@@ -316,10 +171,11 @@ kill_leader() {
 }
 
 # A whole release as `deploy/release.sh --all` does it (both Kamal configs,
-# every group), with the smoke tests through Caddy that would roll it back.
+# every group), with the smoke tests through Caddy that would roll it back
+# (KIT_SMOKE_URLS_SANDBOX).
 release() {
-  SMOKE_URLS="$SITE/healthz" kitd deploy --version "$1"
-  SMOKE_URLS="$SITE/healthz" kitd deploy -c deploy/kamal/receiver.yml --version "$1"
+  kitd deploy -c deploy/kamal/app.yml --version "$1"
+  kitd deploy -c deploy/kamal/receiver.yml --version "$1"
 }
 
 operations() {
@@ -365,7 +221,7 @@ print("\n".join(json.load(sys.stdin)["message_ids"]))' | sort -u > "$LOG/sent.tx
   {
     echo "# Deploy rehearsal"
     echo
-    echo "Run $(date -u +%Y-%m-%dT%H:%MZ) with images $APP:$V1 / $V2, deployed with deploy-kit $(cat "$REPO/.kamal/kit/VERSION") and Kamal."
+    echo "Run $(date -u +%Y-%m-%dT%H:%MZ) with images $APP:$V1 / $V2, deployed to the sandbox with deploy-kit $(cat "$REPO/.kamal/kit/VERSION") and Kamal."
     echo
     if [ -s "$LOG/ops.failed" ]; then
       echo "**Operations that failed:** $(tr '\n' ';' < "$LOG/ops.failed")"
@@ -413,20 +269,19 @@ PY
     echo "Viewer readings per channel per minute, across the whole run (one per minute expected; 0 is a gap):"
     echo
     echo '```'
-    psql_q "SELECT c.slug, to_char(date_trunc('minute', v.observed_at), 'HH24:MI'), count(*)
+    # Minutes as epoch minutes, so a run across midnight counts right.
+    psql_q "SELECT c.slug, floor(extract(epoch FROM v.observed_at) / 60)::bigint, count(*)
             FROM viewer_samples v JOIN channels c ON c.id = v.channel_id
             GROUP BY 1, 2 ORDER BY 1, 2" |
       python3 -c '
-import sys, collections
+import sys, collections, time
 rows = collections.defaultdict(dict)
 for l in sys.stdin:
     slug, minute, n = l.strip().split("|")
-    rows[slug][minute] = int(n)
+    rows[slug][int(minute)] = int(n)
 for slug, minutes in rows.items():
     keys = sorted(minutes)
-    h0, m0 = map(int, keys[0].split(":")); h1, m1 = map(int, keys[-1].split(":"))
-    all_minutes = [f"{(m // 60) % 24:02d}:{m % 60:02d}" for m in range(h0 * 60 + m0, h1 * 60 + m1 + 1)]
-    gaps = [m for m in all_minutes if m not in minutes]
+    gaps = [time.strftime("%H:%M", time.gmtime(m * 60)) for m in range(keys[0], keys[-1] + 1) if m not in minutes]
     print(slug + ": " + str(len(keys)) + " minutes with readings, gaps: " + (", ".join(gaps) or "none"))'
     echo '```'
     echo
@@ -451,7 +306,7 @@ for slug, minutes in rows.items():
     echo "Running at the end:"
     echo
     echo '```'
-    docker ps --filter label=destination=rehearsal --format '{{.Names}}  {{.Status}}' | sort
+    docker ps --filter label=destination=sandbox --format '{{.Names}}  {{.Status}}' | sort
     echo '```'
     echo
     echo "Open alerts: $(psql_q "SELECT coalesce(string_agg(message, '; '), 'none') FROM alerts WHERE resolved_at IS NULL")"
@@ -463,25 +318,14 @@ for slug, minutes in rows.items():
 
 down() {
   stop_probes
-  [ -f "$WORK/sim.pid" ] && kill "$(cat "$WORK/sim.pid")" 2>/dev/null || true
-  pkill -f "mix sim --ip 0.0.0.0 --port 4050" 2>/dev/null || true
-  local ids
-  ids=$(docker ps -aq --filter label=destination=rehearsal)
-  # shellcheck disable=SC2086 # one id per word
-  [ -z "$ids" ] || docker rm -f $ids >/dev/null
-  docker rm -f "$SERVER" "$REGISTRY_CONTAINER" >/dev/null 2>&1 || true
-  [ -d "$DEPLOY" ] && dc down -v --remove-orphans || true
-  docker volume ls -q --filter "name=^${VOLUMES}_" | xargs -r docker volume rm >/dev/null
+  "$KIT" sandbox reset --yes
 }
 
 case "${1:-all}" in
   all)
-    mkdir -p "$WORK" "$LOG"
-    down
+    mkdir -p "$WORK"
+    stop_probes
     rm -rf "$LOG" && mkdir -p "$LOG"
-    build
-    setup
-    start_sim
     up
     probes
     trap 'stop_probes' EXIT
@@ -489,7 +333,10 @@ case "${1:-all}" in
     stop_probes
     report
     ;;
-  report) report ;;
+  report)
+    V1=$(cat "$WORK/v1" 2>/dev/null || echo "sandbox-1")
+    report
+    ;;
   down) down ;;
   *) echo "usage: $0 [all|report|down]" >&2; exit 1 ;;
 esac

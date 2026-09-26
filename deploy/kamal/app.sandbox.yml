@@ -1,0 +1,35 @@
+# The "sandbox" destination of app.yml, for `kit sandbox` (deploy-kit,
+# docs/sandbox.md; .kamal/sandbox/): what Kamal deploys to on this machine,
+# merged over app.yml by `-d sandbox`. Started by `kit sandbox init`.
+#
+# kit sandbox refuses to deploy unless every host is 127.0.0.1, SSH is on
+# the sandbox's port and the images come from the sandbox's registry.
+# The fake Kick runs on this machine: every role reaches it as
+# host.docker.internal. No role runs kamal-proxy (Caddy is in front, as in
+# production), so there is no proxy section.
+servers:
+  web_a:
+    hosts: [127.0.0.1]
+    options:
+      add-host: host.docker.internal:host-gateway
+  web_b:
+    hosts: [127.0.0.1]
+    options:
+      add-host: host.docker.internal:host-gateway
+  collector_a:
+    hosts: [127.0.0.1]
+    options:
+      add-host: host.docker.internal:host-gateway
+  collector_b:
+    hosts: [127.0.0.1]
+    options:
+      add-host: host.docker.internal:host-gateway
+
+ssh:
+  user: root
+  port: 2222
+
+registry:
+  server: 127.0.0.1:5555
+  username: sandbox
+  password: [KIT_SANDBOX_REGISTRY_PASSWORD]

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Where everything is (printed by `kit sandbox up` and `status`).
+cat <<'URLS'
+
+  The site            http://localhost:8080   (the admin: /admin)
+  The ingress         http://127.0.0.1:8080   (webhooks, as Kick reaches it)
+  The fake Kick       http://127.0.0.1:4050/_sim/state
+  Web nodes direct    http://127.0.0.1:4110  http://127.0.0.1:4111
+URLS

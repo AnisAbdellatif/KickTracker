@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# After the first deploy: track the fake Kick's channels, so collection
+# starts (polls, chat, webhooks).
+set -euo pipefail
+# shellcheck source=lib.sh
+. "$(dirname "$0")/lib.sh"
+
+"$KIT" sandbox exec web_a bin/kick_tracker rpc "
+  for slug <- ~w($(channels)), do: IO.inspect(KickTracker.Channels.add(slug) |> elem(0), label: slug)"

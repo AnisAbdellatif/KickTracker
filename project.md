@@ -1624,10 +1624,12 @@ change to the app beyond producer config.
   pushed tree, CI green for the exact commit and the images' build
   attestations, brings the server's checkout up to the commit and
   decrypts its secrets there, and runs the migrations; after, smoke tests
-  through Caddy roll a failed release back. The whole path is rehearsed on
-  a development machine with `deploy/rehearsal/rehearse.sh` (the production
-  stack under load, upgraded step by step, with what each step costs
-  measured).
+  through Caddy roll a failed release back. The whole path runs on a
+  development machine in the sandbox (deploy-kit's `kit sandbox`,
+  `.kamal/sandbox/`: the production stack, deployed by the kit and Kamal
+  to a "server" container, with the fake Kick), and is rehearsed there with
+  `deploy/rehearsal/rehearse.sh` (the sandbox under load, upgraded step by
+  step, with what each step costs measured).
 - A release deploys **only what it changes**: a group (collectors, web,
   receivers) is redeployed when something it runs (its image's build
   context, its Kamal config, its secrets file; for the collectors, minus

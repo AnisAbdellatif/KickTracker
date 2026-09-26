@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Before the first deploy, and on each `kit sandbox up`: the database, the
+# queue and Caddy (compose, on Kamal's network, as in production) and the
+# fake Kick.
+set -euo pipefail
+# shellcheck source=lib.sh
+. "$(dirname "$0")/lib.sh"
+
+sync_deploy
+docker build -q -t "$DB_IMAGE" "$REPO/deploy/db" >/dev/null
+docker network inspect kamal >/dev/null 2>&1 || docker network create kamal >/dev/null
+dc up -d --wait db rabbitmq
+# No healthcheck: it answers once the web nodes and receivers are deployed.
+dc up -d caddy
+start_sim
