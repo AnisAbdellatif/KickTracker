@@ -1506,6 +1506,17 @@ period, always with an arrow.
 Under `/admin`, same `web` role, separate `live_session` with an `on_mount`
 auth check.
 
+Layout: a sidebar of sections with icons (Monitor: health, anomalies,
+audit log, errors, dashboard; Channels: channels, groups, subscriptions;
+Data: corrections, chat log, export / import, dead letters; People:
+privacy requests, admins; Site: settings, the public site), the admin's
+account, the theme and logging out at its foot; on a phone, a drawer
+opened from a top bar (daisyUI's, no script). Every page is built from
+the same pieces (`KickTrackerWeb.AdminComponents`): a page header with
+its actions, cards, stat tiles, status pills, empty states, search boxes
+and icon buttons. Long lists (channels, subscriptions, export's channels,
+group members) are searched on the server and scroll inside their card.
+
 - **Access:** accounts on phx.gen.auth's model (server-side session tokens),
   password + TOTP on every login, **no public sign-up** (admins invite
   admins). Optionally reachable only over the private

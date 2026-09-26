@@ -315,44 +315,39 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
 
     ~H"""
     <Layouts.admin flash={@flash} current_admin={@current_admin} active={:chat_log}>
-      <div class="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 class="text-xl font-semibold">{gettext("Chat log")}</h1>
-          <p class="text-muted mt-1 max-w-2xl text-sm">
-            {gettext(
-              "Message text and chat events, kept only for channels logging is on for, for each channel's retention. Admin only; never shown on the public site."
+      <.page_header title={gettext("Chat log")} icon="hero-chat-bubble-left-right">
+        <:subtitle>
+          {gettext(
+            "Message text and chat events, kept only for channels logging is on for, for each channel's retention. Admin only; never shown on the public site."
+          )}
+          <span id="chat-log-tz" class="mt-1 flex items-center gap-1 text-xs">
+            <.icon name="hero-clock" class="size-3.5" />
+            {gettext("Times in %{tz}, your timezone. Links keep UTC; the CSV export is in UTC.",
+              tz: @tz
             )}
-          </p>
-        </div>
-        <.link
-          navigate={~p"/about/privacy#chat-logging"}
-          class="text-muted inline-flex items-center gap-1 text-xs hover:underline"
-        >
-          <.icon name="hero-shield-check" class="size-4" />
-          {gettext("What the privacy page tells chatters")}
-        </.link>
-      </div>
+          </span>
+        </:subtitle>
+        <:actions>
+          <.link navigate={~p"/about/privacy#chat-logging"} class="btn btn-ghost btn-sm gap-1">
+            <.icon name="hero-shield-check" class="size-4" />
+            {gettext("What the privacy page tells chatters")}
+          </.link>
+        </:actions>
+      </.page_header>
 
-      <p id="chat-log-tz" class="text-muted mt-1 text-xs">
-        <.icon name="hero-clock" class="size-3.5" />
-        {gettext("Times in %{tz}, your timezone. Links keep UTC; the CSV export is in UTC.",
-          tz: @tz
-        )}
-      </p>
-
-      <div id="chat-log-summary" class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <.summary_tile icon="hero-signal" label={gettext("Logging on")}>
+      <div id="chat-log-summary" class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <.stat_tile icon="hero-signal" label={gettext("Logging on")}>
           {@summary.logging}
           <span class="text-muted text-sm font-normal">
             / {ngettext("1 channel", "%{count} channels", @summary.channels)}
           </span>
-        </.summary_tile>
-        <.summary_tile icon="hero-chat-bubble-left-right" label={gettext("Messages kept")}>
+        </.stat_tile>
+        <.stat_tile icon="hero-chat-bubble-left-right" label={gettext("Messages kept")}>
           ≈ {format_count(@summary.messages)}
-        </.summary_tile>
-        <.summary_tile icon="hero-bolt" label={gettext("Chat events kept")}>
+        </.stat_tile>
+        <.stat_tile icon="hero-bolt" label={gettext("Chat events kept")}>
           {format_count(@summary.events)}
-        </.summary_tile>
+        </.stat_tile>
       </div>
 
       <div class="mt-6 grid gap-6 xl:grid-cols-[22rem_minmax(0,1fr)]">
@@ -715,9 +710,11 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
                   </li>
                 <% end %>
               </ol>
-              <.empty :if={@tab == "messages" and @messages == []} icon="hero-chat-bubble-left-right">
-                {gettext("Nothing logged for these filters.")}
-              </.empty>
+              <.empty_state
+                :if={@tab == "messages" and @messages == []}
+                icon="hero-chat-bubble-left-right"
+                title={gettext("Nothing logged for these filters.")}
+              />
               <div :if={@more?} class="flex justify-center py-2">
                 <button id="chat-log-more" phx-click="more" class="btn btn-sm btn-ghost gap-1">
                   <.icon name="hero-arrow-down" class="size-4" />{gettext("Older messages")}
@@ -742,9 +739,11 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
                   </details>
                 </li>
               </ol>
-              <.empty :if={@tab == "events" and @events == []} icon="hero-bolt">
-                {gettext("No chat events logged for these filters.")}
-              </.empty>
+              <.empty_state
+                :if={@tab == "events" and @events == []}
+                icon="hero-bolt"
+                title={gettext("No chat events logged for these filters.")}
+              />
             </div>
           <% else %>
             <div id="chat-log-start" class="mt-10 mb-6 flex flex-col items-center gap-3 text-center">
@@ -853,22 +852,6 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
   end
 
   attr :icon, :string, required: true
-  attr :label, :string, required: true
-  slot :inner_block, required: true
-
-  defp summary_tile(assigns) do
-    ~H"""
-    <div class="card-surface flex items-center gap-3 p-4">
-      <span class="icon-tile"><.icon name={@icon} class="size-5" /></span>
-      <div class="min-w-0">
-        <p class="text-muted text-xs">{@label}</p>
-        <p class="text-lg font-semibold tabular-nums">{render_slot(@inner_block)}</p>
-      </div>
-    </div>
-    """
-  end
-
-  attr :icon, :string, required: true
   attr :patch, :string, required: true
   slot :inner_block, required: true
 
@@ -892,18 +875,6 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
 
     ~H"""
     <p class="chat-text whitespace-pre-wrap break-words text-sm" phx-no-format><span :for={p <- @parts} class={p.type == :emote && "emote-combo"}><%= if p.type == :text do %>{p.text}<% else %><img class="emote" src={ChatLog.emote_url(p.id)} alt={p.name} title={p.name} loading="lazy" decoding="async" /><span :if={p.count > 1} class="combo-count">×{p.count}</span><% end %></span></p>
-    """
-  end
-
-  attr :icon, :string, required: true
-  slot :inner_block, required: true
-
-  defp empty(assigns) do
-    ~H"""
-    <div class="text-muted flex flex-col items-center gap-2 py-10 text-sm">
-      <.icon name={@icon} class="size-6 opacity-60" />
-      {render_slot(@inner_block)}
-    </div>
     """
   end
 

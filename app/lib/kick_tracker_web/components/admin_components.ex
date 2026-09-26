@@ -31,7 +31,7 @@ defmodule KickTrackerWeb.AdminComponents do
           </p>
         </div>
       </div>
-      <div :if={@actions != []} class="flex flex-wrap items-center gap-2">
+      <div :if={@actions != []} class="flex min-w-0 max-w-full flex-wrap items-center gap-2">
         {render_slot(@actions)}
       </div>
     </header>
@@ -66,7 +66,7 @@ defmodule KickTrackerWeb.AdminComponents do
             <p :if={@subtitle != []} class="text-muted text-xs">{render_slot(@subtitle)}</p>
           </div>
         </div>
-        <div :if={@actions != []} class="flex flex-wrap items-center gap-2">
+        <div :if={@actions != []} class="flex min-w-0 max-w-full flex-wrap items-center gap-2">
           {render_slot(@actions)}
         </div>
       </header>
