@@ -636,3 +636,16 @@ body { min-height: 100dvh; }
   background: var(--surface-raised);
 }
 .drop-zone.phx-drop-target-active, .drop-zone:hover { border-color: var(--color-primary); }
+
+/* One detail of an audit entry: its key, muted, and its value. */
+.detail-chip {
+  display: inline-flex;
+  gap: .25rem;
+  max-width: 100%;
+  padding: .0625rem .5rem;
+  border-radius: var(--radius-selector);
+  background: var(--surface-raised);
+  font-size: .75rem;
+  line-height: 1.25rem;
+  overflow-wrap: anywhere;
+}

@@ -211,8 +211,15 @@ defmodule KickTrackerWeb.Admin.AdminPagesTest do
   test "the audit log filters by action", %{conn: conn, admin: admin} do
     Audit.log(admin, "channel.pause", "somestreamer")
     Audit.log(admin, "channel.resume", "somestreamer")
-    {:ok, _view, html} = live(conn, ~p"/admin/audit?action=channel.pause")
-    assert html =~ "channel.pause"
-    refute html =~ "channel.resume"
+    {:ok, view, _html} = live(conn, ~p"/admin/audit?action=channel.pause")
+    table = render(element(view, "#audit"))
+    assert table =~ "channel.pause"
+    refute table =~ "channel.resume"
+
+    # The filter offers every action logged, and choosing one keeps it in the URL.
+    assert has_element?(view, "#audit-action option[value='channel.resume']")
+    view |> form("#audit-filter", %{action: "channel.resume"}) |> render_change()
+    assert_patch(view, ~p"/admin/audit?action=channel.resume")
+    refute render(element(view, "#audit")) =~ "channel.pause"
   end
 end

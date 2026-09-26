@@ -50,4 +50,10 @@ defmodule KickTracker.Audit do
 
     Repo.all(query)
   end
+
+  @doc "Every action ever logged, for the page's filter."
+  @spec actions() :: [String.t()]
+  def actions,
+    do:
+      Repo.all(from l in "admin_audit_log", distinct: true, order_by: l.action, select: l.action)
 end
