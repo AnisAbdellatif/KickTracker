@@ -12,7 +12,7 @@ defmodule KickTrackerWeb.Admin.AdminPagesTest do
     channel!(slug: "somestreamer")
 
     for path <-
-          ~w(/admin/groups /admin/dead-letters /admin/data /admin/privacy /admin/settings /admin/audit) do
+          ~w(/admin/groups /admin/dead-letters /admin/data /admin/privacy /admin/chat-log /admin/settings /admin/audit) do
       assert {:ok, _view, html} = live(conn, path), path
       assert html =~ "Admin"
     end

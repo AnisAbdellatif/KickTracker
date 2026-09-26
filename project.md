@@ -1532,6 +1532,14 @@ auth check.
 - **Privacy:** find everything held about a Kick user id; delete it
   (per-user rows, username, raw event bodies redacted). Searches are
   audited without what was searched for.
+- **Chat log** (`/admin/chat-log`, §12.8): turn chat logging on or off
+  per channel and set its retention; read the log by channels, users
+  (across channels) and UTC period, filters in the URL, with the chat-feed
+  events beside it; export the selection as CSV (streamed; formula-like
+  cells get a leading apostrophe); delete one channel's log over a period
+  (typing its slug confirms; the collector's `Workers.ChatLog` runs it).
+  Views, exports, deletions and setting changes are audited, without the
+  users looked up.
 - **Export / import:** download chosen channels, alone or with their
   history over an optional date range, as a `.zip` of CSVs (one per table,
   local ids kept so they join, plus `manifest.json`); upload one from

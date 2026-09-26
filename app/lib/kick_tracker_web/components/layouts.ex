@@ -158,6 +158,9 @@ defmodule KickTrackerWeb.Layouts do
           <.admin_link to={~p"/admin/transfer"} active={@active == :transfer}>
             {gettext("Export / import")}
           </.admin_link>
+          <.admin_link to={~p"/admin/chat-log"} active={@active == :chat_log}>
+            {gettext("Chat log")}
+          </.admin_link>
           <.admin_link to={~p"/admin/privacy"} active={@active == :privacy}>
             {gettext("Privacy")}
           </.admin_link>

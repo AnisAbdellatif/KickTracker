@@ -296,6 +296,10 @@ defmodule KickTracker.Tracking.ChatSocket do
     end
   end
 
+  defp frame({:ping, data}, state), do: send_frame(%{state | last_in: now_s()}, {:pong, data})
+  defp frame({:close, code, reason}, state), do: reconnect(state, {:closed, code, reason})
+  defp frame(_other, state), do: %{state | last_in: now_s()}
+
   # A message's text, and the data of events we don't parse, go further
   # only for a channel with chat logging on (§12.8); for the rest they end
   # here.
@@ -309,10 +313,6 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   defp forward(state, {:other, name, topic, _data}),
     do: tap(state, &to_channel(&1, {:pusher_other, name, topic}))
-
-  defp frame({:ping, data}, state), do: send_frame(%{state | last_in: now_s()}, {:pong, data})
-  defp frame({:close, code, reason}, state), do: reconnect(state, {:closed, code, reason})
-  defp frame(_other, state), do: %{state | last_in: now_s()}
 
   defp topics(state) do
     [chatroom_topic(state)] ++

@@ -100,6 +100,7 @@ defmodule KickTrackerWeb.Router do
       live "/data", DataLive
       live "/transfer", TransferLive
       live "/privacy", PrivacyLive
+      live "/chat-log", ChatLogLive
       live "/settings", SettingsLive
       live "/admins", AdminsLive
       live "/audit", AuditLive
@@ -111,6 +112,7 @@ defmodule KickTrackerWeb.Router do
     pipe_through [:browser, :require_admin]
 
     get "/transfers/:id/download", KickTrackerWeb.Admin.TransferController, :download
+    get "/chat-log/export.csv", KickTrackerWeb.Admin.ChatLogController, :export
 
     live_dashboard "/dashboard",
       metrics: KickTrackerWeb.Telemetry,
