@@ -9,9 +9,9 @@ defmodule Sim.Fixtures.Anonymizer do
     * **ids**: `id` and every `*_id` key (except category, emote, badge,
       gift and reward ids), outside category/emote/badge/gift contexts,
       become fake integers (or numeric strings, if they were strings);
-    * **names** (`username`, `slug`, `channel_slug`, `display_name`, and
-      `name` directly inside a person) become `user0001`-style pseudonyms,
-      case-insensitively consistent;
+    * **names** (`username`, `slug`, `channel_slug`, `display_name`,
+      `host_username`, and `name` directly inside a person) become
+      `user0001`-style pseudonyms, case-insensitively consistent;
     * **free text** (chat `content`, titles, descriptions, bios, reasons) and
       **social handles** become placeholders; empty strings stay empty;
     * **every URL** becomes `https://example.invalid/asset/N`;
@@ -51,9 +51,9 @@ defmodule Sim.Fixtures.Anonymizer do
                    gift_id reward_id subscription_id message_id)
   # Numbers that identify a record without being called `id` or `*_id`.
   @other_id_keys ~w(order_column)
-  @name_keys ~w(username slug channel_slug display_name)
-  @text_keys ~w(content message stream_title session_title title channel_description
-                description bio reason offline_banner_text file_name)
+  @name_keys ~w(username slug channel_slug display_name host_username)
+  @text_keys ~w(content message optional_message stream_title session_title title
+                channel_description description bio reason offline_banner_text file_name)
   @cursor_keys ~w(cursor next_cursor nextcursor prev_cursor previous_cursor)
   @image_data_keys ~w(base64svg)
   @social_keys ~w(instagram twitter youtube discord tiktok facebook email website)

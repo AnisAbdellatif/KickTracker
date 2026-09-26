@@ -336,11 +336,8 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
       messages: gettext("Messages / min"),
       chatters: gettext("Active chatters"),
       flagged: gettext("flagged reading, not counted as a peak"),
-      kinds:
-        Map.merge(event_labels(), %{
-          "hosted_by" => gettext("Hosted by"),
-          "hosting" => gettext("Hosting")
-        }),
+      kinds: event_labels(),
+      hosts: host_labels(),
       event: event_label(nil),
       title: gettext("Title"),
       category: gettext("Category")

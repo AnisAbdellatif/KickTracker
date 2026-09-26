@@ -362,6 +362,12 @@ defmodule KickTrackerWeb.HomeLive do
                       <span :if={n[:who]} class="text-base-content/70">
                         {gettext("by %{who}", who: n.who)}
                       </span>
+                    <% kind when kind in ~w(hosted_by hosting) -> %>
+                      <.link navigate={~p"/c/#{n.slug}"} class="font-medium hover:underline">{n.slug}</.link>
+                      {host_phrase(kind, n[:other])}
+                      <span :if={n.value}>
+                        · {ngettext("1 viewer", "%{count} viewers", n.value)}
+                      </span>
                     <% kind -> %>
                       {event_label(kind)} ·
                       <.link navigate={~p"/c/#{n.slug}"} class="hover:underline">{n.slug}</.link>
@@ -385,4 +391,11 @@ defmodule KickTrackerWeb.HomeLive do
   defp board_metric("peak_viewers"), do: :peak
   defp board_metric("follower_gain"), do: :followers
   defp board_metric("kicks"), do: :subs
+
+  # A host from the tracked channel's side; the other channel as Kick
+  # named it, when known.
+  defp host_phrase("hosted_by", nil), do: gettext("was hosted")
+  defp host_phrase("hosted_by", other), do: gettext("hosted by %{other}", other: other)
+  defp host_phrase("hosting", nil), do: gettext("hosted another channel")
+  defp host_phrase("hosting", other), do: gettext("hosting %{other}", other: other)
 end

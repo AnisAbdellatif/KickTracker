@@ -165,11 +165,40 @@ defmodule KickTrackerWeb.SiteComponents do
   def event_label("host"), do: gettext("Host")
   def event_label("host_in"), do: gettext("Hosted by")
   def event_label("host_out"), do: gettext("Hosting")
+  def event_label("hosted_by"), do: gettext("Hosted by")
+  def event_label("hosting"), do: gettext("Hosting")
   def event_label(_), do: gettext("Event")
+
+  @doc """
+  What the stream chart says about hosts (§16): its legend entry, the
+  tooltip's sentences (`%{other}`, `%{before}`, `%{after}` filled in the
+  browser), and the name for a channel Kick didn't name.
+  """
+  def host_labels do
+    # Each placeholder bound to itself: translated here, filled there.
+    other = [other: "%{other}"]
+
+    %{
+      legend: gettext("Hosts"),
+      hosted_by: gettext("Hosted by %{other}", other),
+      hosting: gettext("Hosting %{other}", other),
+      viewers: gettext("viewers"),
+      someone: gettext("another channel"),
+      after:
+        gettext("%{before} → %{after} viewers within 5 minutes",
+          before: "%{before}",
+          after: "%{after}"
+        )
+    }
+  end
 
   @doc "Labels for every event kind, for charts that name them (§13.6)."
   def event_labels,
-    do: Map.new(~w(raid_in raid_out host host_in host_out), &{&1, event_label(&1)})
+    do:
+      Map.new(
+        ~w(raid_in raid_out host host_in host_out hosted_by hosting),
+        &{&1, event_label(&1)}
+      )
 
   @doc """
   The sum of figures that may be unknown (`nil`): unknown if any part is,

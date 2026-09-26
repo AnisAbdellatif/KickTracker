@@ -116,7 +116,7 @@ defmodule KickTrackerWeb.Admin.PrivacyLive do
             <dt>{gettext("Follows")}</dt><dd>{@found.follows}</dd>
             <dt>{gettext("Support events")}</dt><dd>{@found.support_events}</dd>
             <dt>{gettext("Raw events mentioning the id")}</dt><dd>{@found.webhook_events}</dd>
-            <dt>{gettext("Hosts mentioning the id")}</dt><dd>{@found.channel_events}</dd>
+            <dt>{gettext("Hosts naming them")}</dt><dd>{@found.channel_events}</dd>
             <dt>{gettext("Logged chat messages")}</dt><dd>{@found.chat_messages}</dd>
             <dt>{gettext("Logged chat events mentioning the id")}</dt><dd>
               {@found.chat_log_events}

@@ -64,6 +64,24 @@ defmodule Sim.Fixtures.AnonymizerTest do
     assert Enum.map(out["data"], & &1["content"]) == ["text-1", ""]
   end
 
+  test "a host names its host by username (same pseudonym as their slug) and may say something" do
+    {out, _} =
+      anon([
+        %{
+          "host_username" => "SomeStreamer",
+          "number_viewers" => 12,
+          "optional_message" => "hi all"
+        },
+        %{"slug" => "somestreamer"}
+      ])
+
+    assert [
+             %{"host_username" => "user0001", "optional_message" => "text-1"},
+             %{"slug" => "user0001"}
+           ] =
+             out
+  end
+
   test "unknown string fields are reported by path only, never by value" do
     {_, state} = anon(%{"data" => [%{"nickname" => "secret person"}, %{"nickname" => "other"}]})
 

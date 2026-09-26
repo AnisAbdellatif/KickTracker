@@ -12,7 +12,8 @@ defmodule KickTracker.Privacy do
     * their follows and support events keep being counted, without their id;
     * raw event bodies naming them are redacted (and marked, since they no
       longer verify against Kick's signature), and so are hosts' payloads
-      (`channel_events`).
+      (`channel_events`); a host to or from them loses their name
+      (`other_channel`) and keeps its time and viewers.
 
   `find/1` is read-only (the web role); `delete/1` runs in the collector's
   `Workers.Privacy` job.
@@ -45,9 +46,14 @@ defmodule KickTracker.Privacy do
           "SELECT count(*) FROM chat_log_events WHERE payload::text ~ ('\\m' || $1 || '\\M')",
           id
         ),
+      # Hosts naming them: by id in the payload, or as the other channel.
       channel_events:
         count.(
-          "SELECT count(*) FROM channel_events WHERE payload::text ~ ('\\m' || $1 || '\\M')",
+          """
+          SELECT count(*) FROM channel_events
+          WHERE payload::text ~ ('\\m' || $1 || '\\M')
+             OR lower(other_channel) = (SELECT lower(username) FROM kick_users WHERE id = $1::bigint)
+          """,
           id
         ),
       # Bodies mentioning the id (possibly inside a longer number).
@@ -87,7 +93,7 @@ defmodule KickTracker.Privacy do
 
           # Giftee lists and similar keep the gift, not the person.
           support_payloads = scrub_support_payloads(user_id)
-          channel_events = scrub_payloads("channel_events", user_id)
+          channel_events = unname_hosts(user_id) + scrub_payloads("channel_events", user_id)
           chat_log_events = scrub_payloads("chat_log_events", user_id)
           audit = redact_audit_log(user_id)
           %{num_rows: names} = Repo.query!("DELETE FROM kick_users WHERE id = $1", [user_id])
@@ -127,6 +133,30 @@ defmodule KickTracker.Privacy do
                OR lower(target) = (SELECT lower(username) FROM kick_users WHERE id = $2))
         """,
         [Integer.to_string(user_id), user_id]
+      )
+
+    n
+  end
+
+  # Hosts name the other channel by username or slug (a channel's slug is
+  # its owner's username, in lower case). Runs before `kick_users` loses
+  # the username; the payload's name fields go with it.
+  defp unname_hosts(user_id) do
+    %{num_rows: n} =
+      Repo.query!(
+        """
+        UPDATE channel_events SET other_channel = NULL,
+          payload = CASE kind
+            WHEN 'hosted_by' THEN jsonb_set(payload, '{data,host_username}', '"[redacted]"')
+            ELSE jsonb_set(
+              jsonb_set(payload, '{data,slug}', '"[redacted]"'),
+              '{data,hosted}',
+              coalesce(payload #> '{data,hosted}', '{}') ||
+                '{"slug": "[redacted]", "username": "[redacted]"}')
+          END
+        WHERE lower(other_channel) = (SELECT lower(username) FROM kick_users WHERE id = $1)
+        """,
+        [user_id]
       )
 
     n

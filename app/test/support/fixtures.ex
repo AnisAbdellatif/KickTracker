@@ -101,6 +101,21 @@ defmodule KickTracker.Fixtures do
     |> Enum.map(&Jason.decode!(get_in(&1, ["response", "body"])))
   end
 
+  @doc """
+  Every recorded host (`StreamHostEvent`, `ChatMoveToSupportedChannelEvent`)
+  in the Pusher fixtures, as `{event, pusher channel, data, received at}`.
+  """
+  def recorded_hosts do
+    for path <- Path.wildcard(Path.join(@recordings, "pusher/*.jsonl")),
+        line <- File.stream!(path),
+        %{"direction" => "in", "frame" => frame, "at" => at} <- [Jason.decode!(line)],
+        is_binary(frame),
+        {:raw, name, channel, data} <- [KickTracker.Kick.Pusher.decode(frame)] do
+      {:ok, at, 0} = DateTime.from_iso8601(at)
+      {name, channel, data, at}
+    end
+  end
+
   @doc "Raw request bodies of every recorded webhook of this type (as Kick sent them)."
   def recorded_webhooks(event_type) do
     @recordings

@@ -9,6 +9,7 @@ defmodule KickTracker.PrivacyTest do
   alias KickTracker.TestKick
 
   @person 424_242
+  @now ~U[2026-06-01 12:00:00.000000Z]
 
   test "scrub removes a person from any JSON, and only them" do
     body = %{
@@ -96,23 +97,48 @@ defmodule KickTracker.PrivacyTest do
     assert Enum.any?(bodies, &(&1.body =~ "\"x\""))
   end
 
-  test "a host's stored payload naming the person is scrubbed; the host stays" do
+  test "hosts to or from the person lose their name; the hosts and their viewers stay" do
     c = channel!()
+    Repo.insert_all("kick_users", [%{id: @person, username: "someone", seen_at: @now}])
 
-    row =
-      KickTracker.ChannelEvents.raw(
+    rows = [
+      # Hosted by them (named by username, in Kick's case), then hosting them.
+      KickTracker.ChannelEvents.row(
         "App\\Events\\StreamHostEvent",
         "chatrooms.1.v2",
-        %{"by" => TestKick.user(@person, "someone")},
-        DateTime.utc_now()
+        %{"host_username" => "SomeOne", "number_viewers" => 12},
+        @now
+      ),
+      KickTracker.ChannelEvents.row(
+        "App\\Events\\ChatMoveToSupportedChannelEvent",
+        "channel.1",
+        %{
+          "slug" => "someone",
+          "hosted" => %{"slug" => "someone", "username" => "SomeOne", "viewers_count" => 12}
+        },
+        DateTime.add(@now, 60)
+      ),
+      KickTracker.ChannelEvents.row(
+        "App\\Events\\StreamHostEvent",
+        "chatrooms.1.v2",
+        %{"host_username" => "someone_else", "number_viewers" => 3},
+        DateTime.add(@now, 120)
       )
+    ]
 
-    :ok = KickTracker.Stats.insert_channel_event(Map.put(row, :channel_id, c.id))
-    assert Privacy.find(@person).channel_events == 1
+    for row <- rows,
+        do: :ok = KickTracker.Stats.insert_channel_event(Map.put(row, :channel_id, c.id))
 
-    assert %{channel_events: 1} = Privacy.delete(@person)
-    assert [%{kind: "hosted_by", payload: payload}] = rows("channel_events", ["id"])
-    refute Jason.encode!(payload) =~ "someone"
+    assert Privacy.find(@person).channel_events == 2
+    assert %{channel_events: 2} = Privacy.delete(@person)
+
+    assert [
+             %{kind: "hosted_by", other_channel: nil, viewers: 12} = by,
+             %{kind: "hosting", other_channel: nil, viewers: 12} = to,
+             %{other_channel: "someone_else", viewers: 3}
+           ] = rows("channel_events", ["occurred_at"])
+
+    refute Jason.encode!([by.payload, to.payload]) =~ ~r/someone/i
     assert Privacy.find(@person).channel_events == 0
   end
 

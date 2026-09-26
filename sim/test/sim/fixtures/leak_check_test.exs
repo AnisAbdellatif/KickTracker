@@ -26,6 +26,11 @@ defmodule Sim.Fixtures.LeakCheckTest do
     refute Map.has_key?(sensitive, "15")
   end
 
+  test "a host's username is sensitive" do
+    sensitive = LeakCheck.sensitive(%{"data" => ~s({"host_username":"SomeStreamer"})})
+    assert sensitive["SomeStreamer"] == "data.host_username"
+  end
+
   test "finds a value anywhere: plain, inside nested JSON, or as a word in a longer string" do
     sensitive = LeakCheck.sensitive(@raw)
 
