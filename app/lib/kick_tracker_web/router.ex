@@ -33,6 +33,9 @@ defmodule KickTrackerWeb.Router do
   pipeline :admin_api do
     plug :accepts, ["json"]
     plug :fetch_session
+    # Checks only requests that change something: the GETs here pass, and
+    # anything added later that writes is covered.
+    plug :protect_from_forgery
     plug KickTrackerWeb.Plugs.RateLimit
     plug :fetch_current_admin
   end
