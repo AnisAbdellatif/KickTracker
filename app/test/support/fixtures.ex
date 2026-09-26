@@ -12,7 +12,8 @@ defmodule KickTracker.Fixtures do
       kick_user_id: Keyword.get(attrs, :kick_user_id, 1_000_000 + n),
       slug: Keyword.get(attrs, :slug, "somestreamer#{n}"),
       chatroom_id: Keyword.get(attrs, :chatroom_id),
-      active: Keyword.get(attrs, :active, true)
+      active: Keyword.get(attrs, :active, true),
+      tracked_since: Keyword.get(attrs, :tracked_since)
     })
   end
 

@@ -1,7 +1,8 @@
 defmodule KickTrackerWeb.Admin.HealthLive do
   @moduledoc """
   The collection's health (project.md §13.8): per channel, whether each
-  source works and how much of the last day and week it covered;
+  source works and how much of the last day, week and month, and of the
+  time since it was added, it covered;
   system-wide, the queue, the receivers and the jobs. Refreshes every 30s.
   """
 
@@ -25,6 +26,7 @@ defmodule KickTrackerWeb.Admin.HealthLive do
     |> assign(
       now: DateTime.utc_now(),
       rows: Health.channels(),
+      long_coverage: Health.long_coverage(),
       ingress: Health.ingress(),
       jobs: Health.jobs(),
       alerts: KickTracker.Alerts.open_alerts(),
@@ -146,8 +148,26 @@ defmodule KickTrackerWeb.Admin.HealthLive do
               <th>{gettext("Webhooks")}</th>
               <th>{gettext("Last event")}</th>
               <th>{gettext("Followers read")}</th>
-              <th class="text-end">{gettext("Poll 24h / 7d")}</th>
-              <th class="text-end">{gettext("Chat 24h / 7d")}</th>
+              <th
+                class="text-end"
+                title={
+                  gettext(
+                    "Share of the window the source recorded, counted from when the channel was added; all: since it was added"
+                  )
+                }
+              >
+                {gettext("Poll 24h / 7d / 30d / all")}
+              </th>
+              <th
+                class="text-end"
+                title={
+                  gettext(
+                    "Share of the window the source recorded, counted from when the channel was added; all: since it was added"
+                  )
+                }
+              >
+                {gettext("Chat 24h / 7d / 30d / all")}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -182,11 +202,16 @@ defmodule KickTrackerWeb.Admin.HealthLive do
               <td class="text-xs">
                 {if r.last_follower_reading, do: ago(r.last_follower_reading, @now), else: "–"}
               </td>
+              <% long = Map.get(@long_coverage, r.channel.id, %{}) %>
               <td class="text-end tabular-nums">
-                {pct(r.coverage.api_24h)} / {pct(r.coverage.api_7d)}
+                {pct(r.coverage.api_24h)} / {pct(r.coverage.api_7d)} / {pct(long[:api_30d])} / {pct(
+                  long[:api_all]
+                )}
               </td>
               <td class="text-end tabular-nums">
-                {pct(r.coverage.chat_24h)} / {pct(r.coverage.chat_7d)}
+                {pct(r.coverage.chat_24h)} / {pct(r.coverage.chat_7d)} / {pct(long[:chat_30d])} / {pct(
+                  long[:chat_all]
+                )}
               </td>
             </tr>
           </tbody>
@@ -324,6 +349,7 @@ defmodule KickTrackerWeb.Admin.HealthLive do
   defp label(:stale), do: gettext("stale")
   defp label(:never), do: gettext("never")
 
+  defp pct(nil), do: "–"
   defp pct(f), do: "#{:erlang.float_to_binary(f * 100, decimals: 1)}%"
 
   defp ago(at, now) do

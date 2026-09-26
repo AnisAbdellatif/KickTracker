@@ -1462,7 +1462,8 @@ auth check.
     leaderboards and the compare page.
 - **Health:** per channel, live status, last poll, chat socket connected,
   webhook subscriptions per event type, last event received, last follower
-  reading, coverage % for 24h and 7 days. System-wide: RabbitMQ queue depth
+  reading, poll and chat coverage % for 24h, 7 days, 30 days and since the
+  channel was added (each counted from when it was added). System-wide: RabbitMQ queue depth
   and dead letters, consumer lag, receivers last seen, Oban queues and
   failures (Oban Web), LiveDashboard.
 - **Dead letters:** list, inspect the envelope, replay into the queue, or

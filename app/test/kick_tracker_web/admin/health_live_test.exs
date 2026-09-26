@@ -8,8 +8,8 @@ defmodule KickTrackerWeb.Admin.HealthLiveTest do
   setup :log_in_admin
 
   test "shows each channel's sources and coverage", %{conn: conn} do
-    channel = Fixtures.channel!(slug: "somestreamer")
     now = DateTime.utc_now()
+    channel = Fixtures.channel!(slug: "somestreamer", tracked_since: DateTime.add(now, -40, :day))
     # Polled fine for the last 30 minutes; chat failed a minute ago.
     for m <- 30..1//-1,
         do: Coverage.mark([channel.id], "api", true, DateTime.add(now, -m * 60), 150)
@@ -22,9 +22,33 @@ defmodule KickTrackerWeb.Admin.HealthLiveTest do
     assert_in_delta row.coverage.api_24h, 30 * 60 / 86_400, 0.001
     assert row.coverage.chat_24h == 0.0
 
+    long = Health.long_coverage(now)[channel.id]
+    assert_in_delta long.api_30d, 30 * 60 / (30 * 86_400), 0.0001
+    assert_in_delta long.api_all, 30 * 60 / (40 * 86_400), 0.0001
+    assert long.chat_all == 0.0
+
     {:ok, _view, html} = live(conn, ~p"/admin")
     assert html =~ "somestreamer"
     assert html =~ "failing"
+  end
+
+  test "counts coverage from when a channel was added" do
+    now = DateTime.utc_now()
+    channel = Fixtures.channel!(tracked_since: DateTime.add(now, -2, :hour))
+
+    for m <- 60..1//-1,
+        do: Coverage.mark([channel.id], "api", true, DateTime.add(now, -m * 60), 150)
+
+    # An hour polled of the two it has been tracked, whatever the window.
+    [row] = Health.channels(now)
+    long = Health.long_coverage(now)[channel.id]
+
+    for f <- [row.coverage.api_24h, row.coverage.api_7d, long.api_30d, long.api_all],
+        do: assert_in_delta(f, 0.5, 0.001)
+
+    # A window with nothing left after it was added is unknown, not 0 or 100%.
+    [row] = Health.channels(DateTime.add(now, -3, :hour))
+    assert row.coverage.api_24h == nil
   end
 
   test "shows the collectors: who collects, who stands by, who is down, writes waiting", %{
