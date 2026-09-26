@@ -13,6 +13,15 @@
 #   another build needs --version.
 # - `kamal app stop` stops the running container, whatever its version.
 
+# kit_require_kamal: stops, before anything is attempted (or notified),
+# when the configured Kamal command isn't here.
+kit_require_kamal() {
+  local kamal=()
+  read -r -a kamal <<<"$(kit_conf KIT_KAMAL kamal)"
+  command -v "${kamal[0]:-kamal}" >/dev/null 2>&1 && return 0
+  kit_die "needs Kamal: '${kamal[*]}' isn't here (KIT_KAMAL). Install it (gem install kamal), or run it in the kit's image: KIT_RUNNER=docker (docs/runner.md)"
+}
+
 # kit_kamal WORDS... [OPTIONS...]: runs Kamal with the configured command,
 # config file and destination. The global options go right after the
 # command words (`app exec`, `deploy`), before the caller's own.

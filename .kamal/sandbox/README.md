@@ -10,7 +10,7 @@ machinery; this is what KickTracker adds.
 
     .kamal/kit/bin/kit sandbox up          # build the working tree, start everything, first deploy, track the channels
     .kamal/kit/bin/kit sandbox deploy      # rebuild the working tree and deploy both configs
-    .kamal/kit/bin/kit sandbox deploy -c deploy/kamal/app.yml --group web   # one group (name its config: see below)
+    .kamal/kit/bin/kit sandbox deploy --group web   # one group: only its config is built and deployed
     .kamal/kit/bin/kit sandbox status      # groups, containers, URLs
     .kamal/kit/bin/kit sandbox logs collector_a -f
     .kamal/kit/bin/kit sandbox exec web_a bin/kick_tracker remote
@@ -31,10 +31,6 @@ Where things are:
 | The ingress | http://127.0.0.1:8080 (webhooks, as Kick reaches them) |
 | The fake Kick | http://127.0.0.1:4050/_sim/state |
 | The web nodes, directly | http://127.0.0.1:4110, http://127.0.0.1:4111 |
-
-`--group` with `kit sandbox deploy` must name its Kamal config (`-c`):
-without it the kit passes the group to both configs, and the receivers'
-has no `web` (it deploys web, then fails on the receivers).
 
 ## The real Kick (opt-in)
 

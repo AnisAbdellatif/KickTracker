@@ -16,6 +16,14 @@ kit_docker() {
   "${docker[@]}" "$@"
 }
 
+# kit_require_docker: stops unless Docker is here and its daemon answers.
+kit_require_docker() {
+  local docker=()
+  read -r -a docker <<<"${KIT_DOCKER:-${KIT_SANDBOX_DOCKER:-docker}}"
+  command -v "${docker[0]:-docker}" >/dev/null 2>&1 || kit_die "needs Docker: '${docker[*]}' isn't here"
+  kit_docker info >/dev/null 2>&1 || kit_die "Docker isn't answering (\`${docker[*]} info\` failed): is it running?"
+}
+
 # kit_runner_image [IMAGE]: IMAGE (KIT_RUNNER_IMAGE when empty, else
 # deploy-kit:<version>), built from sandbox/Dockerfile when it's the
 # kit's own and isn't here yet. Prints its name.
@@ -106,8 +114,7 @@ kit_runner_maybe_exec() {
 kit_runner_exec() {
   local exported=$1 image args name dir sock gid key token os seen=" "
   shift
-  command -v "${KIT_DOCKER:-${KIT_SANDBOX_DOCKER:-docker}}" >/dev/null 2>&1 ||
-    kit_die "KIT_RUNNER=docker, and no docker here"
+  kit_require_docker
   KIT_PROJECT_DIR=$R_KIT_PROJECT_DIR
   [ -n "$KIT_PROJECT_DIR" ] || KIT_PROJECT_DIR=$(kit_project_dir)
   image=$(kit_runner_image "$R_KIT_RUNNER_IMAGE") || exit 1

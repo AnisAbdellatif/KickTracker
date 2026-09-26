@@ -330,18 +330,46 @@ kit_sandbox_up() {
   kit_sandbox_hook urls
 }
 
-# kit_sandbox_deploy [-c CONFIG] [KIT-DEPLOY-ARGS...]: the working tree,
-# built and deployed through the kit (every config, or -c's).
+# kit_sandbox_deploy [-c CONFIG] [--group NAME]... [KIT-DEPLOY-ARGS...]:
+# the working tree, built and deployed through the kit (every config, or
+# -c's; with --group, only those holding the groups).
 kit_sandbox_deploy() {
-  local configs="" args=() config
+  local configs="" groups="" args=() config g owner selected groups_of=()
   while [ $# -gt 0 ]; do
     case $1 in
-      -c | --config-file) configs="$configs $2" && shift ;;
+      -c | --config-file) configs="$configs $(kit_config_file "$2")" && shift ;;
+      --group)
+        [ $# -ge 2 ] || kit_die "--group needs a group"
+        groups="$groups $2"
+        shift
+        ;;
+      --group=*) groups="$groups ${1#--group=}" ;;
       *) args+=("$1") ;;
     esac
     shift
   done
-  [ -n "$configs" ] || configs=$(kit_sandbox_configs | tr '\n' ' ')
+  if [ -z "$configs" ]; then
+    for config in $(kit_sandbox_configs); do configs="$configs $(kit_config_file "$config")"; done
+  fi
+  # --group: only the configs holding those groups are built and deployed,
+  # each given its own groups (kit deploy refuses a group of another config).
+  if [ -n "$groups" ]; then
+    for g in $groups; do
+      [ -f "$(kit_group_dir "$g")/group.env" ] || kit_die "no group '$g' (.kamal/groups/$g/group.env)"
+      owner=$(kit_group_config_file "$g")
+      kit_in_list "$owner" "$configs" || kit_die "group $g belongs to $owner, which this deploy doesn't cover (${configs# })"
+    done
+    selected=""
+    for config in $configs; do
+      for g in $groups; do
+        if [ "$(kit_group_config_file "$g")" = "$config" ]; then
+          selected="$selected $config"
+          break
+        fi
+      done
+    done
+    configs=$selected
+  fi
   [ -f "$SANDBOX_WORK/deployed" ] || kit_die "no sandbox yet: kit sandbox up"
   _sbx_running "$SANDBOX_SERVER" || kit_die "the sandbox is down: kit sandbox up"
   kit_sandbox_registry_up
@@ -350,7 +378,12 @@ kit_sandbox_deploy() {
   export SANDBOX_VERSION
   for config in $configs; do kit_sandbox_build "$config" "$SANDBOX_VERSION"; done
   for config in $configs; do
-    kit_sandbox_kit deploy -c "$config" --skip-push --version "$SANDBOX_VERSION" ${args[@]+"${args[@]}"} ||
+    groups_of=()
+    for g in $groups; do
+      [ "$(kit_group_config_file "$g")" = "$config" ] && groups_of+=(--group "$g")
+    done
+    kit_sandbox_kit deploy -c "$config" --skip-push --version "$SANDBOX_VERSION" \
+      ${groups_of[@]+"${groups_of[@]}"} ${args[@]+"${args[@]}"} ||
       kit_die "deploying $config to the sandbox failed"
   done
   kit_ok "sandbox: $SANDBOX_VERSION deployed"

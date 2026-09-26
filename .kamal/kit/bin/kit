@@ -160,6 +160,12 @@ cmd_deploy() {
     shift
   done
   kit_load_config "$DEST"
+  kit_require_kamal
+  # Without curl every smoke check fails, which would roll back a good
+  # deploy: missing, it's said now, before anything is deployed.
+  if [ "$smoke" = true ] && [ -n "$(kit_conf KIT_SMOKE_URLS "")" ]; then
+    kit_require curl "for the smoke tests; --no-smoke deploys without them"
+  fi
   kit_is_true "$(kit_conf KIT_AUTO_ROLLBACK true)" || rollback=false
   kit_is_true "$(kit_conf KIT_DEPLOY_SKIP_PUSH false)" && skip_push=true
   # One version for every Kamal call of this deploy (plain roles, each
@@ -314,6 +320,7 @@ cmd_group() {
   _take_destination "$@"
   set -- ${ARGS[@]+"${ARGS[@]}"}
   kit_load_config "$DEST"
+  case $sub in list | "") ;; *) kit_require_kamal ;; esac
 
   case $sub in
     list)
@@ -413,6 +420,7 @@ cmd_role_exec() {
   set -- ${ARGS[@]+"${ARGS[@]}"}
   [ $# -eq 2 ] || kit_die "kit role-exec ROLE 'COMMAND'"
   kit_load_config "$DEST"
+  kit_require_kamal
   kit_role_exec "$1" "$2"
 }
 
@@ -666,6 +674,7 @@ cmd_host() {
 cmd_kamal() {
   _take_destination "$@"
   kit_load_config "$DEST"
+  kit_require_kamal
   kit_kamal ${ARGS[@]+"${ARGS[@]}"}
 }
 
@@ -745,6 +754,7 @@ USAGE
       ;;
   esac
   kit_sandbox_load
+  case $sub in init) ;; *) kit_require_docker ;; esac
   case $sub in
     init) kit_sandbox_init ;;
     up) kit_sandbox_up ;;

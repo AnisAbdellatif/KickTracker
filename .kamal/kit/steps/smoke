@@ -10,6 +10,8 @@
 if [ "${KIT_HOOK:-}" = post-deploy ] && [ -n "${KIT_RUN_DIR:-}" ]; then exit 0; fi
 urls=$(kit_conf KIT_SMOKE_URLS "")
 [ -n "$urls" ] || exit 0
+# Missing, every check would fail as if the site were down.
+kit_require curl "for the smoke tests"
 retries=$(kit_conf KIT_SMOKE_RETRIES 10)
 interval=$(kit_conf KIT_SMOKE_INTERVAL 3)
 timeout=$(kit_conf KIT_SMOKE_TIMEOUT 10)
