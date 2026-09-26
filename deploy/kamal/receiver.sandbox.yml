@@ -1,0 +1,26 @@
+# The "sandbox" destination of receiver.yml, for `kit sandbox` (deploy-kit,
+# docs/sandbox.md; .kamal/sandbox/): what Kamal deploys to on this machine,
+# merged over receiver.yml by `-d sandbox`. Started by `kit sandbox init`.
+#
+# kit sandbox refuses to deploy unless every host is 127.0.0.1, SSH is on
+# the sandbox's port and the images come from the sandbox's registry.
+# The fake Kick runs on this machine: the receivers reach it as
+# host.docker.internal. No role runs kamal-proxy.
+servers:
+  receiver_1:
+    hosts: [127.0.0.1]
+    options:
+      add-host: host.docker.internal:host-gateway
+  receiver_2:
+    hosts: [127.0.0.1]
+    options:
+      add-host: host.docker.internal:host-gateway
+
+ssh:
+  user: root
+  port: 2222
+
+registry:
+  server: 127.0.0.1:5555
+  username: sandbox
+  password: [KIT_SANDBOX_REGISTRY_PASSWORD]

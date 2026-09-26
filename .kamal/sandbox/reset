@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# kit sandbox reset: the fake Kick, the stack and every volume of the
+# sandbox gone (compose's, and the ones Kamal's containers made:
+# kicktracker-sandbox_journal-a, _spool1...).
+set -euo pipefail
+# shellcheck source=lib.sh
+. "$(dirname "$0")/lib.sh"
+
+stop_sim
+[ -f "$SERVER_DIR/compose.single.yml" ] && dc down -v --remove-orphans
+docker volume ls -q --filter "name=^${COMPOSE_PROJECT_NAME}_" | xargs -r docker volume rm >/dev/null

@@ -8,6 +8,15 @@ KIT_KAMAL=kamal                 # the command: kamal, bin/kamal, "bundle exec ka
 KIT_KAMAL_CONFIG_FILE=          # -c; empty: Kamal's default (config/deploy.yml)
 KIT_ROLES=                      # all roles; empty: read from `kamal config`
 
+# --- Where Kamal runs (docs/runner.md). Read without a destination.
+KIT_RUNNER=local                # local: this machine's Kamal; docker: the kit's image (Kamal, bash, gh, sops)
+KIT_RUNNER_IMAGE=               # empty: deploy-kit:<version>, built from sandbox/Dockerfile
+KIT_RUNNER_ENV=                 # more variables to pass in (NAMES; KIT_* and KAMAL_* always are)
+KIT_RUNNER_NETWORK=             # docker run --network; empty: Docker's default
+KIT_RUNNER_SSH_DIR=             # empty: ~/.ssh
+KIT_RUNNER_SSH_AGENT=auto       # auto: $SSH_AUTH_SOCK (Docker Desktop's on a Mac); none; or a socket path
+KIT_RUNNER_DOCKER_SOCKET=       # empty: /var/run/docker.sock (for builds); none
+
 # --- Hooks: which steps each Kamal hook runs, in order. Names are the
 # kit's steps (steps/), the project's (.kamal/steps/), or paths. The
 # project's .kamal/hooks.d/<hook>/* scripts run after these. The gates run
@@ -90,3 +99,15 @@ KIT_WEBHOOK_URL=                 # Slack, Discord, Mattermost, or anything takin
 KIT_NTFY_URL=
 KIT_NTFY_TOKEN=
 KIT_NOTIFY_COMMAND=
+
+# --- kit sandbox (docs/sandbox.md; usually set in .kamal/sandbox/sandbox.env)
+KIT_SANDBOX_CONFIGS=             # Kamal configs, in order; empty: the project's
+KIT_SANDBOX_NAME=                # container names' part; empty: the project folder's name
+KIT_SANDBOX_SSH_PORT=2222
+KIT_SANDBOX_REGISTRY_PORT=5555
+KIT_SANDBOX_PROXY_PORT=8080      # kamal-proxy's HTTP port, for roles behind it
+KIT_SANDBOX_PROXY_TLS_PORT=8443
+KIT_SANDBOX_SERVER_PATH=/srv/sandbox  # where hooks' server files appear on the "server"
+KIT_SANDBOX_ENV=                 # NAME=value ... for the deployer (what your Kamal configs' ERB reads)
+KIT_SANDBOX_NOTIFY=false         # send the kit's notifications from the sandbox too
+KIT_SANDBOX_IMAGE=               # empty: KIT_RUNNER_IMAGE (the kit's image, deploy-kit:<version>)

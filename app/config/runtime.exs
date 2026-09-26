@@ -250,10 +250,25 @@ if config_env() == :prod do
 
   host = System.get_env("PHX_HOST") || "example.com"
 
+  # The public URL links are built with (invitations, exports): HTTPS on
+  # 443 behind Caddy by default; PHX_URL_SCHEME and PHX_URL_PORT where the
+  # site is served otherwise (the sandbox: plain HTTP on 8080).
+  url_scheme =
+    case System.get_env("PHX_URL_SCHEME") || "https" do
+      scheme when scheme in ~w(http https) -> scheme
+      other -> raise "PHX_URL_SCHEME must be http or https, not #{inspect(other)}"
+    end
+
+  url_port =
+    case System.get_env("PHX_URL_PORT") do
+      nil -> if(url_scheme == "https", do: 443, else: 80)
+      port -> String.to_integer(port)
+    end
+
   config :kick_tracker, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :kick_tracker, KickTrackerWeb.Endpoint,
-    url: [host: host, port: 443, scheme: "https"],
+    url: [host: host, port: url_port, scheme: url_scheme],
     http: [
       # IPv4 by default: containers often have no IPv6, where binding ::
       # fails; LISTEN_IPV6=true listens on both.

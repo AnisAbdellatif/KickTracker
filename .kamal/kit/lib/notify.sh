@@ -120,6 +120,10 @@ _kit_notify_send() {
 _kit_curl_secret_url() {
   local url=$1
   shift
+  command -v curl >/dev/null 2>&1 || {
+    kit_warn "curl missing: notification not sent"
+    return 1
+  }
   {
     printf 'url = "%s"\n' "$(_kit_curl_quote "$url")"
     if [ -n "${KIT_CURL_SECRET_HEADER:-}" ]; then

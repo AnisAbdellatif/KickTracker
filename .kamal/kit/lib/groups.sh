@@ -81,7 +81,7 @@ kit_config_service() {
   local file=$1
   case $file in /*) ;; *) file="$KIT_PROJECT_DIR/$file" ;; esac
   [ -r "$file" ] || return 0
-  sed -n 's/^service:[[:space:]]*["'"'"']\{0,1\}\([^"'"'"'[:space:]#]*\).*/\1/p' "$file" | head -n 1
+  kit_yaml_get service "$file" || true
 }
 
 # kit_group_roles_of NAME: a group's roles, read without loading it.
@@ -332,8 +332,27 @@ _kit_group_restore() {
   kit_is_true "$(kit_conf KIT_GROUP_RESTORE_ON_FAILURE false)" || return 0
   [ -n "$previous" ] || return 0
   kit_warn "$KIT_GROUP: restoring $role to $previous"
-  KIT_GROUP_DEPLOY=$KIT_GROUP kit_kamal rollback -H -r "$role" "$previous" ||
+  kit_group_rollback_role "$role" "$previous" ||
     kit_warn "$KIT_GROUP: could not restore $role to $previous"
+}
+
+# kit_group_rollback_role ROLE VERSION: puts ROLE (of the loaded group)
+# back on VERSION. Kamal's rollback starts the old container before
+# stopping the new one, so, as for a deploy, the role is stopped first when
+# KIT_GROUP_STOP_FIRST is set: otherwise both want its published port. A
+# role already on VERSION is left alone (rolling back onto the running
+# build would replace a container with a copy of itself).
+kit_group_rollback_role() {
+  local role=$1 version=$2 current
+  current=$(kit_role_version "$role")
+  if [ "$current" = "$version" ]; then
+    kit_info "$role already runs $version: nothing to roll back"
+    return 0
+  fi
+  if kit_is_true "$(kit_conf KIT_GROUP_STOP_FIRST true)" && [ -n "$current" ]; then
+    kit_kamal app stop -H -r "$role" || return 1
+  fi
+  KIT_GROUP_DEPLOY=$KIT_GROUP kit_kamal rollback -H -r "$role" "$version"
 }
 
 _kit_group_deploy_rolling() {

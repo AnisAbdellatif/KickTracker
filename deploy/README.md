@@ -18,9 +18,9 @@ images; it deploys nothing and holds no key to the server.
 
 | File | What |
 |---|---|
-| `release.sh` | **A release**, from your machine: `kit deploy` of the app, then of the receivers |
+| `release.sh` | **A release**, from your machine: `kit deploy` of the groups the release changes, the app's then the receivers' |
 | `kamal/app.yml`, `kamal/receiver.yml` | Kamal's configs: the app image (web, collectors) and the receiver image |
-| `kamal/*.rehearsal.yml` | What the rehearsal changes (`-d rehearsal`) |
+| `kamal/*.sandbox.yml` | Kamal's `sandbox` destination: the stack on this machine (`kit sandbox`) |
 | `kamal/registry-password` | The read-only GHCR token Kamal logs the server in with |
 | `server-sync.sh` | Run on the server before each deploy: checkout up to the commit, secrets decrypted |
 | `../.kamal/` | deploy-kit: its settings (`kit.env`), the groups (`groups/`), the project's steps (`steps/`), the vendored kit (`kit/`) |
@@ -37,7 +37,8 @@ images; it deploys nothing and holds no key to the server.
 | `ops/common.sh` | Shared by the cron scripts: reading the secrets, alerts, heartbeats |
 | `rabbitmq/` | Topology and users; `make-prod-definitions.sh` for production |
 | `secrets/` | sops-encrypted env files, and `decrypt.sh` (see its README) |
-| `rehearsal/` | The whole deploy path, rehearsed on a development machine under load |
+| `compose.sandbox.yml` | The sandbox's differences from `compose.single.yml` (plain HTTP on 127.0.0.1:8080) |
+| `rehearsal/` | The whole deploy path, rehearsed on the sandbox under load |
 
 ## First deployment
 
@@ -77,7 +78,10 @@ does Docker, the deploy user, SSH hardening and the firewall:
    - `secrets/deployer.sops.env` from `deployer.env.example`: a GitHub
      token (classic) with only `read:packages`, encrypted like the others;
    - Kamal (`gem install kamal`, 2.12 or later), `sops`, and `gh` logged in
-     (for the CI and attestation checks).
+     (for the CI and attestation checks). Or only Docker: with
+     `KIT_RUNNER=docker` in `.kamal/kit.local.env` the kit runs Kamal, sops
+     and gh in its own image, handing it your SSH keys, gh's token and age
+     key (deploy-kit's `docs/runner.md`).
 6. The first deploy (collectors with `--bootstrap`: nobody collects yet),
    then the receivers:
 
@@ -137,16 +141,32 @@ Merge to `main` and wait for CI to pass (its Images job builds, labels and
 attests the app, receiver and database images, tagged with the commit).
 Then, from your machine, in an up-to-date checkout of `main`:
 
+    deploy/release.sh --dry-run   # what would be deployed, and why
     deploy/release.sh
 
-That is two `kit deploy`s (deploy-kit, `.kamal/`): the app's Kamal config,
-then the receivers'. Before anything is replaced, the kit checks that
-you're on `main`, clean and pushed, that CI passed for this exact commit
-and that the images carry the CI workflow's attestation; then it brings
-the server's checkout up to the commit and decrypts its secrets there
-(`server-sync.sh`), and runs the migrations (`.kamal/steps/migrate`: the
-new image's `bin/migrate`, expand-then-contract only, `lock_timeout 5s`).
-Then, one group at a time (`.kamal/groups/`):
+Only the groups the release changes are deployed. For each group the
+script compares the build it runs (the active collector's, for the
+collectors) with this commit, over the paths that group runs: its image's
+build context, its Kamal config and its secrets file, and for the
+collectors minus what only web nodes run (the list is in the script). A
+web-only change deploys the web nodes and leaves collection and the
+receivers alone; tests and docs deploy nothing. `--all` deploys every
+group regardless. `deploy/release-test.sh` (run by CI) checks which
+groups each kind of change deploys; add to it when the lists change.
+The kit lets the environment win over `.kamal/`'s files, so `release.sh`
+refuses to run while a `KT_*` variable is exported in the shell (it would
+replace the server's settings), and lists any `KIT_*` one it will use.
+
+That is up to two `kit deploy --group …`s (deploy-kit, `.kamal/`): the
+app's Kamal config, then the receivers'. Before anything is replaced, the
+kit checks that you're on `main`, clean and pushed, that CI passed for
+this exact commit and that the images carry the CI workflow's
+attestation; then it brings the server's checkout up to the commit and
+decrypts its secrets there (`server-sync.sh`), and, when the app's config
+is deployed, runs the migrations (`.kamal/steps/migrate`: the new image's
+`bin/migrate`, expand-then-contract only, `lock_timeout 5s`; a migration
+is app code, so it deploys the collectors and web both). Then, one group
+at a time (`.kamal/groups/`):
 
 - **collectors**: only the standby gets the new build (stopped first,
   never two containers on one journal), then the leader restarts in place
@@ -157,9 +177,9 @@ Then, one group at a time (`.kamal/groups/`):
   fails its new build goes back to its previous one.
 - **receivers**: `receiver_1`, then `receiver_2`, the same way.
 
-Last, the smoke tests (`KIT_SMOKE_URLS`) through Caddy: if they fail, the
-release is rolled back (web and receivers to their previous build, the
-collectors switched back). A step that fails stops the release; what
+Last, the smoke tests (`KIT_SMOKE_URLS`) through Caddy: if they fail, what
+the release deployed is rolled back (web and receivers to their previous
+build, each stopped first; the collectors switched back). A step that fails stops the release; what
 wasn't reached keeps running the previous build. Every outcome goes to the
 kit's notification channels.
 
@@ -183,8 +203,20 @@ Images are named by commit, so a deploy never swaps an image by accident;
 `.kamal/kit.local.env` exported, or through `kit`). A change to
 `caddy/sites.caddy` also needs the host's Caddy reloaded, by hand.
 
-Before trusting a change to any of this, rehearse it on a development
-machine: `rehearsal/rehearse.sh` (rehearsal/README.md).
+## The sandbox, and the rehearsal
+
+To try the deploy path on your machine, with the stack as production runs
+it and the fake Kick in place of kick.com, use the sandbox (deploy-kit's
+`kit sandbox`, set up in `../.kamal/sandbox/`, whose README says what is
+where):
+
+    .kamal/kit/bin/kit sandbox up       # the working tree built and deployed; http://localhost:8080
+    .kamal/kit/bin/kit sandbox deploy   # again, after a change
+    .kamal/kit/bin/kit sandbox reset    # gone, data included
+
+Before trusting a change to any of this, rehearse it: `rehearsal/rehearse.sh`
+(rehearsal/README.md) runs the sandbox under load through every kind of
+deploy, restart and rollback, and reports what each cost.
 
 ## Moving the running server from compose to Kamal (once)
 

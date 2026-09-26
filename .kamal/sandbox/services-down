@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# kit sandbox down: the fake Kick and the stack stopped, their data kept.
+set -euo pipefail
+# shellcheck source=lib.sh
+. "$(dirname "$0")/lib.sh"
+
+stop_sim
+[ -f "$SERVER_DIR/compose.single.yml" ] && dc stop

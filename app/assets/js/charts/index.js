@@ -20,3 +20,4 @@ import * as sparkline from "./sparkline"
 export const kinds = {timeseries, stream, share, heatmap, bars, sparkline}
 export {echarts}
 export {tokens} from "./theme"
+export {fitYAxes} from "./yfit"

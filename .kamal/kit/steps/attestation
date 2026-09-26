@@ -7,6 +7,12 @@
 # KIT_IMAGE_<SERVICE> per Kamal service.
 . "$(dirname "$0")/_preamble.sh"
 
+# kit sandbox: local, nothing to check against GitHub, the branch or a freeze.
+if [ -n "${KIT_SANDBOX:-}" ]; then
+  kit_info "sandbox: attestation skipped"
+  exit 0
+fi
+
 kit_require gh "GitHub's CLI, logged in: gh auth login"
 # Per Kamal service first (a project with several images):
 # KIT_IMAGE_<SERVICE>, e.g. KIT_IMAGE_MYAPP_WORKER for service myapp-worker.

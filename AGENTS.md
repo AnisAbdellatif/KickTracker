@@ -101,8 +101,8 @@ understanding their intent first.
 | `sim/` | The fake Kick + the recorder (§17) | All development and tests run against it |
 | `fixtures/` | Recorded, anonymized Kick payloads (§17.1) | Source for the simulator and parser tests |
 | `contracts/` | The event envelope (§8.1) | The only thing app and ingress share |
-| `deploy/` | Kamal configs (`kamal/`), compose files (infrastructure, stage 2), Caddy, RabbitMQ definitions, `release.sh` (a release, run by a person with deploy-kit), `server-sync.sh` (run on the server before each deploy) | `compose.dev.yml` runs TimescaleDB (55432) and RabbitMQ (55672) for development and tests; `rehearsal/rehearse.sh` runs the production stack locally and upgrades it under load with the kit: run it after changing anything on the deploy path |
-| `.kamal/` | deploy-kit: settings (`kit.env`), groups, project steps, the vendored kit (`kit/`) | Update the kit with `kit update --from <deploy-kit checkout or URL> --ref <tag>`; never edit `.kamal/kit/` by hand |
+| `deploy/` | Kamal configs (`kamal/`), compose files (infrastructure, stage 2), Caddy, RabbitMQ definitions, `release.sh` (a release, run by a person with deploy-kit; deploys only the groups a change touches, checked by `release-test.sh`), `server-sync.sh` (run on the server before each deploy) | `compose.dev.yml` runs TimescaleDB (55432) and RabbitMQ (55672) for development and tests; `rehearsal/rehearse.sh` runs the sandbox under load and upgrades it with the kit: run it after changing anything on the deploy path |
+| `.kamal/` | deploy-kit: settings (`kit.env`), groups, project steps, the sandbox (`sandbox/`: the production stack on this machine, `kit sandbox up`), the vendored kit (`kit/`) | Update the kit with `kit update --from <deploy-kit checkout or URL> --ref <tag>`, and check the vendored copy matches the tag (before 0.6.0 the update ran the old kit's file list, so a release adding a folder needed a second `kit update`); never edit `.kamal/kit/` by hand. The sandbox and the rehearsal never reach a real server: never weaken `deploy/kamal/*.sandbox.yml` or the kit's checks to make them work |
 
 Follow the phase order in §20. Don't build ahead of the current phase without asking.
 
@@ -111,6 +111,12 @@ Follow the phase order in §20. Don't build ahead of the current phase without a
 - **Never call the real Kick while developing or testing.** Everything runs against the
   simulator (`sim/`). The only code allowed to reach the real Kick before phase 5 is the
   recorder (§17.1), run by hand by the owner.
+- **The one exception is the sandbox's opt-in real-Kick mode** (`.kamal/sandbox/README.md`):
+  the owner creates it with `KT_SANDBOX_KICK=real` and the sandbox's own Kick app in
+  `.kamal/sandbox/kick.env`. Agents never turn it on, never put production's Kick app
+  there (its subscription sync would remove production's webhooks), never commit
+  `kick.env`, and never weaken the secrets hook's check against production's client id.
+  Tests and the deploy rehearsal always use the fake Kick.
 - Every Kick URL and key comes from **configuration** (`KICK_API_URL`, `KICK_ID_URL`,
   `KICK_V2_URL`, `PUSHER_URL`, `KICK_PUBLIC_KEY`). No code path may know or check whether
   it is talking to the simulator; something that only works against the simulator is a

@@ -1,9 +1,9 @@
-# The deploy rehearsal (rehearsal/README.md): compose.single.yml's
+# The sandbox (`kit sandbox`, .kamal/sandbox/): compose.single.yml's
 # database, queue and Caddy as they run in production, on one development
 # machine. Only what a laptop can't do differs: plain HTTP on
-# 127.0.0.1:8080 instead of 80/443, backups to a local WAL-G store. The
-# app's containers are Kamal's (deploy/kamal/*.rehearsal.yml adds the fake
-# Kick's host).
+# 127.0.0.1:8080 instead of 80/443, backups to a local WAL-G store, and no
+# ports but Caddy's. The app's containers are Kamal's
+# (deploy/kamal/*.sandbox.yml).
 services:
   caddy:
     profiles: !reset []

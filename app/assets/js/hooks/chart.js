@@ -23,7 +23,9 @@
 // tracked), and the reader zooms from there: wheel or pinch, drag to pan,
 // zoom out to the whole period. Their zoom survives live points and theme
 // changes; double-click, or data-chart-action="fit", goes back to all
-// the data.
+// the data. The value axes follow the window (charts/yfit.js): zoomed in,
+// they span what is visible, and a series switched off in the legend no
+// longer counts.
 
 let loading = null
 const load = () => (loading ||= import("../charts/index.js"))
@@ -59,12 +61,20 @@ export const Chart = {
     this.themeObserver = new MutationObserver(() => this.render())
     this.themeObserver.observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]})
 
-    load().then(({echarts, kinds}) => {
+    load().then(({echarts, kinds, fitYAxes}) => {
       this.echarts = echarts
+      this.fitYAxes = fitYAxes
       this.kind = kinds[this.el.dataset.kind]
       this.chart = echarts.init(this.canvas, null, {renderer: "canvas"})
       // Only the reader's own zooming fires this (setOption doesn't).
-      this.chart.on("datazoom", () => this.keepZoom())
+      this.chart.on("datazoom", () => {
+        this.keepZoom()
+        this.fitY()
+      })
+      this.chart.on("legendselectchanged", ({selected}) => {
+        this.hidden = new Set(Object.keys(selected).filter((name) => !selected[name]))
+        this.fitY()
+      })
       this.chart.getZr().on("dblclick", () => this.fit())
       this.resize = new ResizeObserver(() => this.chart && this.chart.resize())
       this.resize.observe(this.el)
@@ -171,6 +181,14 @@ export const Chart = {
       if (window) {
         option.dataZoom = option.dataZoom.map((z) => ({...z, startValue: window[0], endValue: window[1]}))
       }
+      // A redraw keeps what the reader switched off in the legend.
+      if (option.legend && this.hidden && this.hidden.size) {
+        option.legend.selected = Object.fromEntries([...this.hidden].map((name) => [name, false]))
+      }
+      // Kept as built (its axes' own min, splitNumber) for fitting again.
+      this.option = {...option}
+      this.window = window
+      if (window) mergeY(option, this.fitYAxes(option, window, this.hidden))
       this.chart.setOption(option, true)
       if (this.tableEl) this.fillTable()
     })
@@ -180,6 +198,14 @@ export const Chart = {
   keepZoom() {
     const z = (this.chart.getOption().dataZoom || [])[0]
     if (z && z.startValue != null && z.endValue != null) this.zoom = [z.startValue, z.endValue]
+  },
+
+  // The value axes spanning the window as it is now (after a zoom, a pan,
+  // or a legend switch), merged into the chart.
+  fitY() {
+    const window = this.zoom || this.window
+    if (!this.option || !window || !this.fitYAxes) return
+    this.chart.setOption({yAxis: this.fitYAxes(this.option, window, this.hidden)}, {lazyUpdate: true})
   },
 
   // Back to all the data.
@@ -282,6 +308,12 @@ function span(t, columns) {
     }
   }
   return first == null ? null : [first, last]
+}
+
+// The fitted bounds written into a freshly built option's value axes.
+function mergeY(option, bounds) {
+  if (Array.isArray(option.yAxis)) option.yAxis = option.yAxis.map((a, i) => ({...a, ...bounds[i]}))
+  else if (option.yAxis) option.yAxis = {...option.yAxis, ...bounds[0]}
 }
 
 const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c])

@@ -1412,7 +1412,9 @@ the edge), and a stream opens on what we recorded rather than Kick's own
 start. The axis still spans the whole period or stream: the reader zooms
 in or out from there (wheel or pinch, drag to pan). Their zoom is kept
 across live points and theme changes; double-click, or the chart's "show
-all" button, fits the data again.
+all" button, fits the data again. The value axes follow the window: zoomed
+in, each spans what is visible (counts still from zero), and a series
+switched off in the legend no longer counts.
 
 (Chart.js was the earlier pick; it lacks bands, markers, linked zoom and
 heatmaps without plugins. uPlot is faster but too narrow for heatmaps and
@@ -1624,10 +1626,19 @@ change to the app beyond producer config.
   pushed tree, CI green for the exact commit and the images' build
   attestations, brings the server's checkout up to the commit and
   decrypts its secrets there, and runs the migrations; after, smoke tests
-  through Caddy roll a failed release back. The whole path is rehearsed on
-  a development machine with `deploy/rehearsal/rehearse.sh` (the production
-  stack under load, upgraded step by step, with what each step costs
-  measured).
+  through Caddy roll a failed release back. The whole path runs on a
+  development machine in the sandbox (deploy-kit's `kit sandbox`,
+  `.kamal/sandbox/`: the production stack, deployed by the kit and Kamal
+  to a "server" container, with the fake Kick), and is rehearsed there with
+  `deploy/rehearsal/rehearse.sh` (the sandbox under load, upgraded step by
+  step, with what each step costs measured).
+- A release deploys **only what it changes**: a group (collectors, web,
+  receivers) is redeployed when something it runs (its image's build
+  context, its Kamal config, its secrets file; for the collectors, minus
+  what only web nodes run) differs between the build it runs and the
+  release. A web-only change leaves collection and the receivers alone,
+  so it can't cost a reading or a webhook; `deploy/release.sh --all`
+  deploys everything.
 - A collector deploy updates **only the standby**, waits for it to be
   healthy, then switches collection to it: the leader restarts in place,
   on the build it had, and its clean stop hands over within a second

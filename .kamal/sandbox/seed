@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# After the first deploy: track the channels, so collection starts (polls,
+# chat, webhooks): the fake Kick's scenario, or with the real Kick the
+# ones kick.env lists (KT_SANDBOX_CHANNELS; none: add them in the admin).
+set -euo pipefail
+# shellcheck source=lib.sh
+. "$(dirname "$0")/lib.sh"
+
+if [ "$(kick_mode)" = real ]; then
+  load_kick_env
+  slugs=${KT_SANDBOX_CHANNELS:-}
+else
+  slugs=$(channels)
+fi
+if [ -z "${slugs// /}" ]; then
+  echo "no channels to track yet: add them in the admin (README.md here, \"The real Kick\")"
+  exit 0
+fi
+"$KIT" sandbox exec web_a bin/kick_tracker rpc "
+  for slug <- ~w($slugs), do: IO.inspect(KickTracker.Channels.add(slug) |> elem(0), label: slug)"

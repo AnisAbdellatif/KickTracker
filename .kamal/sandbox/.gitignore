@@ -1,0 +1,4 @@
+# kit sandbox: generated keys, secrets and state.
+.work/
+# The sandbox's own Kick app, for the real Kick (opt-in): never committed.
+kick.env
