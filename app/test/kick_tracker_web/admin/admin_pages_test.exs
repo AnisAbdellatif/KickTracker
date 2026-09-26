@@ -72,12 +72,26 @@ defmodule KickTrackerWeb.Admin.AdminPagesTest do
 
   test "groups are created, filled and made public", %{conn: conn} do
     c = channel!(slug: "somestreamer")
+    other = channel!(slug: "otherstreamer")
     {:ok, view, _} = live(conn, ~p"/admin/groups")
     view |> form("#create-group", %{name: "Some group"}) |> render_submit()
     [g] = Groups.list()
     view |> form("#members-#{g.id}", %{channels: [c.id], public: "true"}) |> render_submit()
     assert [%{channel_ids: [id], public: true, slug: "some-group"}] = Groups.list(public: true)
     assert id == c.id
+
+    # A search hides the channels it doesn't match, without dropping them:
+    # saving keeps the member the search hid.
+    view |> element("#group-#{g.id} button[phx-click=edit]") |> render_click()
+
+    view
+    |> element("#members-#{g.id} input[name=member_q]")
+    |> render_keyup(%{"value" => "other"})
+
+    assert has_element?(view, "#members-#{g.id} label.hidden input[value='#{c.id}'][checked]")
+    view |> form("#members-#{g.id}", %{channels: [c.id, other.id]}) |> render_submit()
+    assert [%{channel_ids: ids}] = Groups.list()
+    assert Enum.sort(ids) == Enum.sort([c.id, other.id])
   end
 
   test "an exclusion from the data page queues the recomputation", %{conn: conn} do
