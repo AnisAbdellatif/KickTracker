@@ -385,7 +385,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
                 id={"chat-log-channel-#{c.id}"}
                 class="flex items-center gap-3 py-2 pe-1"
               >
-                <.avatar name={c.slug} class="size-8 text-sm" />
+                <.avatar name={c.slug} channel_id={c.id} class="size-8 text-sm" />
                 <div class="min-w-0 flex-1">
                   <p class="truncate text-sm font-medium" title={c.slug}>{c.slug}</p>
                   <div class="text-muted flex flex-wrap items-center gap-x-2 text-xs">

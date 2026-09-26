@@ -239,7 +239,11 @@ defmodule KickTrackerWeb.ChannelLive do
     <Layouts.app flash={@flash}>
       <div id="channel-page" phx-hook="Format">
         <header class="flex flex-wrap items-center gap-x-4 gap-y-3">
-          <.avatar name={@channel.slug} class="size-12 text-xl sm:size-14 sm:text-2xl" />
+          <.avatar
+            name={@channel.slug}
+            channel_id={@channel.id}
+            class="size-12 text-xl sm:size-14 sm:text-2xl"
+          />
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
               <h1 class="truncate text-2xl font-semibold tracking-tight sm:text-3xl">

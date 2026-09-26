@@ -17,6 +17,8 @@ defmodule KickTracker.Channels.Channel do
     # Chat logging (§12.8): message text kept for this channel, admin only.
     field :chat_log, :boolean, default: false
     field :chat_log_retention_days, :integer, default: 90
+    # The picture Kick last gave (§12.9); our copy is in channel_avatars.
+    field :avatar_url, :string
 
     timestamps(type: :utc_datetime_usec)
   end

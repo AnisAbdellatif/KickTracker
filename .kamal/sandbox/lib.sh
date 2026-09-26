@@ -40,7 +40,7 @@ start_sim() {
   echo "starting the fake Kick on :4050 ($(basename "$SCENARIO"); the first start compiles it)"
   [ -d "$REPO/sim/deps" ] || (cd "$REPO/sim" && mix deps.get >/dev/null)
   (cd "$REPO/sim" && exec nohup setsid mix sim --ip 0.0.0.0 --port 4050 --scenario "$SCENARIO" \
-    --webhook-url http://127.0.0.1:8080/) >"$WORK/sim.log" 2>&1 </dev/null &
+    --webhook-url http://127.0.0.1:8080/ --asset-url http://host.docker.internal:4050) >"$WORK/sim.log" 2>&1 </dev/null &
   echo $! >"$WORK/sim.pid"
   local waited=0
   until curl -sf -o /dev/null "$SIM/_sim/state"; do

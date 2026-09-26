@@ -1291,6 +1291,25 @@ channels, the busiest ~117 000): about 150 bytes per message with
 indexes, so ~6.5 GB a year for the busiest channel and ~15 GB for all of
 them, at 365 days' retention; 90 days is a quarter of that.
 
+### 12.9 Channel pictures
+
+A channel's picture comes from what Kick already sends: `profile_picture`
+in `/livestreams` answers (every poll of a live channel) and in stream
+status and metadata events (`broadcaster.profile_picture`). The channel's
+process records it in `channels.avatar_url` when it changes (a journaled
+`{:avatar_url, …}`), which queues `Workers.ChannelAvatar`; the job
+downloads it (PNG, JPEG, GIF or WebP by their first bytes, up to 1 MB,
+streamed and dropped past that) into `channel_avatars` (one row per
+channel: source URL, type, bytes, hash). A daily sweep retries any not
+copied. The site serves the copy at `/img/channels/:id/avatar?v=<hash>`
+(a year's cache, `nosniff`, a sandboxing CSP; rate-limited like `/data`),
+so a visitor's browser never contacts Kick; hidden channels' pictures
+aren't served. The avatar component shows the picture where a copy
+exists and the channel's initial otherwise. Not exported between
+instances (re-fetched from the next poll or event); deleted with the
+channel. The fake Kick serves solid-colour PNGs for its channels
+(`--asset-url` sets the address the code under test reaches it at).
+
 ## 13. Frontend
 
 Two surfaces from the same `web` role: a **public site** for casual visitors

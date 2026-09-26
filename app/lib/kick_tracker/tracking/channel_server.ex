@@ -356,6 +356,7 @@ defmodule KickTracker.Tracking.ChannelServer do
 
       started_at ->
         state = learn_channel_id(state, livestream["channel_id"])
+        state = learn_avatar(state, livestream["profile_picture"])
         state = observe(state, {:live, started_at, at})
         {snapshot, category} = Changes.from_livestream(livestream)
 
@@ -407,12 +408,28 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   # --- events --------------------------------------------------------------
 
+  # The channel's picture, as Kick gives it now (§12.9): recorded when it
+  # changes; copying it is the collector's job, not this process's.
+  defp learn_avatar(state, url) do
+    if url != state.channel.avatar_url and KickTracker.Avatars.fetchable?(url) do
+      record(state, [{:avatar_url, state.channel.id, url}])
+      %{state | channel: %{state.channel | avatar_url: url}}
+    else
+      state
+    end
+  end
+
+  defp broadcaster_picture(%{"broadcaster" => %{"profile_picture" => url}}), do: url
+  defp broadcaster_picture(_body), do: nil
+
   defp handle_event(state, %Envelope{} = envelope) do
     state =
       try do
         case Envelope.payload(envelope) do
           {:ok, body} ->
-            event(state, envelope.event_type, body, envelope.occurred_at)
+            state
+            |> learn_avatar(broadcaster_picture(body))
+            |> event(envelope.event_type, body, envelope.occurred_at)
 
           {:error, _} ->
             Logger.error("event #{envelope.message_id} has an unreadable body")

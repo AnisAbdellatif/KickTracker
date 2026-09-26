@@ -434,25 +434,39 @@ defmodule KickTrackerWeb.SiteComponents do
   end
 
   @doc """
-  A channel's avatar: its initial on one of the seven metric hues, picked
-  from its name. Kick's avatar images are not fetched or hotlinked.
+  An avatar. Given a `channel_id`, the channel's picture where we hold a
+  copy of it (§12.9, served from our own domain; Kick is never contacted
+  by the browser). Otherwise, or for a person, the name's initial on one
+  of the seven metric hues, picked from the name.
   """
   attr :name, :string, required: true
+  attr :channel_id, :integer, default: nil
   attr :class, :any, default: "size-10 text-base"
 
   def avatar(assigns) do
-    assigns = assign(assigns, :hue, :erlang.phash2(assigns.name, 7) + 1)
+    version = assigns.channel_id && Map.get(KickTracker.Avatars.versions(), assigns.channel_id)
+    assigns = assign(assigns, hue: :erlang.phash2(assigns.name, 7) + 1, version: version)
 
     ~H"""
     <span
       class={[
-        "avatar-initial inline-flex shrink-0 items-center justify-center rounded-full font-semibold uppercase",
+        "avatar-initial inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold uppercase",
         "avatar-#{@hue}",
         @class
       ]}
       aria-hidden="true"
     >
-      {String.first(@name || "?")}
+      <img
+        :if={@version}
+        src={~p"/img/channels/#{@channel_id}/avatar?#{[v: @version]}"}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        class="size-full object-cover"
+      />
+      <%= if !@version do %>
+        {String.first(@name || "?")}
+      <% end %>
     </span>
     """
   end

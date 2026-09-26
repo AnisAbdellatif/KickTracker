@@ -55,6 +55,16 @@ defmodule KickTrackerWeb.Router do
     get "/healthz", HealthzController, :show
   end
 
+  # Channels' pictures, our copies (§12.9).
+  pipeline :images do
+    plug KickTrackerWeb.Plugs.RateLimit
+  end
+
+  scope "/img", KickTrackerWeb do
+    pipe_through :images
+    get "/channels/:id/avatar", AvatarController, :show
+  end
+
   # History as cacheable JSON (§13.5), versioned from the start.
   scope "/data/v1", KickTrackerWeb.Data do
     pipe_through :api

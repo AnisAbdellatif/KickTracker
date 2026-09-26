@@ -19,6 +19,8 @@ defmodule Mix.Tasks.Sim do
     * `--from` — where simulated time starts (ISO 8601), for generating history
     * `--webhook-url` — where to deliver webhooks; without it, nothing is
       delivered and the API still works
+    * `--asset-url` — the address the code under test reaches this fake
+      Kick at, for the pictures it hands out (default: its own URL)
 
   Point the code under test at it:
 
@@ -37,7 +39,8 @@ defmodule Mix.Tasks.Sim do
     scenario: :string,
     speed: :float,
     from: :string,
-    webhook_url: :string
+    webhook_url: :string,
+    asset_url: :string
   ]
 
   @impl true
@@ -59,7 +62,8 @@ defmodule Mix.Tasks.Sim do
         clock: clock,
         port: Keyword.get(opts, :port, 4050),
         ip: parse_ip(opts[:ip]),
-        webhook_url: opts[:webhook_url]
+        webhook_url: opts[:webhook_url],
+        asset_url: opts[:asset_url]
       )
 
     base = Instance.base_url()

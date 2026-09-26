@@ -23,7 +23,7 @@ defmodule KickTracker.Workers.DeleteChannel do
   # Children before parents (foreign keys).
   @by_stream ~w(stream_overrides stream_stats chat_stream_users stream_changes)
   @by_channel ~w(viewer_samples chat_minutes chat_minute_users follower_samples subscriber_samples
-                 follows support_events channel_events chat_messages chat_log_events
+                 follows support_events channel_events chat_messages chat_log_events channel_avatars
                  coverage hourly_stats annotations
                  channel_group_members channel_slugs)
 

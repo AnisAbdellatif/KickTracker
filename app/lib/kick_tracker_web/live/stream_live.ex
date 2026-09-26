@@ -140,7 +140,7 @@ defmodule KickTrackerWeb.StreamLive do
             navigate={~p"/c/#{@channel.slug}"}
             class="flex items-center gap-1.5 hover:text-base-content"
           >
-            <.avatar name={@channel.slug} class="size-5 text-[0.65rem]" />{@channel.slug}
+            <.avatar name={@channel.slug} channel_id={@channel.id} class="size-5 text-[0.65rem]" />{@channel.slug}
           </.link>
           <.icon name="hero-chevron-right-micro" class="size-4 opacity-50 rtl:rotate-180" />
           <.link navigate={~p"/c/#{@channel.slug}/streams"} class="hover:text-base-content">

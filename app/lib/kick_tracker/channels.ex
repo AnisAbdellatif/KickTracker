@@ -268,6 +268,23 @@ defmodule KickTracker.Channels do
   end
 
   @doc """
+  Records the picture Kick gives for a channel now (§12.9) and, when it is
+  a new one, queues copying it. In the caller's transaction (the journal's
+  writer), so the job exists only if the change does.
+  """
+  @spec store_avatar_url(integer(), String.t()) :: :ok
+  def store_avatar_url(channel_id, url) do
+    {changed, _} =
+      from(c in Channel,
+        where: c.id == ^channel_id and (is_nil(c.avatar_url) or c.avatar_url != ^url)
+      )
+      |> Repo.update_all(set: [avatar_url: url])
+
+    if changed > 0, do: {:ok, _} = KickTracker.Workers.ChannelAvatar.enqueue(channel_id)
+    :ok
+  end
+
+  @doc """
   Tells a channel's running processes that some fields of its row changed
   (a rename, a chatroom id learnt), on the channel's own topic, as
   `{:channel_fields, fields}`. Only the fields that changed travel, so a
