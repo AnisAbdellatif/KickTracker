@@ -612,3 +612,27 @@ body { min-height: 100dvh; }
 }
 .kv-list dt { color: var(--ink-muted); }
 .kv-list dd { text-align: end; font-variant-numeric: tabular-nums; }
+
+/* A choice drawn as a card (export scope). */
+.export-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: .625rem;
+  padding: .75rem;
+  border: 1px solid var(--color-base-300);
+  border-radius: var(--radius-field);
+  cursor: pointer;
+  font-size: .875rem;
+}
+.export-choice:has(input:checked) {
+  border-color: var(--color-primary);
+  background: color-mix(in oklab, var(--color-primary) 8%, transparent);
+}
+
+/* Where a file can be dropped. */
+.drop-zone {
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius-box);
+  background: var(--surface-raised);
+}
+.drop-zone.phx-drop-target-active, .drop-zone:hover { border-color: var(--color-primary); }
