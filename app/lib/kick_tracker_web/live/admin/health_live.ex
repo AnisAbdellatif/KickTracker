@@ -15,7 +15,7 @@ defmodule KickTrackerWeb.Admin.HealthLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket), do: :timer.send_interval(@refresh_ms, :refresh)
-    {:ok, socket |> assign(page_title: gettext("Health")) |> load()}
+    {:ok, socket |> assign(page_title: gettext("Health"), q: "", show: "all") |> load()}
   end
 
   @impl true
@@ -40,309 +40,488 @@ defmodule KickTrackerWeb.Admin.HealthLive do
   end
 
   @impl true
+  def handle_event("search", %{"q" => q}, socket), do: {:noreply, assign(socket, q: q)}
+
+  def handle_event("show", %{"show" => show}, socket) when show in ~w(all problems live),
+    do: {:noreply, assign(socket, show: show)}
+
+  @impl true
   def render(assigns) do
+    assigns =
+      assign(assigns,
+        problems: Enum.count(assigns.rows, &problem?(&1, assigns)),
+        live: Enum.count(assigns.rows, & &1.live_since),
+        shown: shown_rows(assigns)
+      )
+
     ~H"""
     <Layouts.admin flash={@flash} current_admin={@current_admin} active={:health}>
-      <.header>
-        {gettext("Health")}
-        <:subtitle>{gettext("Updated %{at} UTC", at: Calendar.strftime(@now, "%H:%M:%S"))}</:subtitle>
-      </.header>
+      <.page_header title={gettext("Health")} icon="hero-heart">
+        <:subtitle>
+          {gettext("Collection at a glance. Updated %{at} UTC, every 30 seconds.",
+            at: Calendar.strftime(@now, "%H:%M:%S")
+          )}
+        </:subtitle>
+      </.page_header>
 
-      <section :if={@alerts != []} id="open-alerts" class="mb-6 rounded-box border border-error p-3">
-        <h2 class="font-semibold text-error">{gettext("Open alerts")}</h2>
-        <ul class="mt-2 space-y-1 text-sm">
-          <li :for={a <- @alerts}>
-            {a.message}
-            <span class="text-xs opacity-60">({gettext("since")} {ago(a.first_at, @now)})</span>
-          </li>
-        </ul>
-      </section>
-
-      <section id="collector-health" class="mb-6 card-surface p-4">
-        <h2 class="font-semibold">{gettext("Collectors")}</h2>
-        <p :if={@collectors == []} class="mt-2 text-sm opacity-60">
-          {gettext("No collector has reported in the last day.")}
-        </p>
-        <table :if={@collectors != []} class="table table-xs mt-2">
-          <thead>
-            <tr>
-              <th>{gettext("Collector")}</th><th>{gettext("Role")}</th><th>
-                {gettext("Build")}
-              </th><th>
-                {gettext("Last heard")}
-              </th><th>{gettext("Writes waiting")}</th><th>{gettext("Set aside")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={c <- @collectors} id={"collector-#{c.id}"}>
-              <td class="font-mono">{c.id}</td>
-              <td>
-                <span class={[
-                  "badge badge-xs",
-                  collector_badge(c, @now)
-                ]}>{collector_role(c, @now)}</span>
-              </td>
-              <td class="font-mono" title={c[:build]}>
-                {short_build(c[:build])}
-                <span
-                  :if={c[:build] && KickTracker.build() && c[:build] != KickTracker.build()}
-                  class="text-xs text-base-content/70"
-                  title={gettext("Not the build this page runs on")}
-                >{gettext("(other build)")}</span>
-              </td>
-              <td>{ago(c.heartbeat_at, @now)}</td>
-              <td class="tabular-nums">
-                {c.journal_depth}
-                <span :if={c.journal_oldest_at} class="text-xs opacity-60">({gettext("oldest")} {ago(
-                  c.journal_oldest_at,
-                  @now
-                )})</span>
-              </td>
-              <td class={["tabular-nums", c.journal_buried > 0 && "text-error font-medium"]}>
-                {c.journal_buried}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p :if={KickTracker.build()} id="web-build" class="mt-2 text-xs text-base-content/70">
-          {gettext("This page is served by build")}
-          <span class="font-mono" title={KickTracker.build()}>{short_build(KickTracker.build())}</span>.
-        </p>
-        <div
-          :for={{c, q} <- quarantined(@collectors)}
-          id={"quarantined-#{c.id}-#{q.channel_id}"}
-          class="alert alert-warning mt-3 text-sm"
+      <div id="health-summary" class="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <.stat_tile
+          icon="hero-cpu-chip"
+          label={gettext("Collection")}
+          tone={if collecting?(@collectors, @now), do: :ok, else: :error}
         >
-          <.icon name="hero-exclamation-triangle-micro" class="size-4" />
-          <span>
-            {gettext(
-              "%{channel} kept crashing on %{collector} (%{failures} times in a row) and waits to be restarted.",
-              channel: channel_name(@rows, q.channel_id),
-              collector: c.id,
-              failures: q.failures
+          {if collecting?(@collectors, @now), do: gettext("running"), else: gettext("stopped")}
+          <:hint>
+            {ngettext("1 collector heard", "%{count} collectors heard", length(@collectors))}
+          </:hint>
+        </.stat_tile>
+        <.stat_tile
+          icon="hero-bell-alert"
+          label={gettext("Open alerts")}
+          tone={if @alerts == [], do: :ok, else: :error}
+        >
+          {length(@alerts)}
+        </.stat_tile>
+        <.stat_tile
+          icon="hero-tv"
+          label={gettext("Channels")}
+          tone={if @problems == 0, do: :ok, else: :warn}
+        >
+          {length(@rows)}
+          <:hint>
+            {ngettext("1 with a problem", "%{count} with a problem", @problems)} · {ngettext(
+              "1 live",
+              "%{count} live",
+              @live
             )}
-            <span :if={q.since}>{gettext("Since")} <.time at={q.since} />.</span>
-          </span>
-        </div>
-        <details :if={@terms != []} class="mt-3 text-sm">
-          <summary class="cursor-pointer opacity-70">{gettext("Recent handoffs")}</summary>
-          <ul class="mt-2 space-y-1">
-            <li :for={t <- @terms}>
-              <span class="font-mono">{t.holder}</span>
-              {gettext("from")} <.time at={t.started_at} />
-              <span :if={t.ended_at}>{gettext("to")} <.time at={t.ended_at} /> ({t.reason})</span>
-              <span :if={!t.ended_at} class="badge badge-success badge-xs">{gettext("now")}</span>
-            </li>
-          </ul>
-        </details>
-      </section>
-
-      <div class="overflow-x-auto">
-        <table id="channel-health" class="table table-sm">
-          <thead>
-            <tr>
-              <th>{gettext("Channel")}</th>
-              <th>{gettext("Live")}</th>
-              <th>{gettext("Viewer poll")}</th>
-              <th>{gettext("Chat")}</th>
-              <th>{gettext("Webhooks")}</th>
-              <th>{gettext("Last event")}</th>
-              <th>{gettext("Followers read")}</th>
-              <th
-                class="text-end"
-                title={
-                  gettext(
-                    "Share of the window the source recorded, counted from when the channel was added; all: since it was added"
-                  )
-                }
-              >
-                {gettext("Poll 24h / 7d / 30d / all")}
-              </th>
-              <th
-                class="text-end"
-                title={
-                  gettext(
-                    "Share of the window the source recorded, counted from when the channel was added; all: since it was added"
-                  )
-                }
-              >
-                {gettext("Chat 24h / 7d / 30d / all")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              :for={r <- @rows}
-              id={"health-#{r.channel.id}"}
-              class={!r.channel.active && "opacity-50"}
-            >
-              <td>
-                <span class="font-medium">{r.channel.slug}</span>
-                <span :if={!r.channel.active} class="text-xs">({gettext("paused")})</span>
-              </td>
-              <td>
-                <span :if={r.live_since} class="badge badge-error badge-sm">{ago(r.live_since, @now)}</span>
-              </td>
-              <td><.source_state s={r.poll} now={@now} /></td>
-              <td><.source_state s={r.chat} now={@now} /></td>
-              <td>
-                <.async_result :let={subs} assign={@subscriptions}>
-                  <:loading>…</:loading>
-                  <:failed>?</:failed>
-                  <%= case subs do %>
-                    <% {:ok, s} -> %>
-                      <% n = Map.get(s.by_user, r.channel.kick_user_id, 0) %>
-                      <span class={[r.channel.active && n < s.want && "text-error font-medium"]}>{n}/{s.want}</span>
-                    <% {:error, _} -> %>
-                      <span class="opacity-60">?</span>
-                  <% end %>
-                </.async_result>
-              </td>
-              <td class="text-xs">{if r.last_event, do: ago(r.last_event, @now), else: "–"}</td>
-              <td class="text-xs">
-                {if r.last_follower_reading, do: ago(r.last_follower_reading, @now), else: "–"}
-              </td>
-              <% long = Map.get(@long_coverage, r.channel.id, %{}) %>
-              <td class="text-end tabular-nums">
-                {pct(r.coverage.api_24h)} / {pct(r.coverage.api_7d)} / {pct(long[:api_30d])} / {pct(
-                  long[:api_all]
-                )}
-              </td>
-              <td class="text-end tabular-nums">
-                {pct(r.coverage.chat_24h)} / {pct(r.coverage.chat_7d)} / {pct(long[:chat_30d])} / {pct(
-                  long[:chat_all]
-                )}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p :if={@rows == []} class="mt-4 text-sm opacity-70">
-          {gettext("No channels yet.")}
-          <.link navigate={~p"/admin/channels"} class="link">{gettext("Add one.")}</.link>
-        </p>
+          </:hint>
+        </.stat_tile>
+        <.stat_tile
+          icon="hero-inbox-arrow-down"
+          label={gettext("Events waiting")}
+          tone={if @ingress.unprocessed == 0, do: :ok, else: :warn}
+        >
+          {@ingress.unprocessed}
+          <:hint :if={@ingress.oldest_unprocessed}>
+            {gettext("oldest %{ago}", ago: ago(@ingress.oldest_unprocessed, @now))}
+          </:hint>
+        </.stat_tile>
       </div>
 
-      <section
+      <.panel
+        :if={@alerts != []}
+        id="open-alerts"
+        title={gettext("Open alerts")}
+        icon="hero-bell-alert"
+        class="mb-6 border-error/50"
+      >
+        <:subtitle>{ngettext("1 alert", "%{count} alerts", length(@alerts))}</:subtitle>
+        <ul class="scroll-panel max-h-64 space-y-2 overflow-y-auto pe-1 text-sm">
+          <li :for={a <- @alerts} class="flex items-start gap-2">
+            <.icon name="hero-exclamation-circle" class="mt-0.5 size-4 shrink-0 text-error" />
+            <span class="flex-1">{a.message}</span>
+            <span class="text-muted shrink-0 text-xs">{gettext("since")} {ago(a.first_at, @now)}</span>
+          </li>
+        </ul>
+      </.panel>
+
+      <.panel
+        id="collector-health"
+        title={gettext("Collectors")}
+        icon="hero-cpu-chip"
+        class="mb-6"
+        flush
+      >
+        <:actions>
+          <span :if={KickTracker.build()} id="web-build" class="text-muted text-xs">
+            {gettext("This page is served by build")}
+            <span class="font-mono" title={KickTracker.build()}>{short_build(KickTracker.build())}</span>.
+          </span>
+        </:actions>
+        <.empty_state
+          :if={@collectors == []}
+          icon="hero-cpu-chip"
+          title={gettext("No collector has reported in the last day.")}
+        />
+        <div :if={@collectors != []} class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>{gettext("Collector")}</th>
+                <th>{gettext("Role")}</th>
+                <th>{gettext("Build")}</th>
+                <th>{gettext("Last heard")}</th>
+                <th class="text-end">{gettext("Writes waiting")}</th>
+                <th class="text-end">{gettext("Set aside")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={c <- @collectors} id={"collector-#{c.id}"}>
+                <td class="font-mono text-sm">{c.id}</td>
+                <td>
+                  <.status_pill tone={collector_tone(c, @now)}>
+                    {collector_role(c, @now)}
+                  </.status_pill>
+                </td>
+                <td class="font-mono text-sm" title={c[:build]}>
+                  {short_build(c[:build])}
+                  <span
+                    :if={c[:build] && KickTracker.build() && c[:build] != KickTracker.build()}
+                    class="text-muted text-xs"
+                    title={gettext("Not the build this page runs on")}
+                  >{gettext("(other build)")}</span>
+                </td>
+                <td class="text-sm">{ago(c.heartbeat_at, @now)}</td>
+                <td class="text-end tabular-nums">
+                  {c.journal_depth}
+                  <span :if={c.journal_oldest_at} class="text-muted text-xs">({gettext("oldest")} {ago(
+                    c.journal_oldest_at,
+                    @now
+                  )})</span>
+                </td>
+                <td class={["text-end tabular-nums", c.journal_buried > 0 && "font-medium text-error"]}>
+                  {c.journal_buried}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div
+          :if={quarantined(@collectors) != [] or @terms != []}
+          class="space-y-3 border-t border-base-300 p-4"
+        >
+          <div
+            :for={{c, q} <- quarantined(@collectors)}
+            id={"quarantined-#{c.id}-#{q.channel_id}"}
+            class="alert alert-warning text-sm"
+          >
+            <.icon name="hero-exclamation-triangle-micro" class="size-4" />
+            <span>
+              {gettext(
+                "%{channel} kept crashing on %{collector} (%{failures} times in a row) and waits to be restarted.",
+                channel: channel_name(@rows, q.channel_id),
+                collector: c.id,
+                failures: q.failures
+              )}
+              <span :if={q.since}>{gettext("Since")} <.time at={q.since} />.</span>
+            </span>
+          </div>
+          <details :if={@terms != []} class="text-sm">
+            <summary class="text-muted cursor-pointer">{gettext("Recent handoffs")}</summary>
+            <ol class="mt-2 space-y-1">
+              <li :for={t <- @terms} class="flex flex-wrap items-center gap-x-2">
+                <span class="font-mono">{t.holder}</span>
+                <span class="text-muted">{gettext("from")} <.time at={t.started_at} /></span>
+                <span :if={t.ended_at} class="text-muted">
+                  {gettext("to")} <.time at={t.ended_at} /> ({t.reason})
+                </span>
+                <.status_pill :if={!t.ended_at} tone={:ok}>{gettext("now")}</.status_pill>
+              </li>
+            </ol>
+          </details>
+        </div>
+      </.panel>
+
+      <.panel id="channels-panel" title={gettext("Channels")} icon="hero-tv" class="mb-6" flush>
+        <:actions>
+          <nav class="segmented" aria-label={gettext("Show")}>
+            <button
+              :for={
+                {key, label} <- [
+                  {"all", gettext("All")},
+                  {"problems", gettext("Problems") <> " · #{@problems}"},
+                  {"live", gettext("Live") <> " · #{@live}"}
+                ]
+              }
+              id={"health-show-#{key}"}
+              type="button"
+              phx-click="show"
+              phx-value-show={key}
+              class={["segmented-item", @show == key && "is-active"]}
+            >
+              {label}
+            </button>
+          </nav>
+          <.search_field
+            id="health-search"
+            event="search"
+            value={@q}
+            placeholder={gettext("Search channels")}
+          />
+        </:actions>
+        <div class="scroll-panel max-h-[70vh] overflow-auto">
+          <table id="channel-health" class="table table-sm table-pin-rows">
+            <thead>
+              <tr>
+                <th>{gettext("Channel")}</th>
+                <th>{gettext("Viewer poll")}</th>
+                <th>{gettext("Chat")}</th>
+                <th>{gettext("Webhooks")}</th>
+                <th>{gettext("Last event")}</th>
+                <th>{gettext("Followers read")}</th>
+                <th title={coverage_help()}>{gettext("Poll coverage")}</th>
+                <th title={coverage_help()}>{gettext("Chat coverage")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                :for={r <- @shown}
+                id={"health-#{r.channel.id}"}
+                class={!r.channel.active && "opacity-60"}
+              >
+                <td>
+                  <div class="flex items-center gap-2">
+                    <.avatar name={r.channel.slug} channel_id={r.channel.id} class="size-7 text-xs" />
+                    <div class="min-w-0">
+                      <p class="truncate font-medium">{r.channel.slug}</p>
+                      <p class="flex flex-wrap gap-1">
+                        <span :if={r.live_since} class="live-pill">{gettext("live")} {ago(
+                          r.live_since,
+                          @now
+                        )}</span>
+                        <span :if={!r.channel.active} class="text-muted text-xs">{gettext("paused")}</span>
+                      </p>
+                    </div>
+                  </div>
+                </td>
+                <td><.source_state s={r.poll} now={@now} /></td>
+                <td><.source_state s={r.chat} now={@now} /></td>
+                <td>
+                  <.async_result :let={subs} assign={@subscriptions}>
+                    <:loading><span class="text-muted">…</span></:loading>
+                    <:failed><span class="text-muted">?</span></:failed>
+                    <%= case subs do %>
+                      <% {:ok, s} -> %>
+                        <% n = Map.get(s.by_user, r.channel.kick_user_id, 0) %>
+                        <.status_pill tone={if r.channel.active and n < s.want, do: :error, else: :ok}>
+                          {n}/{s.want}
+                        </.status_pill>
+                      <% {:error, _} -> %>
+                        <span class="text-muted">?</span>
+                    <% end %>
+                  </.async_result>
+                </td>
+                <td class="text-muted whitespace-nowrap text-xs">
+                  {if r.last_event, do: ago(r.last_event, @now), else: "–"}
+                </td>
+                <td class="text-muted whitespace-nowrap text-xs">
+                  {if r.last_follower_reading, do: ago(r.last_follower_reading, @now), else: "–"}
+                </td>
+                <% long = Map.get(@long_coverage, r.channel.id, %{}) %>
+                <td>
+                  <.coverage values={[
+                    {"24h", r.coverage.api_24h},
+                    {"7d", r.coverage.api_7d},
+                    {"30d", long[:api_30d]},
+                    {"all", long[:api_all]}
+                  ]} />
+                </td>
+                <td>
+                  <.coverage values={[
+                    {"24h", r.coverage.chat_24h},
+                    {"7d", r.coverage.chat_7d},
+                    {"30d", long[:chat_30d]},
+                    {"all", long[:chat_all]}
+                  ]} />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <.empty_state :if={@rows == []} icon="hero-tv" title={gettext("No channels yet.")}>
+            <.link navigate={~p"/admin/channels"} class="link">{gettext("Add one.")}</.link>
+          </.empty_state>
+          <.empty_state
+            :if={@rows != [] and @shown == []}
+            icon="hero-check-circle"
+            title={
+              if @show == "problems",
+                do: gettext("No channel has a problem."),
+                else: gettext("No channel matches.")
+            }
+          />
+        </div>
+      </.panel>
+
+      <.panel
         :if={@payload_issues != []}
         id="payload-issues"
-        class="mt-8 rounded-box border border-warning p-3"
+        title={gettext("Webhooks with an unexpected shape (7 days)")}
+        icon="hero-exclamation-triangle"
+        class="mb-6 border-warning/50"
       >
-        <h2 class="font-semibold">{gettext("Webhooks with an unexpected shape (7 days)")}</h2>
-        <ul class="mt-2 space-y-1 text-sm">
+        <ul class="space-y-1 text-sm">
           <li :for={i <- @payload_issues}>
             <span class="font-mono text-xs">{i.event_type} v{i.event_version}</span>: {i.problem}
-            <span class="text-xs opacity-60">({i.count}×, {gettext("last")} {ago(i.last_seen_at, @now)}, {gettext(
+            <span class="text-muted text-xs">({i.count}×, {gettext("last")} {ago(i.last_seen_at, @now)}, {gettext(
               "e.g."
             )} {i.example_message_id})</span>
           </li>
         </ul>
-      </section>
+      </.panel>
 
-      <div class="mt-10 grid gap-6 lg:grid-cols-3">
-        <section id="queue-health" class="card-surface p-4">
-          <h2 class="font-semibold">{gettext("Queue")}</h2>
+      <div class="grid gap-6 lg:grid-cols-3">
+        <.panel id="queue-health" title={gettext("Queue")} icon="hero-queue-list">
           <.async_result :let={queues} assign={@queues}>
             <:loading>
-              <p class="text-sm opacity-60">…</p>
+              <p class="text-muted text-sm">…</p>
             </:loading>
             <:failed>
               <p class="text-sm text-error">{gettext("Could not read")}</p>
             </:failed>
             <%= case queues do %>
               <% {:ok, qs} -> %>
-                <dl class="mt-2 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
+                <dl class="kv-list">
                   <%= for q <- qs do %>
                     <dt>{q.name}</dt>
                     <dd class={[
-                      "tabular-nums",
                       (String.ends_with?(q.name, ".dead") and q.messages > 0) &&
-                        "text-error font-medium"
+                        "font-medium text-error"
                     ]}>
-                      {q.messages} ({q.unacked} {gettext("unacked")}, {q.consumers} {gettext(
-                        "consumers"
-                      )})
+                      {q.messages}
+                      <span class="text-muted text-xs">
+                        ({q.unacked} {gettext("unacked")}, {q.consumers} {gettext("consumers")})
+                      </span>
                     </dd>
                   <% end %>
                 </dl>
               <% :not_configured -> %>
-                <p class="mt-2 text-sm opacity-60">
-                  {gettext("RABBITMQ_MANAGEMENT_URL is not set.")}
-                </p>
+                <p class="text-muted text-sm">{gettext("RABBITMQ_MANAGEMENT_URL is not set.")}</p>
               <% {:error, reason} -> %>
-                <p class="mt-2 text-sm text-error">
+                <p class="text-sm text-error">
                   {gettext("RabbitMQ didn't answer: %{r}", r: inspect(reason))}
                 </p>
             <% end %>
           </.async_result>
-          <dl class="mt-4 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
+          <dl class="kv-list mt-4 border-t border-base-300 pt-3">
             <dt>{gettext("Consumer lag (p95, last hour)")}</dt>
-            <dd class="tabular-nums">
-              {if @ingress.lag_p95_s, do: "#{Float.round(@ingress.lag_p95_s, 1)} s", else: "–"}
-            </dd>
+            <dd>{if @ingress.lag_p95_s, do: "#{Float.round(@ingress.lag_p95_s, 1)} s", else: "–"}</dd>
             <dt>{gettext("Events waiting for their channel")}</dt>
-            <dd class="tabular-nums">
+            <dd>
               {@ingress.unprocessed}
-              <span :if={@ingress.oldest_unprocessed} class="text-xs opacity-60">({gettext("oldest")} {ago(
+              <span :if={@ingress.oldest_unprocessed} class="text-muted text-xs">({gettext("oldest")} {ago(
                 @ingress.oldest_unprocessed,
                 @now
               )})</span>
             </dd>
           </dl>
-        </section>
+        </.panel>
 
-        <section id="receiver-health" class="card-surface p-4">
-          <h2 class="font-semibold">{gettext("Receivers")}</h2>
-          <p :if={@ingress.receivers == []} class="mt-2 text-sm opacity-60">
+        <.panel id="receiver-health" title={gettext("Receivers")} icon="hero-signal">
+          <p :if={@ingress.receivers == []} class="text-muted text-sm">
             {gettext("No deliveries in the last 7 days.")}
           </p>
-          <dl class="mt-2 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
+          <dl class="kv-list">
             <%= for r <- @ingress.receivers do %>
               <dt>{r.name}</dt>
-              <dd class="tabular-nums">{ago(r.last_at, @now)} · {r.last_hour}/h</dd>
+              <dd>{ago(r.last_at, @now)} · {r.last_hour}/h</dd>
             <% end %>
           </dl>
-        </section>
+        </.panel>
 
-        <section id="job-health" class="card-surface p-4">
-          <h2 class="font-semibold">{gettext("Jobs")}</h2>
-          <dl class="mt-2 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
+        <.panel id="job-health" title={gettext("Jobs")} icon="hero-cog-8-tooth">
+          <:actions>
+            <a href={~p"/admin/dashboard"} class="btn btn-ghost btn-xs gap-1">
+              {gettext("LiveDashboard")}<.icon name="hero-arrow-up-right" class="size-3" />
+            </a>
+          </:actions>
+          <dl class="kv-list">
             <%= for c <- @jobs.counts do %>
               <dt>{c.queue} · {c.state}</dt>
-              <dd class={["tabular-nums", c.state in ["retryable", "discarded"] && "text-error"]}>
-                {c.count}
-              </dd>
+              <dd class={[c.state in ["retryable", "discarded"] && "text-error"]}>{c.count}</dd>
             <% end %>
           </dl>
-          <ul class="mt-3 space-y-1 text-xs">
+          <ul :if={@jobs.failures != []} class="mt-3 space-y-1 border-t border-base-300 pt-3 text-xs">
             <li :for={f <- @jobs.failures} class="break-words">
               <span class="font-medium">{f.worker |> String.split(".") |> List.last()}</span>
-              {f.state} {ago(f.at, @now)}: <span class="opacity-70">{f.error}</span>
+              {f.state} {ago(f.at, @now)}: <span class="text-muted">{f.error}</span>
             </li>
           </ul>
-          <a href={~p"/admin/dashboard"} class="link mt-3 inline-block text-sm">{gettext(
-            "LiveDashboard"
-          )}</a>
-        </section>
+        </.panel>
       </div>
     </Layouts.admin>
     """
   end
+
+  attr :values, :list, required: true
+
+  # A source's coverage over four windows as small meters, the first
+  # (24h) also as a figure; each window's figure on hover.
+  defp coverage(assigns) do
+    ~H"""
+    <div
+      class="flex items-center gap-2"
+      title={Enum.map_join(@values, " · ", fn {w, v} -> "#{w} #{pct(v)}" end)}
+    >
+      <span class="w-12 text-end text-sm tabular-nums">{pct(elem(hd(@values), 1))}</span>
+      <span class="flex items-end gap-0.5" aria-hidden="true">
+        <span
+          :for={{_w, v} <- @values}
+          class={["coverage-bar", coverage_tone(v)]}
+          style={"--level: #{if v, do: Float.round(v * 100, 1), else: 0}%"}
+        ></span>
+      </span>
+    </div>
+    """
+  end
+
+  defp coverage_tone(nil), do: "tone-neutral"
+  defp coverage_tone(v) when v >= 0.98, do: "tone-ok"
+  defp coverage_tone(v) when v >= 0.9, do: "tone-warn"
+  defp coverage_tone(_), do: "tone-error"
+
+  defp coverage_help,
+    do:
+      gettext(
+        "Share of 24h, 7 days, 30 days and all time the source recorded, counted from when the channel was added"
+      )
+
+  # Something to look at: an active channel whose poll or chat isn't
+  # working, whose webhook subscriptions aren't all there, or whose poll
+  # covered less than 90% of the last day.
+  defp problem?(r, assigns) do
+    subs_short? =
+      case assigns.subscriptions do
+        %{ok?: true, result: {:ok, s}} -> Map.get(s.by_user, r.channel.kick_user_id, 0) < s.want
+        _ -> false
+      end
+
+    r.channel.active and
+      (r.poll.state in [:failing, :stale] or r.chat.state in [:failing, :stale] or subs_short? or
+         (is_number(r.coverage.api_24h) and r.coverage.api_24h < 0.9))
+  end
+
+  defp shown_rows(assigns) do
+    q = String.downcase(String.trim(assigns.q))
+
+    Enum.filter(assigns.rows, fn r ->
+      (q == "" or String.contains?(String.downcase(r.channel.slug), q)) and
+        case assigns.show do
+          "problems" -> problem?(r, assigns)
+          "live" -> r.live_since != nil
+          _ -> true
+        end
+    end)
+  end
+
+  defp collecting?(collectors, now),
+    do:
+      Enum.any?(collectors, &(&1.state == "leader" and DateTime.diff(now, &1.heartbeat_at) <= 90))
 
   attr :s, :map, required: true
   attr :now, DateTime, required: true
 
   defp source_state(assigns) do
     ~H"""
-    <span class={[
-      "text-xs",
-      @s.state == :ok && "text-success",
-      @s.state in [:failing, :stale] && "text-error font-medium",
-      @s.state == :never && "opacity-50"
-    ]}>
-      {label(@s.state)}<span :if={@s.at}> · {ago(@s.at, @now)}</span>
-    </span>
+    <div class="flex flex-col items-start gap-0.5">
+      <.status_pill tone={state_tone(@s.state)}>{label(@s.state)}</.status_pill>
+      <span :if={@s.at} class="text-muted whitespace-nowrap text-xs">{ago(@s.at, @now)}</span>
+    </div>
     """
   end
+
+  defp state_tone(:ok), do: :ok
+  defp state_tone(:never), do: :neutral
+  defp state_tone(_), do: :error
 
   defp label(:ok), do: gettext("ok")
   defp label(:failing), do: gettext("failing")
@@ -392,19 +571,12 @@ defmodule KickTrackerWeb.Admin.HealthLive do
   defp role_label("shadow"), do: gettext("shadow, on another machine")
   defp role_label(other), do: other
 
-  defp collector_badge(c, now) do
+  defp collector_tone(c, now) do
     cond do
-      DateTime.diff(now, c.heartbeat_at) > if(c.state == "shadow", do: 900, else: 90) ->
-        "badge-error"
-
-      c.state == "leader" ->
-        "badge-success"
-
-      c.state == "standby" ->
-        "badge-info"
-
-      true ->
-        "badge-ghost"
+      DateTime.diff(now, c.heartbeat_at) > if(c.state == "shadow", do: 900, else: 90) -> :error
+      c.state == "leader" -> :ok
+      c.state == "standby" -> :info
+      true -> :neutral
     end
   end
 end

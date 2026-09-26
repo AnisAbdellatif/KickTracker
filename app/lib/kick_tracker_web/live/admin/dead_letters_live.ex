@@ -115,81 +115,111 @@ defmodule KickTrackerWeb.Admin.DeadLettersLive do
   def render(assigns) do
     ~H"""
     <Layouts.admin flash={@flash} current_admin={@current_admin} active={:dead_letters}>
-      <.header>
-        {gettext("Dead letters")}
+      <.page_header title={gettext("Dead letters")} icon="hero-inbox-stack">
         <:subtitle>
           {gettext(
-            "Messages the consumer rejected or that failed ten deliveries. Nothing is dropped silently."
+            "Webhook messages the consumer rejected, or that failed ten deliveries. Nothing is dropped silently: each waits here to be replayed or discarded with a reason."
           )}
         </:subtitle>
         <:actions>
-          <button id="refresh" phx-click="refresh" class="btn btn-sm btn-ghost">{gettext("Refresh")}</button>
+          <button id="refresh" phx-click="refresh" class="btn btn-sm btn-ghost gap-1">
+            <.icon name="hero-arrow-path" class="size-4" />{gettext("Refresh")}
+          </button>
         </:actions>
-      </.header>
-      <p :if={@error} class="text-sm text-error">{gettext("RabbitMQ: %{e}", e: @error)}</p>
-      <p :if={!@error and @messages == []} class="text-sm opacity-70">
-        {gettext("The dead-letter queue is empty.")}
-      </p>
-      <p
-        :if={!@error and @total > Enum.sum(Enum.map(@messages, & &1.copies))}
-        id="dead-letters-more"
-        class="text-sm opacity-70"
-      >
-        {gettext("%{total} messages wait; the oldest are listed.", total: @total)}
-      </p>
-      <ul id="dead-letters" class="space-y-2">
-        <li
-          :for={m <- @messages}
-          id={"dl-#{m.key}"}
-          class="card-surface p-4 text-sm"
-        >
-          <div class="flex flex-wrap items-center gap-2">
-            <button phx-click="open" phx-value-id={m.key} class="link font-mono text-xs">{m.message_id ||
-              gettext("no message id")}</button>
-            <span class="badge badge-sm">{m.event_type || m.routing_key}</span>
-            <span class="text-xs opacity-70">{m.reason} {m.count && "×#{m.count}"}</span>
-            <span :if={m.copies > 1} class="badge badge-sm badge-ghost">
-              {gettext("%{n} copies", n: m.copies)}
-            </span>
-            <span :if={m.erased != []} class="badge badge-sm badge-warning">
-              {gettext("names removed data")}
-            </span>
-            <span class="flex-1"></span>
-            <button
-              :if={m.erased == []}
-              phx-click="replay"
-              phx-value-id={m.key}
-              data-confirm={gettext("Publish it to kick.events again?")}
-              class="btn btn-xs"
-            >{gettext("Replay")}</button>
-            <button phx-click="ask_discard" phx-value-id={m.key} class="btn btn-xs btn-ghost">{gettext(
-              "Discard"
-            )}</button>
+      </.page_header>
+
+      <.panel :if={@error} class="mb-6 border-error/50">
+        <div class="flex items-start gap-3">
+          <span class="icon-tile text-error"><.icon name="hero-exclamation-triangle" class="size-5" /></span>
+          <div>
+            <p class="font-medium">{gettext("RabbitMQ didn't answer.")}</p>
+            <p class="text-muted mt-1 break-all text-xs">{@error}</p>
           </div>
-          <form
-            :if={@discarding == m.key}
-            id={"discard-#{m.key}"}
-            phx-submit="discard"
-            class="mt-2 flex gap-2"
-          >
-            <input type="hidden" name="key" value={m.key} />
-            <input
-              name="reason"
-              class="input input-sm flex-1"
-              placeholder={gettext("Why (kept in the audit log)")}
-              required
-            />
-            <button class="btn btn-sm btn-error">{gettext("Discard for good")}</button>
-            <button type="button" phx-click="cancel_discard" class="btn btn-sm btn-ghost">{gettext(
-              "Cancel"
-            )}</button>
-          </form>
-          <pre
-            :if={@open == m.key}
-            class="mt-2 max-h-96 overflow-auto rounded bg-base-200 p-2 text-xs"
-          >{pretty(m.envelope) || m.payload}</pre>
-        </li>
-      </ul>
+        </div>
+      </.panel>
+
+      <.panel :if={!@error and @messages == []}>
+        <.empty_state icon="hero-inbox" title={gettext("The dead-letter queue is empty.")}>
+          {gettext("Every webhook received so far was handled.")}
+        </.empty_state>
+      </.panel>
+
+      <.panel
+        :if={@messages != []}
+        title={ngettext("1 message waiting", "%{count} messages waiting", @total)}
+        icon="hero-inbox-stack"
+        flush
+      >
+        <:subtitle :if={@total > Enum.sum(Enum.map(@messages, & &1.copies))}>
+          <span id="dead-letters-more">
+            {gettext("%{total} messages wait; the oldest are listed.", total: @total)}
+          </span>
+        </:subtitle>
+        <ul id="dead-letters" class="divide-y divide-base-300">
+          <li :for={m <- @messages} id={"dl-#{m.key}"} class="px-4 py-3 text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                phx-click="open"
+                phx-value-id={m.key}
+                class="inline-flex items-center gap-1 font-mono text-xs hover:text-primary"
+                aria-expanded={to_string(@open == m.key)}
+              >
+                <.icon
+                  name="hero-chevron-right"
+                  class={["size-3.5 transition", @open == m.key && "rotate-90"]}
+                />
+                {m.message_id || gettext("no message id")}
+              </button>
+              <.status_pill tone={:info}>{m.event_type || m.routing_key}</.status_pill>
+              <.status_pill tone={:error}>{m.reason}{m.count && " ×#{m.count}"}</.status_pill>
+              <.status_pill :if={m.copies > 1}>{gettext("%{n} copies", n: m.copies)}</.status_pill>
+              <.status_pill :if={m.erased != []} tone={:warn}>
+                {gettext("names removed data")}
+              </.status_pill>
+              <span class="flex-1"></span>
+              <button
+                :if={m.erased == []}
+                phx-click="replay"
+                phx-value-id={m.key}
+                data-confirm={gettext("Publish it to kick.events again?")}
+                class="btn btn-sm btn-ghost gap-1"
+              >
+                <.icon name="hero-arrow-uturn-right" class="size-4" />{gettext("Replay")}
+              </button>
+              <button
+                phx-click="ask_discard"
+                phx-value-id={m.key}
+                class="btn btn-sm btn-ghost gap-1 text-error"
+              >
+                <.icon name="hero-trash" class="size-4" />{gettext("Discard")}
+              </button>
+            </div>
+            <form
+              :if={@discarding == m.key}
+              id={"discard-#{m.key}"}
+              phx-submit="discard"
+              class="inset-well mt-3 flex flex-wrap gap-2 p-3"
+            >
+              <input type="hidden" name="key" value={m.key} />
+              <input
+                name="reason"
+                class="input input-sm min-w-56 flex-1"
+                placeholder={gettext("Why (kept in the audit log)")}
+                phx-mounted={Phoenix.LiveView.JS.focus()}
+                required
+              />
+              <button class="btn btn-sm btn-error">{gettext("Discard for good")}</button>
+              <button type="button" phx-click="cancel_discard" class="btn btn-sm btn-ghost">
+                {gettext("Cancel")}
+              </button>
+            </form>
+            <pre
+              :if={@open == m.key}
+              class="scroll-panel inset-well mt-3 max-h-96 overflow-auto p-3 text-xs"
+            >{pretty(m.envelope) || m.payload}</pre>
+          </li>
+        </ul>
+      </.panel>
     </Layouts.admin>
     """
   end

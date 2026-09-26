@@ -70,4 +70,35 @@ defmodule KickTrackerWeb.Admin.ChannelsLiveTest do
     view |> form("#tz-form-#{channel.id}", %{timezone: "Europe/Paris"}) |> render_submit()
     assert Channels.get!(channel.id).timezone == "Europe/Paris"
   end
+
+  test "the list is searched and filtered by state", %{conn: conn} do
+    {:ok, live} = Channels.add("livestreamer")
+    {:ok, off} = Channels.add("offlinestreamer")
+    {:ok, _} = Channels.set_active(off, false)
+    {:ok, view, _} = live(conn, "/admin/channels")
+
+    view |> element("#channels-show-paused") |> render_click()
+    refute has_element?(view, "#channel-#{live.id}")
+    assert has_element?(view, "#channel-#{off.id}")
+
+    view |> element("#channels-show-all") |> render_click()
+    view |> element("#channels-search") |> render_change(%{"q" => "LIVE"})
+    assert has_element?(view, "#channel-#{live.id}")
+    refute has_element?(view, "#channel-#{off.id}")
+  end
+
+  test "deleting asks in a dialog for the slug, then queues the deletion", %{conn: conn} do
+    {:ok, channel} = Channels.add("offlinestreamer")
+    {:ok, view, _} = live(conn, "/admin/channels")
+
+    view |> element("#ask-delete-#{channel.id}") |> render_click()
+    assert has_element?(view, "#delete-dialog", "Delete offlinestreamer and all its data?")
+
+    html = view |> form("#delete-#{channel.id}", %{slug: "wrong"}) |> render_submit()
+    assert html =~ "Type the slug exactly"
+
+    view |> form("#delete-#{channel.id}", %{slug: "offlinestreamer"}) |> render_submit()
+    refute has_element?(view, "#delete-dialog")
+    assert [%{action: "channel.delete_data", target: "offlinestreamer"} | _] = Audit.recent()
+  end
 end

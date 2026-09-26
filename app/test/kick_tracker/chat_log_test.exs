@@ -62,6 +62,44 @@ defmodule KickTracker.ChatLogTest do
     end
   end
 
+  describe "a message's pieces (emotes)" do
+    defp e(id, name, count \\ 1), do: %{type: :emote, id: id, name: name, count: count}
+    defp t(text), do: %{type: :text, text: text}
+
+    test "text and Kick's emote tokens, as BetterChat reads them" do
+      assert ChatLog.parse_content("hi [emote:1:a] there") == [t("hi "), e("1", "a"), t(" there")]
+      assert ChatLog.parse_content("") == []
+      assert ChatLog.parse_content(nil) == []
+      assert ChatLog.parse_content("no emotes, é ü 😂") == [t("no emotes, é ü 😂")]
+
+      assert ChatLog.parse_content("[emote:5747976:collectiblesDespairge]") == [
+               e("5747976", "collectiblesDespairge")
+             ]
+    end
+
+    test "a run of one emote is one piece with its count; anything else ends the run" do
+      assert ChatLog.parse_content("[emote:7:KEKW] [emote:7:KEKW][emote:7:KEKW]") ==
+               [e("7", "KEKW", 3)]
+
+      assert ChatLog.parse_content("lol [emote:7:KEKW] [emote:7:KEKW] [emote:9:b] [emote:7:KEKW]") ==
+               [t("lol "), e("7", "KEKW", 2), t(" "), e("9", "b"), t(" "), e("7", "KEKW")]
+
+      assert ChatLog.parse_content("[emote:7:KEKW] and [emote:7:KEKW]") ==
+               [e("7", "KEKW"), t(" and "), e("7", "KEKW")]
+    end
+
+    test "what isn't a token stays text" do
+      assert ChatLog.parse_content("[emote:x:a] [emote:1] [emote:1:a") ==
+               [t("[emote:x:a] [emote:1] [emote:1:a")]
+
+      assert ChatLog.parse_content("<b>[emote:1:<i>]</b>") == [t("<b>"), e("1", "<i>"), t("</b>")]
+    end
+
+    test "an emote's image is on Kick's file host, as configured" do
+      assert ChatLog.emote_url("37226") == ChatLog.files_url() <> "/emotes/37226/fullsize"
+    end
+  end
+
   describe "storage" do
     test "a message stored twice is kept once" do
       c = channel!()

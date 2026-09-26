@@ -118,7 +118,7 @@ Follow the phase order in §20. Don't build ahead of the current phase without a
   `kick.env`, and never weaken the secrets hook's check against production's client id.
   Tests and the deploy rehearsal always use the fake Kick.
 - Every Kick URL and key comes from **configuration** (`KICK_API_URL`, `KICK_ID_URL`,
-  `KICK_V2_URL`, `PUSHER_URL`, `KICK_PUBLIC_KEY`). No code path may know or check whether
+  `KICK_V2_URL`, `PUSHER_URL`, `KICK_PUBLIC_KEY`, `KICK_FILES_URL`). No code path may know or check whether
   it is talking to the simulator; something that only works against the simulator is a
   bug.
 - When new real payloads are needed, ask the owner to run the recorder; don't write

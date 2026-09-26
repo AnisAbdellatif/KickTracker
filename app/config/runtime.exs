@@ -53,6 +53,7 @@ kick_defaults =
       "KICK_API_URL" => sim,
       "KICK_ID_URL" => sim,
       "KICK_V2_URL" => sim <> "/api/v2",
+      "KICK_FILES_URL" => sim,
       "PUSHER_URL" =>
         "ws://127.0.0.1:4050/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false",
       "KICK_CLIENT_ID" => "dev-client",
@@ -77,7 +78,13 @@ config :kick_tracker, :kick,
   client_id: setting.("KICK_CLIENT_ID"),
   client_secret: setting.("KICK_CLIENT_SECRET"),
   # Optional: fetched from the API when unset.
-  public_key: System.get_env("KICK_PUBLIC_KEY")
+  public_key: System.get_env("KICK_PUBLIC_KEY"),
+  # Where Kick's images are (emotes, loaded by the admin's browser in the
+  # chat log). Optional, unlike the rest: only the admin's browser uses it,
+  # and a deploy that predates it must still start.
+  files_url:
+    System.get_env("KICK_FILES_URL") || Map.get(kick_defaults, "KICK_FILES_URL") ||
+      "https://files.kick.com"
 
 # A shadow collector (§10.5) takes no webhooks: no queue to read.
 config :kick_tracker,

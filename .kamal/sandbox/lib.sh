@@ -78,6 +78,11 @@ site_settings() {
     set_env "$file" PHX_URL_PORT 8080
   done
   set_env "$secrets/app.env" ADMIN_AUTOLOGIN admin@sandbox.localhost
+  # Emotes in the chat log load in the browser on this machine: from the
+  # fake Kick when there is one, else from the real one (the app's default).
+  if [ "$(kick_mode)" = fake ]; then
+    set_env "$secrets/app.env" KICK_FILES_URL http://127.0.0.1:4050
+  fi
 }
 
 # set_env FILE NAME VALUE: NAME=VALUE in an env file, replaced or added.

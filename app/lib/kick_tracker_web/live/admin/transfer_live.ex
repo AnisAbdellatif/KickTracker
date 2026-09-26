@@ -21,8 +21,10 @@ defmodule KickTrackerWeb.Admin.TransferLive do
      |> assign(
        page_title: gettext("Export / import"),
        channels: Channels.list_all(),
-       pending: nil
+       pending: nil,
+       export_q: ""
      )
+     |> then(&assign(&1, export_ids: MapSet.new(&1.assigns.channels, fn c -> c.id end)))
      |> assign(transfers: Transfers.list())
      |> allow_upload(:archive,
        accept: ~w(.zip),
@@ -63,6 +65,30 @@ defmodule KickTrackerWeb.Admin.TransferLive do
       [] -> {:noreply, put_flash(socket, :error, gettext("Pick at least one channel."))}
       :error -> {:noreply, put_flash(socket, :error, gettext("Dates are YYYY-MM-DD."))}
     end
+  end
+
+  # The export form as it is edited: which channels are ticked, and the
+  # search over them (non-matching ones are hidden, not unticked).
+  def handle_event("export_change", %{"export" => params}, socket) do
+    ids = for id <- List.wrap(params["channel_ids"]), {n, ""} <- [Integer.parse(id)], do: n
+
+    {:noreply,
+     assign(socket, export_ids: MapSet.new(ids), export_q: params["q"] || socket.assigns.export_q)}
+  end
+
+  # "All" or "None", for the channels the search shows.
+  def handle_event("export_select", %{"to" => to}, socket) when to in ~w(all none) do
+    shown =
+      socket.assigns.channels
+      |> Enum.filter(&matches?(&1, socket.assigns.export_q))
+      |> Enum.map(& &1.id)
+
+    ids =
+      if to == "all",
+        do: MapSet.union(socket.assigns.export_ids, MapSet.new(shown)),
+        else: MapSet.difference(socket.assigns.export_ids, MapSet.new(shown))
+
+    {:noreply, assign(socket, export_ids: ids)}
   end
 
   def handle_event("validate", _params, socket), do: {:noreply, socket}
@@ -129,102 +155,184 @@ defmodule KickTrackerWeb.Admin.TransferLive do
     ~H"""
     <Layouts.admin flash={@flash} current_admin={@current_admin} active={:transfer}>
       <div phx-hook="Format" id="transfer-page">
-        <.header>
-          {gettext("Export / import")}
+        <.page_header title={gettext("Export / import")} icon="hero-arrows-right-left">
           <:subtitle>
             {gettext(
               "Move tracked channels and their history between instances, or take them elsewhere to analyse. An export is a .zip of CSV files, one per table."
             )}
           </:subtitle>
-        </.header>
+        </.page_header>
 
-        <div class="grid gap-8 lg:grid-cols-2">
-          <section>
-            <h2 class="font-semibold">{gettext("Export")}</h2>
-            <.form for={%{}} as={:export} id="export-form" phx-submit="export" class="mt-2 space-y-3">
-              <fieldset class="space-y-1 text-sm">
-                <label class="flex items-center gap-2">
+        <div class="grid items-start gap-6 lg:grid-cols-2">
+          <.panel title={gettext("Export")} icon="hero-arrow-down-tray">
+            <.form
+              for={%{}}
+              as={:export}
+              id="export-form"
+              phx-submit="export"
+              phx-change="export_change"
+              class="space-y-4"
+            >
+              <fieldset class="grid gap-2 sm:grid-cols-2">
+                <label class="export-choice">
                   <input
                     type="radio"
                     name="export[scope]"
                     value="data"
-                    class="radio radio-sm"
+                    class="radio radio-sm radio-primary"
                     checked
                   />
-                  {gettext("Channels and their history")}
+                  <span>
+                    <span class="block font-medium">{gettext("Channels and their history")}</span>
+                    <span class="text-muted text-xs">{gettext(
+                      "Everything collected, for a range or all of it"
+                    )}</span>
+                  </span>
                 </label>
-                <label class="flex items-center gap-2">
-                  <input type="radio" name="export[scope]" value="channels" class="radio radio-sm" />
-                  {gettext("The channel list only")}
+                <label class="export-choice">
+                  <input
+                    type="radio"
+                    name="export[scope]"
+                    value="channels"
+                    class="radio radio-sm radio-primary"
+                  />
+                  <span>
+                    <span class="block font-medium">{gettext("The channel list only")}</span>
+                    <span class="text-muted text-xs">{gettext("To track the same channels elsewhere")}</span>
+                  </span>
                 </label>
               </fieldset>
 
-              <fieldset class="max-h-56 overflow-y-auto card-surface p-2 text-sm">
-                <p :if={@channels == []} class="opacity-60">{gettext("No channels yet.")}</p>
-                <label :for={c <- @channels} class="flex items-center gap-2">
+              <div>
+                <div class="mb-2 flex flex-wrap items-center gap-2">
+                  <p class="text-sm font-medium">{gettext("Channels")}</p>
+                  <span id="export-count" class="text-muted text-xs">
+                    {gettext("%{n} of %{all} selected",
+                      n: MapSet.size(@export_ids),
+                      all: length(@channels)
+                    )}
+                  </span>
+                  <span class="flex-1"></span>
+                  <button
+                    type="button"
+                    phx-click="export_select"
+                    phx-value-to="all"
+                    class="btn btn-xs btn-ghost"
+                  >
+                    {gettext("All")}
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="export_select"
+                    phx-value-to="none"
+                    class="btn btn-xs btn-ghost"
+                  >
+                    {gettext("None")}
+                  </button>
+                </div>
+                <label class="input input-sm mb-2 w-full">
+                  <.icon name="hero-magnifying-glass" class="text-muted size-4" />
                   <input
-                    type="checkbox"
-                    name="export[channel_ids][]"
-                    value={c.id}
-                    class="checkbox checkbox-xs"
-                    checked
+                    type="search"
+                    name="export[q]"
+                    value={@export_q}
+                    placeholder={gettext("Search channels")}
+                    phx-debounce="150"
+                    autocomplete="off"
                   />
-                  <span>{c.slug}</span>
-                  <span :if={!c.active} class="badge badge-ghost badge-xs">{gettext("paused")}</span>
                 </label>
-              </fieldset>
+                <div class="scroll-panel inset-well max-h-64 overflow-y-auto p-2">
+                  <p :if={@channels == []} class="text-muted p-2 text-sm">
+                    {gettext("No channels yet.")}
+                  </p>
+                  <label
+                    :for={c <- @channels}
+                    class={[
+                      "flex cursor-pointer items-center gap-2 rounded-[var(--radius-field)] px-2 py-1 text-sm hover:bg-[var(--surface-hover)]",
+                      !matches?(c, @export_q) && "hidden"
+                    ]}
+                  >
+                    <input
+                      type="checkbox"
+                      name="export[channel_ids][]"
+                      value={c.id}
+                      class="checkbox checkbox-xs checkbox-primary"
+                      checked={MapSet.member?(@export_ids, c.id)}
+                    />
+                    <span class="flex-1 truncate">{c.slug}</span>
+                    <.status_pill :if={!c.active}>{gettext("paused")}</.status_pill>
+                  </label>
+                </div>
+              </div>
 
               <div class="grid grid-cols-2 gap-2">
-                <label class="text-xs">{gettext("From (UTC, optional)")}<input
-                  type="date"
-                  name="export[from]"
-                  class="input input-sm w-full"
-                /></label>
-                <label class="text-xs">{gettext("To (UTC, optional)")}<input
-                  type="date"
-                  name="export[to]"
-                  class="input input-sm w-full"
-                /></label>
+                <label class="text-muted text-xs">
+                  {gettext("From (UTC, optional)")}
+                  <input type="date" name="export[from]" class="input input-sm mt-1 w-full" />
+                </label>
+                <label class="text-muted text-xs">
+                  {gettext("To (UTC, optional)")}
+                  <input type="date" name="export[to]" class="input input-sm mt-1 w-full" />
+                </label>
               </div>
-              <button class="btn btn-sm btn-primary">{gettext("Export")}</button>
+              <button class="btn btn-sm btn-primary gap-1">
+                <.icon name="hero-arrow-down-tray" class="size-4" />{gettext("Export")}
+              </button>
             </.form>
-          </section>
+          </.panel>
 
-          <section>
-            <h2 class="font-semibold">{gettext("Import")}</h2>
-            <p class="mt-1 text-sm opacity-70">
+          <.panel title={gettext("Import")} icon="hero-arrow-up-tray">
+            <:subtitle>
               {gettext(
                 "Adds what isn't here yet; nothing already here is changed. Channels and removal requests come along."
               )}
-            </p>
+            </:subtitle>
 
             <form
               :if={!@pending}
               id="upload-form"
               phx-submit="upload"
               phx-change="validate"
-              class="mt-2 space-y-2"
+              class="space-y-3"
             >
-              <.live_file_input upload={@uploads.archive} class="file-input file-input-sm w-full" />
-              <div :for={entry <- @uploads.archive.entries} class="flex items-center gap-2 text-sm">
-                <progress class="progress w-40" value={entry.progress} max="100" />
-                <span>{entry.client_name}</span>
+              <label
+                phx-drop-target={@uploads.archive.ref}
+                class="drop-zone flex cursor-pointer flex-col items-center gap-2 p-6 text-center"
+              >
+                <.icon name="hero-arrow-up-tray" class="text-muted size-6" />
+                <span class="text-sm">{gettext("Drop an export here, or choose a .zip")}</span>
+                <.live_file_input
+                  upload={@uploads.archive}
+                  class="file-input file-input-sm w-full max-w-xs"
+                />
+              </label>
+              <div
+                :for={entry <- @uploads.archive.entries}
+                class="flex flex-wrap items-center gap-2 text-sm"
+              >
+                <.icon name="hero-document" class="text-muted size-4" />
+                <span class="truncate">{entry.client_name}</span>
+                <progress class="progress progress-primary w-32" value={entry.progress} max="100" />
                 <button
                   type="button"
                   phx-click="cancel-upload"
                   phx-value-ref={entry.ref}
                   class="btn btn-xs btn-ghost"
-                >{gettext("Cancel")}</button>
+                >
+                  {gettext("Cancel")}
+                </button>
                 <span :for={err <- upload_errors(@uploads.archive, entry)} class="text-error">
                   {upload_error(err)}
                 </span>
               </div>
-              <button class="btn btn-sm">{gettext("Upload and preview")}</button>
+              <button class="btn btn-sm gap-1">
+                <.icon name="hero-eye" class="size-4" />{gettext("Upload and preview")}
+              </button>
             </form>
 
-            <div :if={@pending} id="import-preview" class="mt-2 card-surface p-4 text-sm">
+            <div :if={@pending} id="import-preview" class="text-sm">
               <% {t, p} = @pending %>
-              <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+              <dl class="kv-list">
                 <dt>{gettext("From")}</dt><dd>{t.manifest["site_name"]}</dd>
                 <dt>{gettext("Exported")}</dt><dd>{t.manifest["exported_at"]}</dd>
                 <dt>{gettext("Contents")}</dt>
@@ -232,82 +340,111 @@ defmodule KickTrackerWeb.Admin.TransferLive do
                   {if t.manifest["scope"] == "channels",
                     do: gettext("the channel list only"),
                     else: gettext("channels and their history")}
-                  <span :if={t.manifest["from"] || t.manifest["to"]} class="opacity-70">
+                  <span :if={t.manifest["from"] || t.manifest["to"]} class="text-muted">
                     ({t.manifest["from"] || "…"} – {t.manifest["to"] || "…"})
                   </span>
                 </dd>
-                <dt>{gettext("New channels")}</dt>
-                <dd>{p.new |> Enum.map(& &1["slug"]) |> Enum.join(", ") |> blank()}</dd>
-                <dt>{gettext("Already here")}</dt>
-                <dd>{p.existing |> Enum.map(& &1["slug"]) |> Enum.join(", ") |> blank()}</dd>
-                <dt :if={p.skipped != []}>{gettext("Not imported")}</dt>
-                <dd :if={p.skipped != []}>
-                  {p.skipped |> Enum.map(& &1["slug"]) |> Enum.join(", ")}
-                  <span class="opacity-70">{gettext("(removed here on request)")}</span>
-                </dd>
               </dl>
-              <p :if={p.delete != []} id="import-deletes" class="mt-3 text-error">
+              <div class="mt-3 space-y-2">
+                <p>
+                  <span class="text-muted">{gettext("New channels")}:</span> {p.new
+                  |> Enum.map(& &1["slug"])
+                  |> Enum.join(", ")
+                  |> blank()}
+                </p>
+                <p>
+                  <span class="text-muted">{gettext("Already here")}:</span> {p.existing
+                  |> Enum.map(& &1["slug"])
+                  |> Enum.join(", ")
+                  |> blank()}
+                </p>
+                <p :if={p.skipped != []}>
+                  <span class="text-muted">{gettext("Not imported")}:</span>
+                  {p.skipped |> Enum.map(& &1["slug"]) |> Enum.join(", ")}
+                  <span class="text-muted">{gettext("(removed here on request)")}</span>
+                </p>
+              </div>
+              <p :if={p.delete != []} id="import-deletes" class="alert alert-error mt-3 text-sm">
                 {gettext(
                   "The other instance deleted these channels on a removal request; importing deletes them here too: %{slugs}",
                   slugs: Enum.join(p.delete, ", ")
                 )}
               </p>
-              <table class="table table-xs mt-3">
-                <tbody>
-                  <tr :for={{table, n} <- Enum.sort(t.manifest["rows"])} :if={n > 0}>
-                    <td class="font-mono">{table}</td><td><.num value={n} /></td>
-                  </tr>
-                </tbody>
-              </table>
-              <div class="mt-3 flex gap-2">
-                <button id="confirm-import" phx-click="confirm" class="btn btn-sm btn-primary">
-                  {gettext("Import")}
-                </button>
+              <details class="mt-3">
+                <summary class="text-muted cursor-pointer text-xs">
+                  {gettext("Rows in the file")}
+                </summary>
+                <dl class="kv-list inset-well mt-2 p-3 text-xs">
+                  <%= for {table, n} <- Enum.sort(t.manifest["rows"]), n > 0 do %>
+                    <dt class="font-mono">{table}</dt><dd><.num value={n} /></dd>
+                  <% end %>
+                </dl>
+              </details>
+              <div class="mt-4 flex gap-2">
+                <button id="confirm-import" phx-click="confirm" class="btn btn-sm btn-primary">{gettext(
+                  "Import"
+                )}</button>
                 <button phx-click="discard" class="btn btn-sm btn-ghost">{gettext("Discard")}</button>
               </div>
             </div>
-          </section>
+          </.panel>
         </div>
 
-        <section class="mt-10">
-          <h2 class="font-semibold">{gettext("Recent")}</h2>
-          <p class="text-xs opacity-60">{gettext("Files are kept for 7 days.")}</p>
-          <table id="transfers" class="table table-xs mt-2">
-            <thead>
-              <tr>
-                <th>{gettext("When")}</th><th>{gettext("What")}</th><th>{gettext("Status")}</th><th>
-                  {gettext("Size")}
-                </th><th>{gettext("By")}</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={t <- @transfers} id={"transfer-#{t.id}"}>
-                <td><.time at={t.inserted_at} /></td>
-                <td>{kind(t)}</td>
-                <td>
-                  <span class={["badge badge-xs", status_class(t.status)]}>{status(t.status)}</span>
-                  <span :if={t.error} class="text-error">{t.error}</span>
-                  <span :if={t.kind == "import" and t.summary} class="opacity-70">
-                    {gettext("%{n} rows added", n: added(t.summary))}
-                  </span>
-                </td>
-                <td>{size(t.size)}</td>
-                <td class="opacity-70">{t.admin && t.admin.email}</td>
-                <td>
-                  <a
-                    :if={t.kind == "export" and t.status == "done"}
-                    href={~p"/admin/transfers/#{t.id}/download"}
-                    class="link"
-                  >{gettext("Download")}</a>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
+        <.panel title={gettext("Recent")} icon="hero-clock" class="mt-6" flush>
+          <:subtitle>{gettext("Files are kept for 7 days.")}</:subtitle>
+          <div class="overflow-x-auto">
+            <table id="transfers" class="table table-sm">
+              <thead>
+                <tr>
+                  <th>{gettext("When")}</th>
+                  <th>{gettext("What")}</th>
+                  <th>{gettext("Status")}</th>
+                  <th class="text-end">{gettext("Size")}</th>
+                  <th>{gettext("By")}</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={t <- @transfers} id={"transfer-#{t.id}"}>
+                  <td class="whitespace-nowrap text-sm"><.time at={t.inserted_at} /></td>
+                  <td class="text-sm">{kind(t)}</td>
+                  <td>
+                    <.status_pill tone={status_tone(t.status)}>{status(t.status)}</.status_pill>
+                    <span :if={t.error} class="ms-1 text-xs text-error">{t.error}</span>
+                    <span :if={t.kind == "import" and t.summary} class="text-muted ms-1 text-xs">
+                      {gettext("%{n} rows added", n: added(t.summary))}
+                    </span>
+                  </td>
+                  <td class="text-end text-sm tabular-nums">{size(t.size)}</td>
+                  <td class="text-muted text-sm">{t.admin && t.admin.email}</td>
+                  <td class="text-end">
+                    <a
+                      :if={t.kind == "export" and t.status == "done"}
+                      href={~p"/admin/transfers/#{t.id}/download"}
+                      class="btn btn-xs btn-ghost gap-1"
+                    >
+                      <.icon name="hero-arrow-down-tray" class="size-3.5" />{gettext("Download")}
+                    </a>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <.empty_state
+              :if={@transfers == []}
+              icon="hero-clock"
+              title={gettext("No exports or imports yet.")}
+            />
+          </div>
+        </.panel>
       </div>
     </Layouts.admin>
     """
   end
+
+  defp matches?(_channel, q) when q in [nil, ""], do: true
+
+  defp matches?(channel, q),
+    do: String.contains?(String.downcase(channel.slug), String.downcase(String.trim(q)))
 
   defp blank(""), do: "–"
   defp blank(s), do: s
@@ -325,10 +462,10 @@ defmodule KickTrackerWeb.Admin.TransferLive do
   defp status("failed"), do: gettext("failed")
   defp status("expired"), do: gettext("expired")
 
-  defp status_class("done"), do: "badge-success"
-  defp status_class("failed"), do: "badge-error"
-  defp status_class(s) when s in ["queued", "running"], do: "badge-info"
-  defp status_class(_), do: "badge-ghost"
+  defp status_tone("done"), do: :ok
+  defp status_tone("failed"), do: :error
+  defp status_tone(s) when s in ["queued", "running"], do: :info
+  defp status_tone(_), do: :neutral
 
   defp added(summary),
     do: summary["tables"] |> Map.values() |> Enum.map(& &1["added"]) |> Enum.sum()

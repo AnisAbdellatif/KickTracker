@@ -72,12 +72,39 @@ defmodule KickTrackerWeb.Admin.AdminPagesTest do
 
   test "groups are created, filled and made public", %{conn: conn} do
     c = channel!(slug: "somestreamer")
+    other = channel!(slug: "otherstreamer")
     {:ok, view, _} = live(conn, ~p"/admin/groups")
     view |> form("#create-group", %{name: "Some group"}) |> render_submit()
     [g] = Groups.list()
     view |> form("#members-#{g.id}", %{channels: [c.id], public: "true"}) |> render_submit()
     assert [%{channel_ids: [id], public: true, slug: "some-group"}] = Groups.list(public: true)
     assert id == c.id
+
+    # A search hides the channels it doesn't match, without dropping them:
+    # saving keeps the member the search hid.
+    view |> element("#group-#{g.id} button[phx-click=edit]") |> render_click()
+
+    view
+    |> element("#members-#{g.id} input[name=member_q]")
+    |> render_keyup(%{"value" => "other"})
+
+    assert has_element?(view, "#members-#{g.id} label.hidden input[value='#{c.id}'][checked]")
+    view |> form("#members-#{g.id}", %{channels: [c.id, other.id]}) |> render_submit()
+    assert [%{channel_ids: ids}] = Groups.list()
+    assert Enum.sort(ids) == Enum.sort([c.id, other.id])
+  end
+
+  test "the corrections page's channel is searched for and picked", %{conn: conn} do
+    a = channel!(slug: "somestreamer")
+    b = channel!(slug: "otherstreamer")
+    {:ok, view, _} = live(conn, ~p"/admin/data?channel=#{a.id}")
+
+    view |> element("#pick-channel-button") |> render_click()
+    view |> element("#pick-channel-search") |> render_change(%{"q" => "other"})
+    refute has_element?(view, "#pick-channel-option-#{a.id}")
+    view |> element("#pick-channel-option-#{b.id}") |> render_click()
+    assert_patch(view, ~p"/admin/data?channel=#{b.id}")
+    assert has_element?(view, "#pick-channel-button", "otherstreamer")
   end
 
   test "an exclusion from the data page queues the recomputation", %{conn: conn} do
@@ -197,8 +224,15 @@ defmodule KickTrackerWeb.Admin.AdminPagesTest do
   test "the audit log filters by action", %{conn: conn, admin: admin} do
     Audit.log(admin, "channel.pause", "somestreamer")
     Audit.log(admin, "channel.resume", "somestreamer")
-    {:ok, _view, html} = live(conn, ~p"/admin/audit?action=channel.pause")
-    assert html =~ "channel.pause"
-    refute html =~ "channel.resume"
+    {:ok, view, _html} = live(conn, ~p"/admin/audit?action=channel.pause")
+    table = render(element(view, "#audit"))
+    assert table =~ "channel.pause"
+    refute table =~ "channel.resume"
+
+    # The filter offers every action logged, and choosing one keeps it in the URL.
+    assert has_element?(view, "#audit-action option[value='channel.resume']")
+    view |> form("#audit-filter", %{action: "channel.resume"}) |> render_change()
+    assert_patch(view, ~p"/admin/audit?action=channel.resume")
+    refute render(element(view, "#audit")) =~ "channel.pause"
   end
 end

@@ -60,6 +60,57 @@ defmodule KickTracker.ChatLog do
   defp hash(parts),
     do: :crypto.hash(:sha256, Enum.intersperse(parts, <<0>>)) |> Base.encode16(case: :lower)
 
+  @emote ~r/\[emote:(\d+):([^\]]*)\]/
+
+  @doc """
+  A message's text in pieces for display: `%{type: :text, text: ...}` and
+  `%{type: :emote, id: ..., name: ..., count: ...}`. Kick writes emotes in
+  the text as `[emote:<id>:<name>]`. A run of the same emote (back to back,
+  or with only spaces between) is one piece with its count, so a spammed
+  emote is drawn once, ×3. Pure.
+  """
+  @spec parse_content(String.t() | nil) :: [map()]
+  def parse_content(content) when is_binary(content) do
+    {parts, last} =
+      @emote
+      |> Regex.scan(content, return: :index)
+      |> Enum.reduce({[], 0}, fn [{at, len}, {id_at, id_len}, {name_at, name_len}],
+                                 {parts, last} ->
+        between = binary_part(content, last, at - last)
+        id = binary_part(content, id_at, id_len)
+        name = binary_part(content, name_at, name_len)
+
+        parts =
+          case parts do
+            [%{type: :emote, id: ^id} = prev | rest] ->
+              if String.trim(between) == "",
+                do: [%{prev | count: prev.count + 1} | rest],
+                else: [emote(id, name), text(between) | parts]
+
+            _ ->
+              [emote(id, name) | if(between == "", do: parts, else: [text(between) | parts])]
+          end
+
+        {parts, at + len}
+      end)
+
+    rest = binary_part(content, last, byte_size(content) - last)
+    Enum.reverse(if rest == "", do: parts, else: [text(rest) | parts])
+  end
+
+  def parse_content(_), do: []
+
+  defp emote(id, name), do: %{type: :emote, id: id, name: name, count: 1}
+  defp text(text), do: %{type: :text, text: text}
+
+  @doc "Where an emote's image is: Kick's file host (`KICK_FILES_URL`)."
+  @spec emote_url(String.t()) :: String.t()
+  def emote_url(id), do: "#{files_url()}/emotes/#{id}/fullsize"
+
+  @doc "Kick's file host, as configured."
+  def files_url,
+    do: Application.get_env(:kick_tracker, :kick, [])[:files_url] || "https://files.kick.com"
+
   ## Writes (collector)
 
   @doc "Stores messages; one already stored is left as it is."
@@ -173,7 +224,8 @@ defmodule KickTracker.ChatLog do
   Logged messages, newest first, with the sender's username and the
   channel's slug. Filters (all optional): `:channel_ids`, `:user_ids`,
   `:from`, `:to` (`[from, to)`), `:before` (a `{sent_at, message_id}`
-  cursor for the next page); `:limit` (default 200).
+  cursor for the next page); `:limit` (default 200). With `:tz` (a
+  timezone Postgres knows), each row also has `local_at`, its time there.
   """
   @spec messages(map()) :: [map()]
   def messages(filters) do
@@ -212,6 +264,7 @@ defmodule KickTracker.ChatLog do
     )
     |> where_in(:channel_id, filters[:channel_ids])
     |> where_time(:occurred_at, filters[:from], filters[:to])
+    |> local_time(:occurred_at, filters[:tz])
     |> Repo.all()
   end
 
@@ -310,6 +363,36 @@ defmodule KickTracker.ChatLog do
     |> where_in(:channel_id, filters[:channel_ids])
     |> where_in(:user_id, filters[:user_ids])
     |> where_time(:sent_at, filters[:from], filters[:to])
+    |> local_time(:sent_at, filters[:tz])
+  end
+
+  # The time in the reader's timezone, as Postgres reckons it (the same
+  # database of zones the channels' timezones use).
+  defp local_time(query, _field, nil), do: query
+
+  defp local_time(query, field, tz),
+    do:
+      select_merge(query, [x], %{local_at: fragment("(? AT TIME ZONE ?)", field(x, ^field), ^tz)})
+
+  @doc """
+  A wall-clock time in `tz` as the UTC instant it is (a time typed by an
+  admin). nil for a time the zone skips or an unknown zone.
+  """
+  @spec to_utc(NaiveDateTime.t(), String.t()) :: DateTime.t() | nil
+  def to_utc(%NaiveDateTime{} = local, tz) do
+    case Repo.query("SELECT ($1::timestamp AT TIME ZONE $2)", [local, tz]) do
+      {:ok, %{rows: [[%DateTime{} = at]]}} -> DateTime.shift_zone!(at, "Etc/UTC")
+      _ -> nil
+    end
+  end
+
+  @doc "A UTC instant as the wall-clock time it is in `tz`."
+  @spec to_local(DateTime.t(), String.t()) :: NaiveDateTime.t() | nil
+  def to_local(%DateTime{} = at, tz) do
+    case Repo.query("SELECT ($1::timestamptz AT TIME ZONE $2)", [at, tz]) do
+      {:ok, %{rows: [[%NaiveDateTime{} = local]]}} -> local
+      _ -> nil
+    end
   end
 
   defp where_in(query, _field, nil), do: query

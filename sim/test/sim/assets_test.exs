@@ -12,4 +12,13 @@ defmodule Sim.AssetsTest do
     assert <<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, _::binary>> = png
     assert png == Sim.Png.solid(64, Sim.Png.colour("profile/somestreamer.png"))
   end
+
+  test "emotes are served as Kick's file host serves them" do
+    start_supervised!({Sim.Instance, port: 0})
+
+    %{status: 200, body: png} =
+      Req.get!(Sim.Instance.base_url() <> "/emotes/37226/fullsize", decode_body: false)
+
+    assert png == Sim.Png.solid(32, Sim.Png.colour("emote/37226"))
+  end
 end

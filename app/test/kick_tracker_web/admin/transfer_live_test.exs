@@ -14,6 +14,26 @@ defmodule KickTrackerWeb.Admin.TransferLiveTest do
 
   setup :log_in_admin
 
+  test "the export's channels: searched without losing what is ticked, all or none of those shown",
+       %{conn: conn} do
+    a = channel!(slug: "somestreamer")
+    b = channel!(slug: "otherstreamer")
+    {:ok, view, _} = live(conn, ~p"/admin/transfer")
+    assert has_element?(view, "#export-count", "2 of 2 selected")
+
+    # Searching hides the other channel, still ticked; "None" unticks only
+    # the one shown.
+    view |> form("#export-form", export: %{q: "some"}) |> render_change()
+    assert has_element?(view, "label.hidden input[value='#{b.id}'][checked]")
+    view |> element("button[phx-value-to=none]") |> render_click()
+    assert has_element?(view, "#export-count", "1 of 2 selected")
+
+    view |> form("#export-form") |> render_submit()
+    [t] = Transfers.list()
+    assert t.options["channel_ids"] == [b.id]
+    refute a.id in t.options["channel_ids"]
+  end
+
   test "an export is queued, built by the collector and downloaded", %{conn: conn} do
     c = channel!(slug: "somestreamer")
     s = stream!(c, ~U[2026-09-01 20:00:00Z], ~U[2026-09-01 21:00:00Z])

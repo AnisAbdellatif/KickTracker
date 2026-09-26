@@ -1277,6 +1277,8 @@ once when the nodes are connected, and through the Manager's sync within a
 minute otherwise. Writes go through the journal like every collected
 write (`{:chat_messages, …}`, `{:chat_log_event, …}`).
 
+Emotes stay in the text as Kick sends them (`[emote:<id>:<name>]`); the admin page draws them as Kick's images (`<KICK_FILES_URL>/emotes/<id>/fullsize`, loaded by the admin's browser; the CSP allows that host on admin pages only), a run of one emote once with its count. The export keeps the tokens.
+
 Kept per channel for its retention (`Workers.ChatLog`, hourly), whether
 logging is still on or not. An admin can view a channel's or a user's log
 (across channels), export a selection, and delete a channel's log for a
@@ -1406,7 +1408,11 @@ Kicks likewise with ingress coverage.
   Responses get an ETag and a `Cache-Control`, so Caddy or Cloudflare can
   serve repeat visitors without touching the app: a day for ranges ending
   more than two days ago, 30s for ranges reaching into the last two days
-  (rollups and late events can still change them).
+  (rollups and late events can still change them). A range that reaches
+  now (a live stream, a rolling period) is revalidated every time, so a
+  chart refreshing it (every minute while live) sees each new reading;
+  an unchanged answer is a 304. The admin's anomalies page reads a live
+  stream again every minute too, findings and chart.
 - **Live over LiveView:** the page subscribes to `"channel:<id>"`; new
   readings are pushed to the chart hook with `push_event` (append a point),
   at most every 60s. Chart data is **never kept in LiveView assigns**, so a
@@ -1504,6 +1510,17 @@ period, always with an arrow.
 Under `/admin`, same `web` role, separate `live_session` with an `on_mount`
 auth check.
 
+Layout: a sidebar of sections with icons (Monitor: health, anomalies,
+audit log, errors, dashboard; Channels: channels, groups, subscriptions;
+Data: corrections, chat log, export / import, dead letters; People:
+privacy requests, admins; Site: settings, the public site), the admin's
+account, the theme and logging out at its foot; on a phone, a drawer
+opened from a top bar (daisyUI's, no script). Every page is built from
+the same pieces (`KickTrackerWeb.AdminComponents`): a page header with
+its actions, cards, stat tiles, status pills, empty states, search boxes
+and icon buttons. Long lists (channels, subscriptions, export's channels,
+group members) are searched on the server and scroll inside their card.
+
 - **Access:** accounts on phx.gen.auth's model (server-side session tokens),
   password + TOTP on every login, **no public sign-up** (admins invite
   admins). Optionally reachable only over the private
@@ -1553,7 +1570,9 @@ auth check.
   audited without what was searched for.
 - **Chat log** (`/admin/chat-log`, §12.8): turn chat logging on or off
   per channel and set its retention; read the log by channels, users
-  (across channels) and UTC period, filters in the URL, with the chat-feed
+  (across channels) and period, filters in the URL (times in UTC there;
+  shown, grouped by day and typed in the admin's browser timezone,
+  converted by Postgres), with the chat-feed
   events beside it; export the selection as CSV (streamed; formula-like
   cells get a leading apostrophe); delete one channel's log over a period
   (typing its slug confirms; the collector's `Workers.ChatLog` runs it).

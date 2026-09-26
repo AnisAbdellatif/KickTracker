@@ -49,44 +49,88 @@ defmodule KickTrackerWeb.Admin.SettingsLive do
   defp label("sub_share"), do: gettext("Assumed streamer's share of a subscription (0–1)")
   defp label("kick_value_usd"), do: gettext("Assumed value of one Kick to the streamer (USD)")
 
+  defp hint("support_page_public"),
+    do: gettext("A channel's Support tab, and support figures in the data API.")
+
+  defp hint("top_people_public"),
+    do: gettext("Named on public pages; the privacy page says so while this is on.")
+
+  defp hint("sub_price_usd"), do: gettext("Kick's price for one subscription.")
+  defp hint("sub_share"), do: gettext("0.95 means the streamer keeps 95%.")
+  defp hint("kick_value_usd"), do: gettext("What the streamer receives for one Kick.")
+
+  defp unit("sub_price_usd"), do: "USD"
+  defp unit("kick_value_usd"), do: "USD"
+  defp unit(_), do: nil
+
   @impl true
   def render(assigns) do
+    {flags, numbers} =
+      assigns.settings |> Enum.sort() |> Enum.split_with(fn {_, v} -> is_boolean(v) end)
+
+    assigns = assign(assigns, flags: flags, numbers: numbers)
+
     ~H"""
     <Layouts.admin flash={@flash} current_admin={@current_admin} active={:settings}>
-      <.header>{gettext("Settings")}</.header>
-      <.form for={%{}} as={:settings} id="settings-form" phx-submit="save" class="max-w-xl space-y-3">
-        <%= for {key, value} <- Enum.sort(@settings) do %>
-          <%= if is_boolean(value) do %>
-            <label class="flex items-center gap-2 text-sm">
-              <input type="hidden" name={"settings[#{key}]"} value="false" />
-              <input
-                type="checkbox"
-                name={"settings[#{key}]"}
-                value="true"
-                checked={value}
-                class="checkbox checkbox-sm"
-              />
-              {label(key)}
+      <.page_header title={gettext("Settings")} icon="hero-cog-6-tooth">
+        <:subtitle>
+          {gettext("What the public site shows, and the assumptions behind estimates.")}
+        </:subtitle>
+      </.page_header>
+
+      <.form for={%{}} as={:settings} id="settings-form" phx-submit="save" class="max-w-2xl space-y-6">
+        <.panel title={gettext("Public site")} icon="hero-globe-alt">
+          <div class="divide-y divide-base-300">
+            <label
+              :for={{key, value} <- @flags}
+              class="flex cursor-pointer items-start justify-between gap-4 py-3 first:pt-0 last:pb-0"
+            >
+              <span>
+                <span class="block text-sm font-medium">{label(key)}</span>
+                <span class="text-muted text-xs">{hint(key)}</span>
+              </span>
+              <span>
+                <input type="hidden" name={"settings[#{key}]"} value="false" />
+                <input
+                  type="checkbox"
+                  name={"settings[#{key}]"}
+                  value="true"
+                  checked={value}
+                  class="toggle toggle-primary"
+                />
+              </span>
             </label>
-          <% else %>
-            <label class="block text-sm">
-              {label(key)}
-              <input
-                name={"settings[#{key}]"}
-                value={value}
-                inputmode="decimal"
-                class="input input-sm mt-1 w-40 block"
-              />
+          </div>
+        </.panel>
+
+        <.panel title={gettext("Revenue estimate")} icon="hero-banknotes">
+          <:subtitle>{gettext("Shown as an estimate wherever it appears.")}</:subtitle>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label :for={{key, value} <- @numbers} class="block text-sm">
+              <span class="font-medium">{label(key)}</span>
+              <span class="input input-sm mt-1 w-full">
+                <input
+                  name={"settings[#{key}]"}
+                  value={value}
+                  inputmode="decimal"
+                  class="tabular-nums"
+                />
+                <span :if={unit(key)} class="text-muted text-xs">{unit(key)}</span>
+              </span>
+              <span class="text-muted mt-1 block text-xs">{hint(key)}</span>
             </label>
-          <% end %>
-        <% end %>
-        <button class="btn btn-sm btn-primary">{gettext("Save")}</button>
+          </div>
+        </.panel>
+
+        <div class="flex items-center gap-3">
+          <button class="btn btn-sm btn-primary">{gettext("Save")}</button>
+          <p class="text-muted text-xs">
+            {gettext(
+              "Polling cadences aren't settings: they are fixed in code with the rules that depend on them (viewers every 60s, subscribers every 5 minutes, followers every 15 minutes live and daily offline)."
+            )}
+          </p>
+        </div>
       </.form>
-      <p class="mt-6 max-w-xl text-xs opacity-70">
-        {gettext(
-          "Polling cadences aren't settings: they are fixed in code with the rules that depend on them (viewers every 60s, subscribers every 5 minutes, followers every 15 minutes live and daily offline)."
-        )}
-      </p>
     </Layouts.admin>
     """
   end

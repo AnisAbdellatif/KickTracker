@@ -126,7 +126,12 @@ defmodule KickTrackerWeb.Layouts do
     """
   end
 
-  @doc "The admin interface's layout, with its navigation."
+  @doc """
+  The admin interface's layout: a sidebar of grouped sections (always
+  shown on wide screens, a drawer opened from the top bar on narrow ones),
+  with the admin's account, the theme and logging out at its foot. No
+  script: the drawer is daisyUI's checkbox, closed again by navigating.
+  """
   attr :flash, :map, required: true
   attr :current_admin, :map, required: true
   attr :active, :atom, default: nil
@@ -134,93 +139,152 @@ defmodule KickTrackerWeb.Layouts do
 
   def admin(assigns) do
     ~H"""
-    <header class="border-b border-base-300 bg-base-100">
-      <nav class="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
-        <.link navigate={~p"/admin"} class="flex items-center gap-2 font-semibold">
-          <.brand_mark />{site_name()}
-          <span class="badge badge-sm badge-neutral">{gettext("Admin")}</span>
-        </.link>
-        <div class="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-          <.admin_link to={~p"/admin"} active={@active == :health}>{gettext("Health")}</.admin_link>
-          <.admin_link to={~p"/admin/channels"} active={@active == :channels}>
-            {gettext("Channels")}
-          </.admin_link>
-          <.admin_link to={~p"/admin/groups"} active={@active == :groups}>
-            {gettext("Groups")}
-          </.admin_link>
-          <.admin_link to={~p"/admin/subscriptions"} active={@active == :subscriptions}>
-            {gettext("Subscriptions")}
-          </.admin_link>
-          <.admin_link to={~p"/admin/dead-letters"} active={@active == :dead_letters}>
-            {gettext("Dead letters")}
-          </.admin_link>
-          <.admin_link to={~p"/admin/data"} active={@active == :data}>{gettext("Data")}</.admin_link>
-          <.admin_link to={~p"/admin/anomalies"} active={@active == :anomalies}>
-            {gettext("Anomalies")}
-          </.admin_link>
-          <.admin_link to={~p"/admin/transfer"} active={@active == :transfer}>
-            {gettext("Export / import")}
-          </.admin_link>
-          <.admin_link to={~p"/admin/chat-log"} active={@active == :chat_log}>
-            {gettext("Chat log")}
-          </.admin_link>
-          <.admin_link to={~p"/admin/privacy"} active={@active == :privacy}>
-            {gettext("Privacy")}
-          </.admin_link>
-          <.admin_link to={~p"/admin/settings"} active={@active == :settings}>
-            {gettext("Settings")}
-          </.admin_link>
-          <.admin_link to={~p"/admin/audit"} active={@active == :audit}>
-            {gettext("Audit log")}
-          </.admin_link>
-          <.admin_link to={~p"/admin/admins"} active={@active == :admins}>
-            {gettext("Admins")}
-          </.admin_link>
-          <a href={~p"/admin/errors"} class="px-2 py-1 text-base-content/70 hover:text-base-content">
-            {gettext("Errors")}
-          </a>
-          <a
-            href={~p"/admin/dashboard"}
-            class="px-2 py-1 text-base-content/70 hover:text-base-content"
+    <div class="drawer lg:drawer-open">
+      <input id="admin-nav" type="checkbox" class="drawer-toggle" aria-label={gettext("Menu")} />
+      <div class="drawer-content flex min-h-dvh flex-col">
+        <header class="sticky top-0 z-30 flex items-center gap-2 border-b border-base-300 bg-base-100/90 px-3 py-2 backdrop-blur lg:hidden">
+          <label
+            for="admin-nav"
+            class="btn btn-ghost btn-sm btn-square"
+            aria-label={gettext("Open the menu")}
           >
-            {gettext("Dashboard")}
-          </a>
-        </div>
-        <div class="flex items-center gap-3 text-sm">
-          <.link navigate={~p"/admin/account"} class="opacity-70 hover:opacity-100">
-            {@current_admin.email}
+            <.icon name="hero-bars-3" class="size-5" />
+          </label>
+          <.link navigate={~p"/admin"} class="flex items-center gap-2 font-semibold">
+            <.brand_mark />{site_name()}
           </.link>
-          <.link href={~p"/admin/logout"} method="delete" class="btn btn-ghost btn-xs">
-            {gettext("Log out")}
+          <span class="badge badge-sm badge-neutral ms-auto">{gettext("Admin")}</span>
+        </header>
+        <main class="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-8 sm:py-8">
+          {render_slot(@inner_block)}
+        </main>
+      </div>
+      <div class="drawer-side z-40">
+        <label for="admin-nav" class="drawer-overlay" aria-label={gettext("Close the menu")}></label>
+        <aside class="admin-sidebar flex min-h-full w-64 flex-col border-e border-base-300 bg-base-100">
+          <.link navigate={~p"/admin"} class="flex items-center gap-2 px-5 pt-5 pb-4 font-semibold">
+            <.brand_mark />{site_name()}
+            <span class="badge badge-sm badge-neutral">{gettext("Admin")}</span>
           </.link>
-          <.theme_toggle />
-        </div>
-      </nav>
-    </header>
-    <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-      {render_slot(@inner_block)}
-    </main>
+          <nav class="flex-1 space-y-5 overflow-y-auto px-3 pb-4" aria-label={gettext("Admin")}>
+            <.admin_section :for={{title, items} <- admin_sections()} title={title}>
+              <.admin_link
+                :for={{key, icon, label, path, kind} <- items}
+                to={path}
+                icon={icon}
+                active={@active == key}
+                external={kind == :external}
+              >
+                {label}
+              </.admin_link>
+            </.admin_section>
+          </nav>
+          <div class="border-t border-base-300 p-3">
+            <.link
+              navigate={~p"/admin/account"}
+              class={[
+                "admin-nav-item",
+                @active == :account && "is-active"
+              ]}
+              title={gettext("Your account")}
+            >
+              <.avatar name={@current_admin.email} class="size-7 text-xs" />
+              <span class="min-w-0 flex-1 truncate">{@current_admin.email}</span>
+            </.link>
+            <div class="mt-2 flex items-center justify-between gap-2 px-1">
+              <.theme_toggle />
+              <.link href={~p"/admin/logout"} method="delete" class="btn btn-ghost btn-sm gap-1">
+                <.icon name="hero-arrow-right-start-on-rectangle" class="size-4" />{gettext("Log out")}
+              </.link>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
     <.flash_group flash={@flash} />
     """
   end
 
-  attr :to, :string, required: true
-  attr :active, :boolean, default: false
+  # The sidebar's sections: {key, icon, label, path, :live | :external}.
+  defp admin_sections do
+    [
+      {gettext("Monitor"),
+       [
+         {:health, "hero-heart", gettext("Health"), ~p"/admin", :live},
+         {:anomalies, "hero-exclamation-triangle", gettext("Anomalies"), ~p"/admin/anomalies",
+          :live},
+         {:audit, "hero-clipboard-document-list", gettext("Audit log"), ~p"/admin/audit", :live},
+         {:errors, "hero-bug-ant", gettext("Errors"), ~p"/admin/errors", :external},
+         {:dashboard, "hero-chart-bar-square", gettext("Dashboard"), ~p"/admin/dashboard",
+          :external}
+       ]},
+      {gettext("Channels"),
+       [
+         {:channels, "hero-tv", gettext("Channels"), ~p"/admin/channels", :live},
+         {:groups, "hero-rectangle-group", gettext("Groups"), ~p"/admin/groups", :live},
+         {:subscriptions, "hero-bell-alert", gettext("Subscriptions"), ~p"/admin/subscriptions",
+          :live}
+       ]},
+      {gettext("Data"),
+       [
+         {:data, "hero-wrench-screwdriver", gettext("Corrections"), ~p"/admin/data", :live},
+         {:chat_log, "hero-chat-bubble-left-right", gettext("Chat log"), ~p"/admin/chat-log",
+          :live},
+         {:transfer, "hero-arrows-right-left", gettext("Export / import"), ~p"/admin/transfer",
+          :live},
+         {:dead_letters, "hero-inbox-stack", gettext("Dead letters"), ~p"/admin/dead-letters",
+          :live}
+       ]},
+      {gettext("People"),
+       [
+         {:privacy, "hero-shield-check", gettext("Privacy requests"), ~p"/admin/privacy", :live},
+         {:admins, "hero-user-group", gettext("Admins"), ~p"/admin/admins", :live}
+       ]},
+      {gettext("Site"),
+       [
+         {:settings, "hero-cog-6-tooth", gettext("Settings"), ~p"/admin/settings", :live},
+         {:site, "hero-globe-alt", gettext("Public site"), ~p"/", :external}
+       ]}
+    ]
+  end
+
+  attr :title, :string, required: true
   slot :inner_block, required: true
+
+  defp admin_section(assigns) do
+    ~H"""
+    <div>
+      <p class="admin-nav-title">{@title}</p>
+      <div class="space-y-0.5">{render_slot(@inner_block)}</div>
+    </div>
+    """
+  end
+
+  attr :to, :string, required: true
+  attr :icon, :string, required: true
+  attr :active, :boolean, default: false
+  attr :external, :boolean, default: false
+  slot :inner_block, required: true
+
+  defp admin_link(%{external: true} = assigns) do
+    ~H"""
+    <a href={@to} class="admin-nav-item">
+      <.icon name={@icon} class="size-4.5 shrink-0" />
+      <span class="flex-1">{render_slot(@inner_block)}</span>
+      <.icon name="hero-arrow-up-right" class="size-3 opacity-50" />
+    </a>
+    """
+  end
 
   defp admin_link(assigns) do
     ~H"""
     <.link
       navigate={@to}
-      class={[
-        "rounded-field px-2 py-1 transition-colors",
-        if(@active,
-          do: "bg-base-200 font-medium",
-          else: "text-base-content/70 hover:bg-base-200 hover:text-base-content"
-        )
-      ]}
+      class={["admin-nav-item", @active && "is-active"]}
+      aria-current={@active && "page"}
     >
-      {render_slot(@inner_block)}
+      <.icon name={@icon} class="size-4.5 shrink-0" />
+      <span class="flex-1">{render_slot(@inner_block)}</span>
     </.link>
     """
   end

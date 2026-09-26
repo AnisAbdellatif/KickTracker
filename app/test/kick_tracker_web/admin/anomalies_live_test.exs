@@ -84,6 +84,60 @@ defmodule KickTrackerWeb.Admin.AnomaliesLiveTest do
     assert html =~ "median of 5 earlier streams"
   end
 
+  test "a live stream is followed: read again each minute, its chart refreshing, until it ends",
+       %{conn: conn, target: target} do
+    KickTracker.Repo.query!(
+      "UPDATE streams SET ended_at = NULL, end_source = NULL WHERE id = $1",
+      [target]
+    )
+
+    {:ok, view, _} = live(conn, ~p"/admin/anomalies/#{target}")
+
+    assert has_element?(view, "#anomaly-chart[data-refresh='60']")
+    assert :sys.get_state(view.pid).socket.assigns.refresh_ref
+
+    # The minute's timer reads it again; once it has ended, no more timers.
+    KickTracker.Repo.query!(
+      "UPDATE streams SET ended_at = now(), end_source = 'event' WHERE id = $1",
+      [target]
+    )
+
+    send(view.pid, :refresh)
+    render(view)
+    refute has_element?(view, "#anomaly-chart[data-refresh]")
+    refute :sys.get_state(view.pid).socket.assigns.refresh_ref
+  end
+
+  test "the channel is searched for and picked, not scrolled for", %{conn: conn, channel: channel} do
+    other = Fixtures.channel!(slug: "otherstreamer")
+    third = Fixtures.channel!(slug: "anotherone")
+    {:ok, view, _} = live(conn, ~p"/admin/anomalies?channel=#{channel.id}")
+
+    view |> element("#anomalies-channel-button") |> render_click()
+    assert has_element?(view, "#anomalies-channel-option-#{channel.id}[aria-selected=true]")
+
+    # Typing narrows the list, the ones starting with it first.
+    view |> element("#anomalies-channel-search") |> render_change(%{"q" => "other"})
+    refute has_element?(view, "#anomalies-channel-option-#{channel.id}")
+
+    assert view |> element("#anomalies-channel-options") |> render() =~
+             ~r/otherstreamer.*anotherone/s
+
+    view |> element("#anomalies-channel-option-#{third.id}") |> render_click()
+    assert_patch(view, ~p"/admin/anomalies?channel=#{third.id}")
+    refute has_element?(view, "#anomalies-channel-panel")
+
+    # Enter takes the first match; Escape closes.
+    view |> element("#anomalies-channel-button") |> render_click()
+    view |> element("#anomalies-channel-search") |> render_change(%{"q" => "oth"})
+    view |> element("#anomalies-channel-search") |> render_submit(%{"q" => "oth"})
+    assert_patch(view, ~p"/admin/anomalies?channel=#{other.id}")
+
+    view |> element("#anomalies-channel-button") |> render_click()
+    view |> element("#anomalies-channel-search input") |> render_keydown(%{"key" => "Escape"})
+    refute has_element?(view, "#anomalies-channel-panel")
+  end
+
   test "the chart's data carries the findings as shaded stretches", %{conn: conn, target: target} do
     data =
       conn

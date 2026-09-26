@@ -44,7 +44,9 @@ function storage(name) {
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
-  params: {_csrf_token: csrfToken},
+  // The visitor's timezone, for pages that group or take times on the
+  // server (the admin's chat log); Postgres checks it before any use.
+  params: {_csrf_token: csrfToken, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone},
   localStorage: storage("localStorage"),
   sessionStorage: storage("sessionStorage"),
   hooks: {...colocatedHooks, Chart, Format, TzSwitch},

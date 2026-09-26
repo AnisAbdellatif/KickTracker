@@ -73,51 +73,75 @@ defmodule KickTrackerWeb.Admin.PrivacyLive do
   def render(assigns) do
     ~H"""
     <Layouts.admin flash={@flash} current_admin={@current_admin} active={:privacy}>
-      <.header>
-        {gettext("Privacy requests")}
+      <.page_header title={gettext("Privacy requests")} icon="hero-shield-check">
         <:subtitle>
           {gettext(
-            "Find what we hold about a Kick user and delete what identifies them. Counts they contributed to stay, without them."
+            "Find what we hold about a Kick user and delete what identifies them. Counts they contributed to stay, without them. Searches are audited without what was searched for."
           )}
         </:subtitle>
-      </.header>
-      <form id="find-user" phx-submit="find" class="flex gap-2">
-        <input
-          name="q"
-          value={@query}
-          class="input input-sm w-64"
-          placeholder={gettext("Kick user id or username")}
-          required
-        />
-        <button class="btn btn-sm">{gettext("Find")}</button>
-      </form>
-      <section
-        :if={@found}
-        id="found"
-        class="mt-4 max-w-lg card-surface p-4 text-sm"
-      >
-        <dl class="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
-          <dt>{gettext("User id")}</dt><dd class="font-mono">{@found.user_id}</dd>
-          <dt>{gettext("Username")}</dt><dd>{@found.username || "–"}</dd>
-          <dt>{gettext("Chat minutes")}</dt><dd>{@found.chat_minutes}</dd>
-          <dt>{gettext("Streams chatted in")}</dt><dd>{@found.chat_streams}</dd>
-          <dt>{gettext("Follows")}</dt><dd>{@found.follows}</dd>
-          <dt>{gettext("Support events")}</dt><dd>{@found.support_events}</dd>
-          <dt>{gettext("Raw events mentioning the id")}</dt><dd>{@found.webhook_events}</dd>
-          <dt>{gettext("Hosts mentioning the id")}</dt><dd>{@found.channel_events}</dd>
-          <dt>{gettext("Logged chat messages")}</dt><dd>{@found.chat_messages}</dd>
-          <dt>{gettext("Logged chat events mentioning the id")}</dt><dd>{@found.chat_log_events}</dd>
-        </dl>
-        <form id="delete-user" phx-submit="delete" class="mt-4 flex gap-2">
-          <input
-            name="confirm"
-            class="input input-sm flex-1"
-            placeholder={gettext("Type %{id} to confirm", id: @found.user_id)}
-            autocomplete="off"
-          />
-          <button class="btn btn-sm btn-error">{gettext("Delete")}</button>
-        </form>
-      </section>
+      </.page_header>
+
+      <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <.panel title={gettext("Find a person")} icon="hero-magnifying-glass">
+          <form id="find-user" phx-submit="find" class="flex gap-2">
+            <label class="input input-sm flex-1">
+              <.icon name="hero-user" class="text-muted size-4" />
+              <input
+                name="q"
+                value={@query}
+                placeholder={gettext("Kick user id or username")}
+                autocomplete="off"
+                required
+              />
+            </label>
+            <button class="btn btn-sm btn-primary">{gettext("Find")}</button>
+          </form>
+          <p class="text-muted mt-3 text-xs">
+            {gettext(
+              "A request usually names a Kick username; the id is what stays the same when they rename."
+            )}
+          </p>
+        </.panel>
+
+        <.panel
+          :if={@found}
+          id="found"
+          title={@found.username || gettext("Unknown username")}
+          icon="hero-user"
+        >
+          <:subtitle><span class="font-mono">{@found.user_id}</span></:subtitle>
+          <dl class="kv-list">
+            <dt>{gettext("Chat minutes")}</dt><dd>{@found.chat_minutes}</dd>
+            <dt>{gettext("Streams chatted in")}</dt><dd>{@found.chat_streams}</dd>
+            <dt>{gettext("Follows")}</dt><dd>{@found.follows}</dd>
+            <dt>{gettext("Support events")}</dt><dd>{@found.support_events}</dd>
+            <dt>{gettext("Raw events mentioning the id")}</dt><dd>{@found.webhook_events}</dd>
+            <dt>{gettext("Hosts mentioning the id")}</dt><dd>{@found.channel_events}</dd>
+            <dt>{gettext("Logged chat messages")}</dt><dd>{@found.chat_messages}</dd>
+            <dt>{gettext("Logged chat events mentioning the id")}</dt><dd>
+              {@found.chat_log_events}
+            </dd>
+          </dl>
+          <form id="delete-user" phx-submit="delete" class="inset-well mt-4 space-y-2 p-3">
+            <p class="text-sm">
+              {gettext(
+                "Deleting removes the username, per-person rows and logged messages, and scrubs raw records. It can't be undone."
+              )}
+            </p>
+            <div class="flex gap-2">
+              <input
+                name="confirm"
+                class="input input-sm flex-1"
+                placeholder={gettext("Type %{id} to confirm", id: @found.user_id)}
+                autocomplete="off"
+              />
+              <button class="btn btn-sm btn-error gap-1">
+                <.icon name="hero-trash" class="size-4" />{gettext("Delete")}
+              </button>
+            </div>
+          </form>
+        </.panel>
+      </div>
     </Layouts.admin>
     """
   end

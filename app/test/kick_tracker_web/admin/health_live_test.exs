@@ -64,6 +64,33 @@ defmodule KickTrackerWeb.Admin.HealthLiveTest do
     assert %{api_all: +0.0} = Health.long_coverage(now)[channel.id]
   end
 
+  test "channels are searched, and filtered to those with a problem", %{conn: conn} do
+    now = DateTime.utc_now()
+    # Tracked for five minutes, all of them polled and chatted: nothing wrong.
+    ok = Fixtures.channel!(slug: "somestreamer", tracked_since: DateTime.add(now, -5 * 60))
+    bad = Fixtures.channel!(slug: "otherstreamer", tracked_since: DateTime.add(now, -2, :day))
+
+    for m <- 5..1//-1 do
+      Coverage.mark([ok.id], "api", true, DateTime.add(now, -m * 60), 150)
+      Coverage.mark([ok.id], "chat", true, DateTime.add(now, -m * 60), 150)
+    end
+
+    Coverage.mark([bad.id], "api", false, DateTime.add(now, -60), 150)
+
+    {:ok, view, _} = live(conn, ~p"/admin")
+    assert has_element?(view, "#health-#{ok.id}")
+    assert has_element?(view, "#health-#{bad.id}")
+
+    view |> element("#health-show-problems") |> render_click()
+    refute has_element?(view, "#health-#{ok.id}")
+    assert has_element?(view, "#health-#{bad.id}")
+
+    view |> element("#health-show-all") |> render_click()
+    view |> element("#health-search") |> render_change(%{"q" => "SOME"})
+    assert has_element?(view, "#health-#{ok.id}")
+    refute has_element?(view, "#health-#{bad.id}")
+  end
+
   test "shows the collectors: who collects, who stands by, who is down, writes waiting", %{
     conn: conn
   } do
