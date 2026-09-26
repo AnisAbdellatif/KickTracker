@@ -14,6 +14,9 @@ defmodule KickTracker.Channels.Channel do
     field :tracked_since, :utc_datetime_usec, read_after_writes: true
     field :active, :boolean, default: true
     field :public, :boolean, default: true
+    # Chat logging (§12.8): message text kept for this channel, admin only.
+    field :chat_log, :boolean, default: false
+    field :chat_log_retention_days, :integer, default: 90
 
     timestamps(type: :utc_datetime_usec)
   end

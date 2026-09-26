@@ -116,6 +116,33 @@ defmodule KickTracker.PrivacyTest do
     assert Privacy.find(@person).channel_events == 0
   end
 
+  test "logged messages go; replies to them no longer say whom they answered" do
+    c = channel!()
+    at = DateTime.utc_now()
+
+    KickTracker.ChatLog.insert_messages(c.id, [
+      KickTracker.ChatLog.message_row(%{id: "p1", sender_id: @person, at: at}, %{content: "mine"}),
+      KickTracker.ChatLog.message_row(%{id: "o1", sender_id: 7, at: at}, %{
+        content: "an answer",
+        type: "reply",
+        reply_to_message_id: "p1",
+        reply_to_user_id: @person
+      })
+    ])
+
+    KickTracker.ChatLog.insert_event(
+      c.id,
+      KickTracker.ChatLog.event_row("E", nil, %{"user" => TestKick.user(@person, "someone")}, at)
+    )
+
+    assert %{chat_messages: 1, chat_log_events: 1} = Privacy.find(@person)
+    assert %{chat_messages: 1, chat_log_events: 1} = Privacy.delete(@person)
+
+    assert [%{message_id: "o1", reply_to_user_id: nil}] = rows("chat_messages", ["message_id"])
+    refute inspect(rows("chat_log_events", ["id"])) =~ "someone"
+    assert %{chat_messages: 0, chat_log_events: 0} = Privacy.find(@person)
+  end
+
   test "a deletion forgets whom earlier privacy searches named in the audit log" do
     Repo.insert_all("kick_users", [
       %{id: @person, username: "someone", seen_at: DateTime.utc_now()},

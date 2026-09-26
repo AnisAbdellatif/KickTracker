@@ -277,9 +277,8 @@ defmodule KickTracker.Tracking.ChatSocket do
       :pong ->
         %{state | ping_sent_at: nil}
 
-      {:chat, message} ->
-        to_channel(state, {:chat, message})
-        state
+      {:chat, _message, _text} = chat ->
+        forward(state, chat)
 
       {:error, code, message} ->
         Logger.warning("chat feed error for channel #{state.channel.id}: #{code} #{message}")
@@ -289,14 +288,27 @@ defmodule KickTracker.Tracking.ChatSocket do
         to_channel(state, {:pusher_raw, name, topic, data, DateTime.utc_now()})
         state
 
-      {:other, name, topic} ->
-        to_channel(state, {:pusher_other, name, topic})
-        state
+      {:other, _name, _topic, _data} = other ->
+        forward(state, other)
 
       :invalid ->
         state
     end
   end
+
+  # A message's text, and the data of events we don't parse, go further
+  # only for a channel with chat logging on (§12.8); for the rest they end
+  # here.
+  defp forward(%{channel: %{chat_log: true}} = state, {:chat, message, text}),
+    do: tap(state, &to_channel(&1, {:chat, message, text}))
+
+  defp forward(state, {:chat, message, _text}), do: tap(state, &to_channel(&1, {:chat, message}))
+
+  defp forward(%{channel: %{chat_log: true}} = state, {:other, name, topic, data}),
+    do: tap(state, &to_channel(&1, {:pusher_other, name, topic, data, DateTime.utc_now()}))
+
+  defp forward(state, {:other, name, topic, _data}),
+    do: tap(state, &to_channel(&1, {:pusher_other, name, topic}))
 
   defp frame({:ping, data}, state), do: send_frame(%{state | last_in: now_s()}, {:pong, data})
   defp frame({:close, code, reason}, state), do: reconnect(state, {:closed, code, reason})

@@ -23,9 +23,11 @@ defmodule KickTracker.Collector.Ops do
     * `{:channel_ids, channel_id, kick_channel_id, chatroom_id}`
     * `{:slug, channel_id, slug, at}` — the slug Kick reports now
     * `{:channel_event, channel_id, row}` — a host, see `KickTracker.ChannelEvents`
+    * `{:chat_messages, channel_id, rows}`, `{:chat_log_event, channel_id, row}`
+      — chat logging (§12.8), see `KickTracker.ChatLog`
   """
 
-  alias KickTracker.{Channels, Events, KickUsers, Stats}
+  alias KickTracker.{Channels, ChatLog, Events, KickUsers, Stats}
   alias KickTracker.Stats.Coverage
 
   @doc """
@@ -56,7 +58,8 @@ defmodule KickTracker.Collector.Ops do
     do: rows |> Enum.map(& &1.channel_id) |> Enum.uniq()
 
   defp channel_ids({kind, channel_id, _})
-       when kind in [:stream, :chat, :channel_event] and is_integer(channel_id),
+       when kind in [:stream, :chat, :channel_event, :chat_messages, :chat_log_event] and
+              is_integer(channel_id),
        do: [channel_id]
 
   defp channel_ids({kind, channel_id, _, _})
@@ -146,6 +149,9 @@ defmodule KickTracker.Collector.Ops do
 
   def apply!({:channel_event, channel_id, row}),
     do: Stats.insert_channel_event(Map.put(row, :channel_id, channel_id))
+
+  def apply!({:chat_messages, channel_id, rows}), do: ChatLog.insert_messages(channel_id, rows)
+  def apply!({:chat_log_event, channel_id, row}), do: ChatLog.insert_event(channel_id, row)
 
   def apply!({:slug, channel_id, slug, at}) do
     Channels.store_slug(channel_id, slug, at)

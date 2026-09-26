@@ -39,7 +39,7 @@ defmodule KickTracker.Tracking.ChannelServer do
   @held_meta_window_s 300
   @max_catch_up_attempts 3
 
-  alias KickTracker.{ChannelEvents, Collector, Events, Stats, Tracking}
+  alias KickTracker.{ChannelEvents, ChatLog, Collector, Events, Stats, Tracking}
   alias KickTracker.Channels.Channel
   alias KickTracker.Collector.{Journal, Tracked}
   alias KickTracker.Collector.Sources.{Followers, Viewers}
@@ -82,6 +82,8 @@ defmodule KickTracker.Tracking.ChannelServer do
       closed_changes: nil,
       pending_meta: nil,
       chat: ChatMinutes.new(),
+      # Messages to log (§12.8), newest first, written with each flush.
+      chat_log: [],
       unknown_events: MapSet.new()
     }
 
@@ -166,6 +168,17 @@ defmodule KickTracker.Tracking.ChannelServer do
     {:noreply, %{state | chat: ChatMinutes.add(state.chat, message)}}
   end
 
+  # A message with its text: the socket sends it only while chat logging
+  # is on (§12.8). Checked again here, so a message on its way when an
+  # admin turned logging off isn't kept.
+  def handle_info({:chat, message, text}, state) do
+    state = %{state | chat: ChatMinutes.add(state.chat, message)}
+
+    if state.channel.chat_log,
+      do: {:noreply, %{state | chat_log: [ChatLog.message_row(message, text) | state.chat_log]}},
+      else: {:noreply, state}
+  end
+
   # A host, sent or received (project.md §16): kept as sent until real ones
   # show what to parse.
   def handle_info({:pusher_raw, name, pusher_channel, data, at}, state) do
@@ -176,19 +189,20 @@ defmodule KickTracker.Tracking.ChannelServer do
     {:noreply, state}
   end
 
-  # A chat-feed event we don't know: its name is logged once, its data
-  # never kept.
-  def handle_info({:pusher_other, name, pusher_channel}, state) do
-    if MapSet.member?(state.unknown_events, name) do
-      {:noreply, state}
-    else
-      Logger.info(
-        "channel #{state.channel.id}: unknown chat-feed event #{name} on #{pusher_channel}"
-      )
+  # A chat-feed event we don't know: its name is logged once; its data is
+  # kept only while chat logging is on (§12.8).
+  def handle_info({:pusher_other, name, pusher_channel, data, at}, state) do
+    if state.channel.chat_log,
+      do:
+        record(state, [
+          {:chat_log_event, state.channel.id, ChatLog.event_row(name, pusher_channel, data, at)}
+        ])
 
-      {:noreply, %{state | unknown_events: MapSet.put(state.unknown_events, name)}}
-    end
+    {:noreply, log_unknown(state, name, pusher_channel)}
   end
+
+  def handle_info({:pusher_other, name, pusher_channel}, state),
+    do: {:noreply, log_unknown(state, name, pusher_channel)}
 
   def handle_info(:flush_chat, state) do
     Process.send_after(self(), :flush_chat, @flush_every_ms)
@@ -286,6 +300,18 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   # --- chat ------------------------------------------------------------------
 
+  defp log_unknown(state, name, pusher_channel) do
+    if MapSet.member?(state.unknown_events, name) do
+      state
+    else
+      Logger.info(
+        "channel #{state.channel.id}: unknown chat-feed event #{name} on #{pusher_channel}"
+      )
+
+      %{state | unknown_events: MapSet.put(state.unknown_events, name)}
+    end
+  end
+
   defp flush_chat(state, now) do
     {minutes, users, chat} = ChatMinutes.take_done(state.chat, now)
 
@@ -298,7 +324,12 @@ defmodule KickTracker.Tracking.ChannelServer do
         )
       end
 
-    record(state, [{:chat, state.channel.id, rows}, {:kick_users, users}])
+    logged =
+      if state.chat_log != [],
+        do: [{:chat_messages, state.channel.id, Enum.reverse(state.chat_log)}],
+        else: []
+
+    record(state, [{:chat, state.channel.id, rows}, {:kick_users, users} | logged])
 
     for m <- rows do
       broadcast(
@@ -312,7 +343,7 @@ defmodule KickTracker.Tracking.ChannelServer do
       )
     end
 
-    %{state | chat: chat}
+    %{state | chat: chat, chat_log: []}
   end
 
   # --- readings ------------------------------------------------------------

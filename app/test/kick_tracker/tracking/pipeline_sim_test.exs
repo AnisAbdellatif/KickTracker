@@ -290,6 +290,75 @@ defmodule KickTracker.Tracking.ChatSimTest do
     refute inspect(dump) =~ "secret"
   end
 
+  describe "chat logging (§12.8)" do
+    test "off by default: no message text anywhere; on: messages and other events as sent",
+         %{channel: c} do
+      say(@a, "a secret message")
+      assert eventually(fn -> flush(c) && mine("chat_minute_users", "user_id") != [] end)
+      settle()
+      assert rows("chat_messages", ["sent_at"]) == []
+      refute inspect(Repo.query!("SELECT * FROM chat_minute_users, kick_users").rows) =~ "secret"
+
+      # Turned on: the running processes hear it.
+      {:ok, _} = KickTracker.ChatLog.configure(c, true, 90)
+      pid = ChannelServer.whereis(c.kick_user_id)
+      assert eventually(fn -> :sys.get_state(pid).channel.chat_log end)
+
+      assert eventually(fn ->
+               :sys.get_state(KickTracker.Tracking.whereis({:chat, c.id})).channel.chat_log
+             end)
+
+      say(@a, "first logged")
+      say(@b, "second logged")
+
+      topic = "chatrooms.#{c.chatroom_id}.v2"
+
+      Sim.Pusher.Hub.broadcast(topic, [
+        Jason.encode!(%{
+          "event" => "App\\Events\\SomethingElse",
+          "channel" => topic,
+          "data" => ~s({"opaque":1})
+        })
+      ])
+
+      assert eventually(fn ->
+               flush(c)
+               settle()
+
+               rows("chat_messages", ["sent_at"])
+               |> Enum.filter(&(&1.user_id in [@a, @b]))
+               |> Enum.map(& &1.content)
+               |> Enum.sort() == ["first logged", "second logged"]
+             end)
+
+      assert [%{channel_id: id, event: "App\\Events\\SomethingElse", payload: payload}] =
+               rows("chat_log_events", ["id"])
+
+      assert id == c.id
+      assert payload == %{"data" => %{"opaque" => 1}}
+
+      # Turned off: nothing more is kept.
+      {:ok, _} = KickTracker.ChatLog.configure(c, false, 90)
+      assert eventually(fn -> not :sys.get_state(pid).channel.chat_log end)
+      say(@a, "not logged")
+
+      assert eventually(fn ->
+               flush(c) && Enum.sum_by(mine("chat_minute_users", "user_id"), & &1.messages) == 4
+             end)
+
+      settle()
+      refute Enum.any?(rows("chat_messages", ["sent_at"]), &(&1.content == "not logged"))
+    end
+
+    test "a change made only in the database reaches the channel within a sync", %{channel: c} do
+      Repo.query!("UPDATE channels SET chat_log = true WHERE id = $1", [c.id])
+      KickTracker.Collector.Tracked.refresh()
+      Manager.sync()
+      pid = ChannelServer.whereis(c.kick_user_id)
+      assert eventually(fn -> :sys.get_state(pid).channel.chat_log end)
+    end
+  end
+
   test "a host is stored as sent; other unknown events are not", %{channel: c} do
     topic = "chatrooms.#{c.chatroom_id}.v2"
 

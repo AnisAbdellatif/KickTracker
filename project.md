@@ -1250,11 +1250,46 @@ channel_events     (id, channel_id, occurred_at,
   policy). Everything else is kept.
 - Kick user ids (in the chat tables, `follows`, `support_events`,
   `webhook_events`) and usernames (`kick_users`, event bodies) count as
-  personal data even without message text. Chat text is never stored.
-  Usernames live in one table, so deletion requests touch one place plus the
-  raw event bodies.
+  personal data even without message text. Chat text is stored only by chat
+  logging (§12.8). Usernames live in one table, so deletion requests touch
+  one place plus the raw event bodies.
 - Nothing from v2 beyond `followers_count` and the chatroom id (which
   chat needs) is stored.
+
+### 12.8 Chat logging (opt-in, per channel)
+
+Off by default. An admin turns it on for a channel (`channels.chat_log`)
+and sets how long its log is kept (`chat_log_retention_days`, 90 by
+default, 1 to 3 650). Only then is message text stored:
+
+- `chat_messages` (hypertable on `sent_at`, 1-day chunks, not compressed):
+  channel, time, Kick's message id, sender id, type, text, and for a reply
+  the message and sender it answers (not its text). Usernames come from
+  `kick_users`. Unique on `(channel_id, message_id, sent_at)`.
+- `chat_log_events`: every other chat-feed event on the channel (bans,
+  unbans, deleted messages, clears, pins, polls...) as sent, until parsers
+  are written from them.
+
+The socket passes a message's text (and other events' data) to the
+channel's process only while logging is on; for every other channel it
+stops there. Turning logging on or off reaches the running channel at
+once when the nodes are connected, and through the Manager's sync within a
+minute otherwise. Writes go through the journal like every collected
+write (`{:chat_messages, …}`, `{:chat_log_event, …}`).
+
+Kept per channel for its retention (`Workers.ChatLog`, hourly), whether
+logging is still on or not. An admin can view a channel's or a user's log
+(across channels), export a selection, and delete a channel's log for a
+period (a collector job, audited). Privacy deletions remove a person's
+messages and scrub events naming them; replies to them keep their text
+but no longer say whom they answered. Never shown on the public site or
+the data API; not in exports between instances; the shadow collector
+never logs (it doesn't copy the setting).
+
+Storage at production's volume (~270 000 messages a day across 42
+channels, the busiest ~117 000): about 150 bytes per message with
+indexes, so ~6.5 GB a year for the busiest channel and ~15 GB for all of
+them, at 365 days' retention; 90 days is a quarter of that.
 
 ## 13. Frontend
 

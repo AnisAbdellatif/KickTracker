@@ -159,8 +159,15 @@ one, stop and ask.
 - **UTC in storage**, channel timezone for daily and weekday figures at read time.
 - **Hours watched** = Σ `viewers × min(Δt, 75s)` (viewers polled every 60s); never
   interpolate across a gap.
-- **No chat text is ever stored.** Only ids, counts and times. Usernames live only in
-  `kick_users`. `chat_minute_users` is kept 90 days.
+- **No chat text is stored, except in chat logging.** Collection keeps only ids, counts
+  and times; usernames live only in `kick_users`; `chat_minute_users` is kept 90 days.
+  The one exception is chat logging (project.md §12.8): off by default, turned on per
+  channel by an admin, and only then are message text (`chat_messages`) and other
+  chat-feed events as sent (`chat_log_events`) kept, for the channel's retention
+  (90 days by default). A message's text must not reach anything but that path: the
+  socket passes it on only for a logged channel. Logged data is admin-only (never on
+  the public site or `/data`), is covered by privacy deletions, and doesn't travel
+  with exports or to the shadow collector.
 - Estimates (revenue, anything modeled) are labeled as such wherever they appear.
 
 ## 8. Architecture rules
