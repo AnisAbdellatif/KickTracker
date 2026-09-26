@@ -143,5 +143,21 @@ else
   verdict fail "KT_* in the shell"
 fi
 
+# Kamal must be here, unless the kit runs it in its image (KIT_RUNNER=docker).
+: >"$CALLS"
+printf 'KIT_KAMAL=no-such-kamal\n' >.kamal/kit.local.env
+if ! release >/dev/null 2>&1 && [ ! -s "$CALLS" ] && grep -q "isn't on PATH" "$tmp/out"; then
+  verdict ok "no Kamal here and the local runner: refused"
+else
+  verdict fail "no Kamal, local runner"
+fi
+printf 'KIT_KAMAL=no-such-kamal\nKIT_RUNNER=docker\n' >.kamal/kit.local.env
+if release && [ "$(cat "$CALLS")" = "$A --group collectors --group web" ]; then
+  verdict ok "no Kamal here with KIT_RUNNER=docker: deploys"
+else
+  verdict fail "no Kamal, docker runner"
+fi
+: >.kamal/kit.local.env
+
 [ "$failures" -eq 0 ] || { echo "$failures failed" && exit 1; }
 echo "all passed"

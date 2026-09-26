@@ -78,7 +78,10 @@ does Docker, the deploy user, SSH hardening and the firewall:
    - `secrets/deployer.sops.env` from `deployer.env.example`: a GitHub
      token (classic) with only `read:packages`, encrypted like the others;
    - Kamal (`gem install kamal`, 2.12 or later), `sops`, and `gh` logged in
-     (for the CI and attestation checks).
+     (for the CI and attestation checks). Or only Docker: with
+     `KIT_RUNNER=docker` in `.kamal/kit.local.env` the kit runs Kamal, sops
+     and gh in its own image, handing it your SSH keys, gh's token and age
+     key (deploy-kit's `docs/runner.md`).
 6. The first deploy (collectors with `--bootstrap`: nobody collects yet),
    then the receivers:
 

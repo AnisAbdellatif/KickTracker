@@ -30,11 +30,17 @@ kit=.kamal/kit/bin/kit
 die() { echo "release: $*" >&2 && exit 1; }
 
 [ -f .kamal/kit.local.env ] || die "no .kamal/kit.local.env: copy .kamal/kit.local.env.example and fill it in"
-# Without Kamal the kit can't tell what runs, and says so obscurely.
-kamal=${KIT_KAMAL:-$(sed -n 's/^KIT_KAMAL=//p' .kamal/kit.env .kamal/kit.local.env | tail -n 1 | tr -d '"'"'")}
-kamal=${kamal:-kamal}
-command -v "${kamal%% *}" >/dev/null ||
-  die "${kamal%% *} isn't on PATH (a user gem install puts it in $(ruby -e 'print Gem.user_dir' 2>/dev/null || echo '<gem user dir>')/bin)"
+# Without Kamal the kit can't tell what runs, and says so obscurely. With
+# KIT_RUNNER=docker (deploy-kit 0.6.0) Kamal runs in the kit's image and
+# needn't be here.
+kit_setting() { sed -n "s/^$1=//p" .kamal/kit.env .kamal/kit.local.env | tail -n 1 | tr -d '"'"'"; }
+runner=${KIT_RUNNER:-$(kit_setting KIT_RUNNER)}
+if [ "${runner:-local}" != docker ]; then
+  kamal=${KIT_KAMAL:-$(kit_setting KIT_KAMAL)}
+  kamal=${kamal:-kamal}
+  command -v "${kamal%% *}" >/dev/null ||
+    die "${kamal%% *} isn't on PATH (a user gem install puts it in $(ruby -e 'print Gem.user_dir' 2>/dev/null || echo '<gem user dir>')/bin), or set KIT_RUNNER=docker in .kamal/kit.local.env: Kamal in the kit's image"
+fi
 
 # The environment wins over .kamal's files (deploy-kit 0.4.1): a KT_*
 # variable exported in this shell would replace the server's settings in
