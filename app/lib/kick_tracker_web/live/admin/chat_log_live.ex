@@ -700,6 +700,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
                             page_path(assigns, %{"users" => to_string(m.reply_to_user_id)})
                         }
                         class="chat-reply-user shrink-0"
+                        style={user_hue(m.reply_to_user_id)}
                       >@{m.reply_to_username || m.reply_to_user_id || "?"}</.link>
                       <span
                         :if={m.reply_to_content}
@@ -716,15 +717,16 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
                         title={DateTime.to_iso8601(m.sent_at)}
                       >{Calendar.strftime(m.local_at, "%H:%M:%S")}</time>
                       <.link
-                        patch={page_path(assigns, %{"users" => to_string(m.user_id)})}
-                        class="chat-user"
-                        title={gettext("This user's messages")}
-                      >{m.username || m.user_id}</.link>
-                      <.link
                         patch={page_path(assigns, %{"channels" => to_string(m.channel_id)})}
                         class={["channel-pill", "avatar-#{hue(m.slug)}"]}
                         title={gettext("This channel's messages")}
-                      >{m.slug}</.link><span class="chat-sep">:</span>
+                      >{m.slug}</.link>
+                      <.link
+                        patch={page_path(assigns, %{"users" => to_string(m.user_id)})}
+                        class="chat-user"
+                        style={user_hue(m.user_id)}
+                        title={gettext("This user's messages")}
+                      >{m.username || m.user_id}</.link><span class="chat-sep">:</span>
                       <.message_content content={m.content} />
                     </p>
                   </li>
@@ -919,6 +921,11 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
   end
 
   defp hue(name), do: :erlang.phash2(name, 7) + 1
+
+  # A sender's colour, as in a chat: a hue drawn from their id, so the
+  # same person keeps it on every line and every visit.
+  defp user_hue(nil), do: nil
+  defp user_hue(user_id), do: "--u: #{:erlang.phash2(user_id, 360)}"
 
   defp period_label("1h"), do: gettext("1h")
   defp period_label("24h"), do: gettext("24h")

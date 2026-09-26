@@ -467,7 +467,7 @@ a.card-surface:hover, .card-surface.is-link:hover {
 }
 
 /* A chat feed as a chat shows it (as BetterChat does): a line per message,
-   time, the sender, the channel's tag, the text; a reply
+   time, the channel's tag, the sender in their colour, the text; a reply
    says above it what it answers. A sticky header per day. */
 .chat-msg {
   padding: .1875rem .5rem;
@@ -483,9 +483,13 @@ a.card-surface:hover, .card-surface.is-link:hover {
   font-size: .75rem;
   font-variant-numeric: tabular-nums;
 }
-.chat-user { font-weight: 700; }
+/* A sender's colour: their hue (--u, from their id) at a lightness that
+   reads on the theme's background. */
+.chat-user, .chat-reply-user { --u-l: .74; font-weight: 700; }
+[data-theme="light"] :is(.chat-user, .chat-reply-user) { --u-l: .5; }
+.chat-user[style], .chat-reply-user[style] { color: oklch(var(--u-l) .16 var(--u)); }
 .chat-user:hover { text-decoration: underline; }
-.chat-msg .channel-pill { margin-inline-start: .375rem; vertical-align: middle; }
+.chat-msg .channel-pill { margin-inline-end: .375rem; vertical-align: middle; }
 .chat-sep { margin-inline-end: .375rem; color: var(--ink-muted); }
 .chat-text { white-space: pre-wrap; }
 .chat-reply {

@@ -297,7 +297,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLiveTest do
     refute has_element?(view, "#chat-log-messages", "elsewhere")
   end
 
-  test "messages read as a chat: time, sender, channel, text; a reply says what it answers",
+  test "messages read as a chat: time, channel, sender in their colour, text; a reply says what it answers",
        %{conn: conn} do
     c = channel!(slug: "somestreamer")
 
@@ -321,11 +321,14 @@ defmodule KickTrackerWeb.Admin.ChatLogLiveTest do
 
     {:ok, view, _} = live(conn, ~p"/admin/chat-log?#{%{"channels" => c.id}}")
     line = view |> element("#msg-#{c.id}-a1 .chat-line") |> render()
-    assert line =~ ~r/12:00:05.*another.*somestreamer.*:.*the answer/s
+    assert line =~ ~r/12:00:05.*somestreamer.*another.*:.*the answer/s
+    # The sender's hue comes from their id: the same on every line.
+    assert line =~ ~s(style="--u: #{:erlang.phash2(8, 360)}")
 
     reply = view |> element("#msg-#{c.id}-a1 .chat-reply") |> render()
     assert reply =~ "Replying to"
     assert reply =~ "@someone"
+    assert reply =~ ~s(style="--u: #{:erlang.phash2(7, 360)}")
     assert reply =~ "the question"
   end
 
