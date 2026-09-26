@@ -1277,6 +1277,8 @@ once when the nodes are connected, and through the Manager's sync within a
 minute otherwise. Writes go through the journal like every collected
 write (`{:chat_messages, …}`, `{:chat_log_event, …}`).
 
+Emotes stay in the text as Kick sends them (`[emote:<id>:<name>]`); the admin page draws them as Kick's images (`<KICK_FILES_URL>/emotes/<id>/fullsize`, loaded by the admin's browser; the CSP allows that host on admin pages only), a run of one emote once with its count. The export keeps the tokens.
+
 Kept per channel for its retention (`Workers.ChatLog`, hourly), whether
 logging is still on or not. An admin can view a channel's or a user's log
 (across channels), export a selection, and delete a channel's log for a

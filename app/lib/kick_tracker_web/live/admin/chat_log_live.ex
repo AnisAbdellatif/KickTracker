@@ -710,7 +710,7 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
                           >{m.reply_to_username || m.reply_to_user_id}</.link>
                         </span>
                       </p>
-                      <p class="whitespace-pre-wrap break-words text-sm">{m.content}</p>
+                      <.message_content content={m.content} />
                     </div>
                   </li>
                 <% end %>
@@ -879,6 +879,19 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
       <span class="truncate">{render_slot(@inner_block)}</span>
       <.icon name="hero-x-mark" class="text-muted size-3.5 shrink-0 group-hover:text-error" />
     </.link>
+    """
+  end
+
+  attr :content, :string, required: true
+
+  # A message with Kick's emotes drawn as their images, loaded from Kick
+  # (admin pages only; see ContentSecurityPolicy). Each piece is its own
+  # element: the text is untrusted and never read as HTML.
+  defp message_content(assigns) do
+    assigns = assign(assigns, :parts, ChatLog.parse_content(assigns.content))
+
+    ~H"""
+    <p class="chat-text whitespace-pre-wrap break-words text-sm" phx-no-format><span :for={p <- @parts} class={p.type == :emote && "emote-combo"}><%= if p.type == :text do %>{p.text}<% else %><img class="emote" src={ChatLog.emote_url(p.id)} alt={p.name} title={p.name} loading="lazy" decoding="async" /><span :if={p.count > 1} class="combo-count">×{p.count}</span><% end %></span></p>
     """
   end
 

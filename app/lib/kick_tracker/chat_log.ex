@@ -60,6 +60,57 @@ defmodule KickTracker.ChatLog do
   defp hash(parts),
     do: :crypto.hash(:sha256, Enum.intersperse(parts, <<0>>)) |> Base.encode16(case: :lower)
 
+  @emote ~r/\[emote:(\d+):([^\]]*)\]/
+
+  @doc """
+  A message's text in pieces for display: `%{type: :text, text: ...}` and
+  `%{type: :emote, id: ..., name: ..., count: ...}`. Kick writes emotes in
+  the text as `[emote:<id>:<name>]`. A run of the same emote (back to back,
+  or with only spaces between) is one piece with its count, so a spammed
+  emote is drawn once, ×3. Pure.
+  """
+  @spec parse_content(String.t() | nil) :: [map()]
+  def parse_content(content) when is_binary(content) do
+    {parts, last} =
+      @emote
+      |> Regex.scan(content, return: :index)
+      |> Enum.reduce({[], 0}, fn [{at, len}, {id_at, id_len}, {name_at, name_len}],
+                                 {parts, last} ->
+        between = binary_part(content, last, at - last)
+        id = binary_part(content, id_at, id_len)
+        name = binary_part(content, name_at, name_len)
+
+        parts =
+          case parts do
+            [%{type: :emote, id: ^id} = prev | rest] ->
+              if String.trim(between) == "",
+                do: [%{prev | count: prev.count + 1} | rest],
+                else: [emote(id, name), text(between) | parts]
+
+            _ ->
+              [emote(id, name) | if(between == "", do: parts, else: [text(between) | parts])]
+          end
+
+        {parts, at + len}
+      end)
+
+    rest = binary_part(content, last, byte_size(content) - last)
+    Enum.reverse(if rest == "", do: parts, else: [text(rest) | parts])
+  end
+
+  def parse_content(_), do: []
+
+  defp emote(id, name), do: %{type: :emote, id: id, name: name, count: 1}
+  defp text(text), do: %{type: :text, text: text}
+
+  @doc "Where an emote's image is: Kick's file host (`KICK_FILES_URL`)."
+  @spec emote_url(String.t()) :: String.t()
+  def emote_url(id), do: "#{files_url()}/emotes/#{id}/fullsize"
+
+  @doc "Kick's file host, as configured."
+  def files_url,
+    do: Application.get_env(:kick_tracker, :kick, [])[:files_url] || "https://files.kick.com"
+
   ## Writes (collector)
 
   @doc "Stores messages; one already stored is left as it is."

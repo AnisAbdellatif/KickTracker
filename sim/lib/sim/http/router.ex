@@ -127,6 +127,14 @@ defmodule Sim.Http.Router do
     |> send_resp(200, Sim.Png.solid(64, Sim.Png.colour(kind <> "/" <> file)))
   end
 
+  # Emotes, as Kick's file host serves them (`KICK_FILES_URL`): a solid
+  # colour per emote id.
+  get "/emotes/:id/fullsize" do
+    conn
+    |> put_resp_content_type("image/png", nil)
+    |> send_resp(200, Sim.Png.solid(32, Sim.Png.colour("emote/" <> id)))
+  end
+
   get "/api/v2/channels/:slug" do
     case Scenario.channel(Server.scenario(), slug) do
       nil -> json(conn, 404, %{"message" => "Not Found"})

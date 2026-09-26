@@ -504,3 +504,23 @@ a.card-surface:hover, .card-surface.is-link:hover {
 .retention-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .retention-input:hover { border-color: var(--color-base-300); }
 .retention-input:focus { border-color: var(--color-primary); background: var(--surface-raised); outline: none; }
+
+/* Kick's emotes in the chat log's messages, at about the text's height;
+   a run of one emote drawn once with its count. */
+.chat-text .emote {
+  display: inline-block;
+  height: 1.75rem;
+  width: auto;
+  max-width: 5rem;
+  margin: -.25rem .0625rem;
+  vertical-align: middle;
+  object-fit: contain;
+}
+.emote-combo { white-space: nowrap; }
+.combo-count {
+  margin-inline-start: .125rem;
+  color: var(--ink-muted);
+  font-size: .75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

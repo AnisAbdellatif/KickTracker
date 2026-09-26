@@ -228,6 +228,39 @@ defmodule KickTrackerWeb.Admin.ChatLogLiveTest do
     assert html =~ "Times in Etc/UTC"
   end
 
+  test "emotes are drawn as Kick's images, a spammed one once with its count; text stays text",
+       %{conn: conn} do
+    c = channel!(slug: "somestreamer")
+
+    ChatLog.insert_messages(c.id, [
+      ChatLog.message_row(%{id: "m1", sender_id: 7, at: @now}, %{
+        content:
+          "<b>hi</b> [emote:37226:KEKW] [emote:37226:KEKW][emote:37226:KEKW] [emote:39261:catJAM]",
+        type: "message"
+      })
+    ])
+
+    conn = get(conn, ~p"/admin/chat-log?#{%{"channels" => c.id}}")
+    html = html_response(conn, 200)
+    host = ChatLog.files_url()
+
+    assert html =~ ~s(src="#{host}/emotes/37226/fullsize")
+    assert html =~ ~s(alt="KEKW")
+    assert html =~ "×3"
+    assert html =~ ~s(src="#{host}/emotes/39261/fullsize")
+    assert html =~ "&lt;b&gt;hi&lt;/b&gt;"
+    refute html =~ "[emote:"
+
+    # Kick's images are allowed on admin pages, and only there.
+    [csp] = get_resp_header(conn, "content-security-policy")
+
+    assert csp =~
+             ~r/img-src 'self' data: blob: #{Regex.escape(URI.parse(host) |> then(&"#{&1.scheme}://#{&1.host}"))}/
+
+    [public_csp] = get_resp_header(get(build_conn(), ~p"/"), "content-security-policy")
+    assert public_csp =~ "img-src 'self' data: blob:;"
+  end
+
   test "the export is the filtered log as CSV, oldest first; audited", %{conn: conn} do
     a = channel!(slug: "somestreamer")
     b = channel!(slug: "otherstreamer")
