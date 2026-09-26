@@ -60,6 +60,9 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
   end
 
   @impl true
+  def handle_info({KickTrackerWeb.Admin.ChannelPicker, "anomalies-channel", id}, socket),
+    do: {:noreply, push_patch(socket, to: ~p"/admin/anomalies?channel=#{id}")}
+
   def handle_info(:refresh, %{assigns: %{live_action: :show}} = socket) do
     params = %{"id" => to_string(socket.assigns.stream.id)}
     handle_params(params, nil, assign(socket, refresh_ref: nil))
@@ -69,10 +72,6 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
     params = %{"channel" => socket.assigns.channel && to_string(socket.assigns.channel.id)}
     handle_params(params, nil, assign(socket, refresh_ref: nil))
   end
-
-  @impl true
-  def handle_event("channel", %{"channel" => id}, socket),
-    do: {:noreply, push_patch(socket, to: ~p"/admin/anomalies?channel=#{id}")}
 
   @impl true
   def render(%{live_action: :show} = assigns) do
@@ -174,29 +173,13 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
             )}
           </:subtitle>
           <:actions>
-            <form
+            <.live_component
               :if={@channels != []}
-              id="channel-form"
-              phx-change="channel"
-              class="flex items-center gap-2"
-            >
-              <.avatar
-                :if={@channel}
-                name={@channel.slug}
-                channel_id={@channel.id}
-                class="size-8 text-sm"
-              />
-              <label class="sr-only" for="anomalies-channel">{gettext("Channel")}</label>
-              <select id="anomalies-channel" name="channel" class="select select-sm w-64">
-                <option
-                  :for={c <- @channels}
-                  value={c.id}
-                  selected={@channel && c.id == @channel.id}
-                >
-                  {c.slug}
-                </option>
-              </select>
-            </form>
+              module={KickTrackerWeb.Admin.ChannelPicker}
+              id="anomalies-channel"
+              channels={@channels}
+              selected={@channel}
+            />
           </:actions>
         </.page_header>
 

@@ -108,6 +108,36 @@ defmodule KickTrackerWeb.Admin.AnomaliesLiveTest do
     refute :sys.get_state(view.pid).socket.assigns.refresh_ref
   end
 
+  test "the channel is searched for and picked, not scrolled for", %{conn: conn, channel: channel} do
+    other = Fixtures.channel!(slug: "otherstreamer")
+    third = Fixtures.channel!(slug: "anotherone")
+    {:ok, view, _} = live(conn, ~p"/admin/anomalies?channel=#{channel.id}")
+
+    view |> element("#anomalies-channel-button") |> render_click()
+    assert has_element?(view, "#anomalies-channel-option-#{channel.id}[aria-selected=true]")
+
+    # Typing narrows the list, the ones starting with it first.
+    view |> element("#anomalies-channel-search") |> render_change(%{"q" => "other"})
+    refute has_element?(view, "#anomalies-channel-option-#{channel.id}")
+
+    assert view |> element("#anomalies-channel-options") |> render() =~
+             ~r/otherstreamer.*anotherone/s
+
+    view |> element("#anomalies-channel-option-#{third.id}") |> render_click()
+    assert_patch(view, ~p"/admin/anomalies?channel=#{third.id}")
+    refute has_element?(view, "#anomalies-channel-panel")
+
+    # Enter takes the first match; Escape closes.
+    view |> element("#anomalies-channel-button") |> render_click()
+    view |> element("#anomalies-channel-search") |> render_change(%{"q" => "oth"})
+    view |> element("#anomalies-channel-search") |> render_submit(%{"q" => "oth"})
+    assert_patch(view, ~p"/admin/anomalies?channel=#{other.id}")
+
+    view |> element("#anomalies-channel-button") |> render_click()
+    view |> element("#anomalies-channel-search input") |> render_keydown(%{"key" => "Escape"})
+    refute has_element?(view, "#anomalies-channel-panel")
+  end
+
   test "the chart's data carries the findings as shaded stretches", %{conn: conn, target: target} do
     data =
       conn
