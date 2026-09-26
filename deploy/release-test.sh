@@ -5,6 +5,8 @@
 #
 #   deploy/release-test.sh
 set -euo pipefail
+# Whatever this shell exports for the kit or the server isn't the test's.
+for var in $(compgen -e | grep -E '^(KT|KIT)_' || true); do unset "$var"; done
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -130,6 +132,15 @@ if [ "$(cat "$CALLS")" = "$A --group collectors --group web" ]; then
   verdict ok "a build that isn't a commit, or a role not running, deploys; a renamed container is its build"
 else
   verdict fail "unknown builds"
+fi
+
+# A KT_* variable in the environment would beat .kamal/kit.local.env: refused.
+echo change >>app/lib/kick_tracker/collector.ex && git commit -qam env
+: >"$CALLS"
+if ! KT_HOST=203.0.113.9 release >/dev/null 2>&1 && [ ! -s "$CALLS" ] && grep -q "KT_HOST" "$tmp/out"; then
+  verdict ok "a KT_* variable in the shell is refused before anything is deployed"
+else
+  verdict fail "KT_* in the shell"
 fi
 
 [ "$failures" -eq 0 ] || { echo "$failures failed" && exit 1; }

@@ -36,6 +36,15 @@ kamal=${kamal:-kamal}
 command -v "${kamal%% *}" >/dev/null ||
   die "${kamal%% *} isn't on PATH (a user gem install puts it in $(ruby -e 'print Gem.user_dir' 2>/dev/null || echo '<gem user dir>')/bin)"
 
+# The environment wins over .kamal's files (deploy-kit 0.4.1): a KT_*
+# variable exported in this shell would replace the server's settings in
+# .kamal/kit.local.env (a stray KT_HOST deploys elsewhere). KIT_* ones are
+# the kit's own switches (KIT_SKIP…): said, not refused.
+kt=$(compgen -e | grep '^KT_' | tr '\n' ' ' || true)
+[ -z "$kt" ] || die "set in this shell, and would win over .kamal/kit.local.env: ${kt% }. Unset it (or put it in that file)"
+kit_vars=$(compgen -e | grep '^KIT_' | tr '\n' ' ' || true)
+[ -z "$kit_vars" ] || echo "release: from this shell, over .kamal's settings: ${kit_vars% }" >&2
+
 all=false dry_run=false target="" args=()
 while [ $# -gt 0 ]; do
   case $1 in
