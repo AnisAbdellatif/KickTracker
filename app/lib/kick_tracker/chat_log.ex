@@ -233,6 +233,24 @@ defmodule KickTracker.ChatLog do
     )
   end
 
+  @doc """
+  The channels logging is on for, for the privacy page: public ones by
+  slug with their retention, hidden ones only counted.
+  """
+  @spec disclosed() :: %{listed: [map()], hidden: non_neg_integer()}
+  def disclosed do
+    logged =
+      Repo.all(
+        from c in Channel,
+          where: c.chat_log,
+          order_by: c.slug,
+          select: %{slug: c.slug, public: c.public, retention_days: c.chat_log_retention_days}
+      )
+
+    {listed, hidden} = Enum.split_with(logged, & &1.public)
+    %{listed: listed, hidden: length(hidden)}
+  end
+
   @doc "Kick user ids for a username (as last seen) or an id typed by an admin."
   @spec find_users(String.t()) :: [integer()]
   def find_users(query) do
