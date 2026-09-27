@@ -2048,6 +2048,12 @@ public site. None is proof: a front-page placement, a followers-only chat
 or a watch party can look the same, so the page says what was seen and
 the figures it rests on, not a verdict.
 
+The page lists every finding across the channels, most recent first
+(from each channel's latest 20 streams): when, the channel and its
+stream, the kind and the figures. A row opens its stream: all its
+findings, the stream's chart with them shaded, and its figures against
+the channel's usual ones.
+
 - **Rules, not a model** (`Metrics.Anomalies`, pure): each finding is a
   plain rule with its evidence, so it can be checked and argued with.
   - *Jump without chat*: the median of the 5 readings after a point is

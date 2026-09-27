@@ -1,15 +1,17 @@
 defmodule KickTrackerWeb.Admin.AnomaliesLive do
   @moduledoc """
-  Audience anomalies (project.md §19.4), admin only: for one channel, its
-  latest streams with what `Metrics.Anomalies` found in each; for one
-  stream, the findings with their figures, the stream's chart with them
-  shaded, and its figures against the channel's usual ones.
+  Audience anomalies (project.md §19.4), admin only: every finding of
+  `Metrics.Anomalies` across the channels' latest streams, most recent
+  first, each leading to its stream; for one stream, the findings with
+  their figures, the stream's chart with them shaded, and its figures
+  against the channel's usual ones.
 
   Signs for review, never a verdict: nothing here reaches the public site.
 
-  A stream still live is read again every minute (its findings, and the
-  chart's data), so the page follows it as it goes; once it has ended the
-  page stops.
+  While a stream shown (or, on the list, any channel's latest stream) is
+  live, the page is read again every minute (the findings, and the
+  chart's data), so it follows the stream as it goes; once it has ended
+  the page stops.
   """
 
   use KickTrackerWeb, :live_view
@@ -37,18 +39,13 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
     end
   end
 
-  def handle_params(params, _uri, socket) do
-    channels = Channels.list_all()
-
-    channel =
-      Enum.find(channels, &(to_string(&1.id) == params["channel"])) || List.first(channels)
-
-    results = if(channel, do: Anomalies.channel_streams(channel), else: [])
+  def handle_params(_params, _uri, socket) do
+    %{findings: findings, live?: live?} = Anomalies.recent(Channels.list_all())
 
     {:noreply,
      socket
-     |> assign(channels: channels, channel: channel, results: results)
-     |> schedule(Enum.any?(results, &is_nil(&1.stream.ended_at)))}
+     |> assign(findings: findings)
+     |> schedule(live?)}
   end
 
   # Read again in a minute while a stream shown is live: its findings move
@@ -60,18 +57,13 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
   end
 
   @impl true
-  def handle_info({KickTrackerWeb.Admin.ChannelPicker, "anomalies-channel", id}, socket),
-    do: {:noreply, push_patch(socket, to: ~p"/admin/anomalies?channel=#{id}")}
-
   def handle_info(:refresh, %{assigns: %{live_action: :show}} = socket) do
     params = %{"id" => to_string(socket.assigns.stream.id)}
     handle_params(params, nil, assign(socket, refresh_ref: nil))
   end
 
-  def handle_info(:refresh, socket) do
-    params = %{"channel" => socket.assigns.channel && to_string(socket.assigns.channel.id)}
-    handle_params(params, nil, assign(socket, refresh_ref: nil))
-  end
+  def handle_info(:refresh, socket),
+    do: handle_params(%{}, nil, assign(socket, refresh_ref: nil))
 
   @impl true
   def render(%{live_action: :show} = assigns) do
@@ -79,10 +71,10 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
     <Layouts.admin flash={@flash} current_admin={@current_admin} active={:anomalies}>
       <div id="anomaly-page" phx-hook="Format" class="space-y-6">
         <.link
-          navigate={~p"/admin/anomalies?channel=#{@channel.id}"}
+          navigate={~p"/admin/anomalies"}
           class="text-muted inline-flex items-center gap-1 text-sm hover:text-base-content"
         >
-          <.icon name="hero-arrow-left" class="size-4" />{gettext("All streams of this channel")}
+          <.icon name="hero-arrow-left" class="size-4" />{gettext("All anomalies")}
         </.link>
         <.page_header title={@channel.slug} icon="hero-exclamation-triangle">
           <:subtitle>
@@ -169,73 +161,58 @@ defmodule KickTrackerWeb.Admin.AnomaliesLive do
         <.page_header title={gettext("Anomalies")} icon="hero-exclamation-triangle">
           <:subtitle>
             {gettext(
-              "Streams whose viewers, chat or follows don't behave like the channel's usual ones."
+              "Moments where a stream's viewers, chat or follows didn't behave like the channel's usual ones, most recent first."
             )}
           </:subtitle>
-          <:actions>
-            <.live_component
-              :if={@channels != []}
-              module={KickTrackerWeb.Admin.ChannelPicker}
-              id="anomalies-channel"
-              channels={@channels}
-              selected={@channel}
-            />
-          </:actions>
         </.page_header>
 
         <.review_note />
 
-        <.panel :if={@channels == []}>
-          <.empty_state icon="hero-tv" title={gettext("No channels yet.")} />
-        </.panel>
-
-        <.panel :if={@channel} title={gettext("Streams")} icon="hero-play-circle" flush>
+        <.panel title={gettext("Findings")} icon="hero-magnifying-glass" flush>
           <div class="overflow-x-auto">
-            <table id="anomaly-streams" class="table table-sm">
+            <table id="anomalies" class="table table-sm">
               <thead>
                 <tr>
-                  <th>{gettext("Started")}</th><th>{gettext("Airtime")}</th><th>
-                    {gettext("Avg viewers")}
-                  </th><th>{gettext("Chatters / min per 100 viewers")}</th><th>{gettext("Usual")}</th><th>
-                    {gettext("Findings")}
-                  </th>
+                  <th>{gettext("When")}</th><th>{gettext("Channel")}</th><th>
+                    {gettext("Finding")}
+                  </th><th>{gettext("What was seen")}</th>
                 </tr>
               </thead>
               <tbody>
-                <tr :for={r <- @results} id={"stream-#{r.stream.id}"}>
+                <tr
+                  :for={r <- @findings}
+                  id={"finding-#{r.stream.id}-#{r.finding.kind}-#{DateTime.to_unix(r.finding.from)}"}
+                  class="hover:bg-base-200 cursor-pointer"
+                  phx-click={JS.navigate(~p"/admin/anomalies/#{r.stream.id}")}
+                >
+                  <td class="whitespace-nowrap">
+                    <.time at={r.finding.from} /> – <.time at={r.finding.to} fmt="time" />
+                  </td>
                   <td class="whitespace-nowrap">
                     <.link
                       navigate={~p"/admin/anomalies/#{r.stream.id}"}
                       class="font-medium hover:underline"
                     >
-                      <.time at={r.stream.started_at} />
+                      {r.channel.slug}
                     </.link>
-                    <.status_pill :if={r.stream.excluded?}>{gettext("excluded")}</.status_pill>
                     <span :if={is_nil(r.stream.ended_at)} class="live-pill">{gettext("live")}</span>
-                  </td>
-                  <td><.duration seconds={r.stream.airtime_s} /></td>
-                  <td><.num value={r.stream.avg_viewers} /></td>
-                  <td>{per_hundred(r.profile.engagement)}</td>
-                  <td>{per_hundred(r.baseline.engagement)}</td>
-                  <td>
-                    <span :if={r.findings == []} class="text-muted">–</span>
-                    <div class="flex flex-wrap gap-1">
-                      <.status_pill
-                        :for={kind <- r.findings |> Enum.map(& &1.kind) |> Enum.uniq()}
-                        tone={:warn}
-                      >
-                        {label(kind)}
-                      </.status_pill>
+                    <.status_pill :if={r.stream.excluded?}>{gettext("excluded")}</.status_pill>
+                    <div class="text-muted text-xs">
+                      {gettext("stream of")} <.time at={r.stream.started_at} />
                     </div>
                   </td>
+                  <td class="whitespace-nowrap">
+                    <.status_pill tone={:warn}>{label(r.finding.kind)}</.status_pill>
+                  </td>
+                  <td class="min-w-80 text-sm">{describe(r.finding)}</td>
                 </tr>
               </tbody>
             </table>
           </div>
           <.empty_state
-            :if={@results == []}
-            icon="hero-play-circle"
-            title={gettext("No streams yet.")}
+            :if={@findings == []}
+            icon="hero-check-circle"
+            title={gettext("Nothing stood out in the channels' latest streams.")}
           />
         </.panel>
       </div>

@@ -62,20 +62,26 @@ defmodule KickTrackerWeb.Admin.AnomaliesLiveTest do
     %{channel: channel, target: target, at: at}
   end
 
-  test "lists a channel's streams with what was found, and shows one stream's findings", %{
+  test "lists what was found across channels, newest first, each leading to its stream", %{
     conn: conn,
     channel: channel,
     target: target
   } do
-    {:ok, view, _html} = live(conn, ~p"/admin/anomalies?channel=#{channel.id}")
+    # Another channel's jump, a day before this one's.
+    other = Fixtures.channel!(slug: "otherstreamer")
+    for d <- -1..3, do: stream!(other, d)
+    stream!(other, 4, jump: true)
 
-    assert view |> element("#stream-#{target}") |> render() =~ "Jump without chat"
-    # The earlier, ordinary streams show nothing.
-    assert view
-           |> element("#anomaly-streams")
-           |> render()
-           |> String.split("Jump without chat")
-           |> length() == 2
+    {:ok, view, _html} = live(conn, ~p"/admin/anomalies")
+
+    list = view |> element("#anomalies") |> render()
+    # Only the two jumps: the ordinary streams show nothing.
+    assert list |> String.split("Jump without chat") |> length() == 3
+    assert list =~ ~r/somestreamer.*otherstreamer/s
+    assert list =~ "Viewers went from"
+
+    view |> element("#anomalies a", channel.slug) |> render_click()
+    assert_redirect(view, ~p"/admin/anomalies/#{target}")
 
     {:ok, view, html} = live(conn, ~p"/admin/anomalies/#{target}")
     assert html =~ "Viewers went from"
@@ -106,36 +112,6 @@ defmodule KickTrackerWeb.Admin.AnomaliesLiveTest do
     render(view)
     refute has_element?(view, "#anomaly-chart[data-refresh]")
     refute :sys.get_state(view.pid).socket.assigns.refresh_ref
-  end
-
-  test "the channel is searched for and picked, not scrolled for", %{conn: conn, channel: channel} do
-    other = Fixtures.channel!(slug: "otherstreamer")
-    third = Fixtures.channel!(slug: "anotherone")
-    {:ok, view, _} = live(conn, ~p"/admin/anomalies?channel=#{channel.id}")
-
-    view |> element("#anomalies-channel-button") |> render_click()
-    assert has_element?(view, "#anomalies-channel-option-#{channel.id}[aria-selected=true]")
-
-    # Typing narrows the list, the ones starting with it first.
-    view |> element("#anomalies-channel-search") |> render_change(%{"q" => "other"})
-    refute has_element?(view, "#anomalies-channel-option-#{channel.id}")
-
-    assert view |> element("#anomalies-channel-options") |> render() =~
-             ~r/otherstreamer.*anotherone/s
-
-    view |> element("#anomalies-channel-option-#{third.id}") |> render_click()
-    assert_patch(view, ~p"/admin/anomalies?channel=#{third.id}")
-    refute has_element?(view, "#anomalies-channel-panel")
-
-    # Enter takes the first match; Escape closes.
-    view |> element("#anomalies-channel-button") |> render_click()
-    view |> element("#anomalies-channel-search") |> render_change(%{"q" => "oth"})
-    view |> element("#anomalies-channel-search") |> render_submit(%{"q" => "oth"})
-    assert_patch(view, ~p"/admin/anomalies?channel=#{other.id}")
-
-    view |> element("#anomalies-channel-button") |> render_click()
-    view |> element("#anomalies-channel-search input") |> render_keydown(%{"key" => "Escape"})
-    refute has_element?(view, "#anomalies-channel-panel")
   end
 
   test "the chart's data carries the findings as shaded stretches", %{conn: conn, target: target} do
