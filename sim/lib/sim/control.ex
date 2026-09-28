@@ -141,7 +141,7 @@ defmodule Sim.Control do
 
   defp build("resub", channel, user, params, now) do
     with {:ok, months} <- int(params, "months", 3) do
-      {:ok, {"channel.subscription.renewal", Payloads.subscription(channel, user, months, now)}}
+      {:ok, {"channel.subscription.renewal", Payloads.renewal(channel, user, months, now)}}
     end
   end
 

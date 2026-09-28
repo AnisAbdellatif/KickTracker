@@ -31,18 +31,31 @@ defmodule KickTracker.Events.FactsTest do
     end
   end
 
-  test "subs and resubs: the subscriber, months, and the body's own time" do
-    body = Sim.Payloads.subscription(sim_channel(), 42, 3, @at)
+  test "new subs: the subscriber, months, and the body's own time" do
+    body = Sim.Payloads.subscription(sim_channel(), 42, 1, @at)
 
     assert {{:support, row}, [%{id: 42}]} =
-             Facts.parse(envelope("channel.subscription.renewal", body), 1)
+             Facts.parse(envelope("channel.subscription.new", body), 1)
 
-    assert %{kind: "resub", user_id: 42, quantity: 3, tier: nil} = row
+    assert %{kind: "sub", user_id: 42, quantity: 1, tier: nil} = row
     assert row.occurred_at == ~U[2026-09-24 18:00:00.000000Z]
     assert %{"expires_at" => _} = row.payload
+  end
 
-    assert {{:support, %{kind: "sub"}}, _} =
-             Facts.parse(envelope("channel.subscription.new", body), 1)
+  test "resubs are dated by the delivery, not by created_at (when the subscription started)" do
+    # Twenty-two months in: created_at is back in 2024. It used to be the
+    # resub's time, which put it in periods before the channel was
+    # tracked, so a longer period showed more resubs than "all".
+    body = Sim.Payloads.renewal(sim_channel(), 42, 22, @at)
+    assert body["created_at"] =~ ~r/^2024-/
+
+    e = envelope("channel.subscription.renewal", body, "2026-09-24T18:00:05Z")
+    assert {{:support, row}, [%{id: 42}]} = Facts.parse(e, 1)
+
+    assert %{kind: "resub", user_id: 42, quantity: 22, tier: nil} = row
+    assert row.occurred_at == e.occurred_at
+    assert DateTime.compare(row.occurred_at, ~U[2026-09-24 18:00:05Z]) == :eq
+    assert %{"expires_at" => _} = row.payload
   end
 
   test "gifts: the gifter, how many, and who received them; anonymous gifters have no id" do

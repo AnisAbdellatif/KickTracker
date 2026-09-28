@@ -371,9 +371,11 @@ Tests then exercise the real HTTP paths (token, public API, subscriptions, Pushe
 
 ## Facts from Events
 
-**Current:** Follows, subs, resubs, gifted subs and Kicks are parsed by the pure `Events.Facts` and written in the same transaction that stores the event, only for tracked channels. They carry no stream id; stream attribution is by time at read time. Usernames go only to `kick_users` (a later sighting's name wins). Kicks messages are never read. (updated 2026-09-24 13:10)
+**Current:** Follows, subs, resubs, gifted subs and Kicks are parsed by the pure `Events.Facts` and written in the same transaction that stores the event, only for tracked channels. They carry no stream id; stream attribution is by time at read time. Usernames go only to `kick_users` (a later sighting's name wins). Kicks messages are never read. A fact is dated by the body's `created_at` when it has one, except a resub, dated by the delivery (`Kick-Event-Message-Timestamp`); a migration re-dated the resubs stored before that from their stored webhooks and queued the rollups of every hour they left or joined. (updated 2026-09-28 04:46)
 
 The plan had `stream_id NULL` on these tables, set at write time. That makes the result depend on arrival order: a follow stored before its stream's start event would be attributed to no stream forever (raw facts are never updated). Attributing by `occurred_at` against stream ranges is the same answer in any order and survives a stream's end being corrected. The sub, gift and Kicks parsers follow Kick's documentation and the simulator's shapes; they must be re-checked when those events are recorded (§16).
+
+On a renewal, `created_at` is when the subscription first started (seen in production, KICK.md §4.1): a 22-month resub was dated almost two years back, so it counted in no stream, and a period reaching further back than the channel's tracking (90d, 1y) showed more resubs, and more estimated revenue, than "all", which starts at `tracked_since`. The delivery time is at most a few seconds after the renewal. Re-dating stored rows changes `support_events`, which are parsed from `webhook_events` and rebuildable from them (project.md §12), not raw facts of their own: the value comes from the stored webhook, not a guess. An admin replay couldn't do it (facts are inserted with `on_conflict: :nothing`). The subscription's start isn't kept as a column: it stays in the stored body. The simulator's renewals now carry a `created_at` months back, like Kick's, so the tests would catch the mistake.
 
 ## v2 Fields
 

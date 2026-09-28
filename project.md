@@ -1081,7 +1081,9 @@ per-channel time ranges, period totals, **distinct counts** and
 - **UTC everywhere** (`timestamptz`). Kick's time (`occurred_at`) is kept
   apart from ours (`observed_at` for polls, `received_at` for events). Events
   without their own timestamp (`channel.followed`) use the
-  `Kick-Event-Message-Timestamp` header.
+  `Kick-Event-Message-Timestamp` header, and so do subscription renewals,
+  whose `created_at` is when the subscription first started, not the
+  renewal (KICK.md §4.1).
 - **Channel timezone** (`channels.timezone`) for everything daily: rollups
   are by UTC hour and turned into days in the channel's timezone when read,
   hour by hour: a stream that crosses midnight counts in both days, each

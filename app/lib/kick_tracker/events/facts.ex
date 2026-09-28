@@ -14,7 +14,8 @@ defmodule KickTracker.Events.Facts do
 
   Only `channel.followed` has been recorded from the real Kick; the sub,
   gift and Kicks shapes follow Kick's documentation, as the simulator's do
-  (project.md §16).
+  (project.md §16), checked against the key names of production's stored
+  bodies (KICK.md §4.1).
   """
 
   alias KickTracker.Events.Envelope
@@ -37,7 +38,9 @@ defmodule KickTracker.Events.Facts do
   @doc """
   The fact in an event, for the channel `channel_id`, and the users it
   names. `occurred_at` is the body's own time when it has one, else the
-  delivery's timestamp (a follow carries none).
+  delivery's timestamp (a follow carries none). A renewal is dated by the
+  delivery too: its `created_at` is when the subscription first started,
+  months or years before (KICK.md §4.1).
   """
   @spec parse(Envelope.t(), integer()) :: {fact(), [user()]} | :none
   def parse(%Envelope{} = e, channel_id) do
@@ -71,6 +74,11 @@ defmodule KickTracker.Events.Facts do
         support(e, channel_id, body, @kinds[type], u.id, months, nil, %{
           "expires_at" => body["expires_at"]
         })
+
+      row =
+        if type == "channel.subscription.renewal",
+          do: %{row | occurred_at: e.occurred_at},
+          else: row
 
       {{:support, row}, [u]}
     else
