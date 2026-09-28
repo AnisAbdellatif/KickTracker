@@ -74,6 +74,8 @@ jobs:
             ingress/receiver/_build
           key: receiver-${{ runner.os }}-${{ hashFiles('ingress/receiver/mix.lock') }}
       - run: mix deps.get
+      # Deployed like the app: its dependencies' advisories matter as much.
+      - run: mix hex.audit
       - run: mix format --check-formatted
       - run: mix compile --warnings-as-errors
       - run: mix test
