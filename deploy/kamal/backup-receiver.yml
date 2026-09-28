@@ -31,6 +31,14 @@ servers:
       publish: 127.0.0.1:<%= ENV.fetch("KT_BACKUP_RECEIVER_PORT", 4060) %>:4060
       volume: kicktracker-shadow_spool:/data
 
+# The log driver named, not just its options: Kamal passes max-size, which
+# only json-file takes, and the shadow machine's Docker may default to
+# another driver (journald refuses it). The main VPS's default is json-file.
+logging:
+  driver: json-file
+  options:
+    max-size: 10m
+
 registry:
   server: <%= ENV.fetch("KT_REGISTRY", "ghcr.io") %>
   username: <%= ENV.fetch("KT_REGISTRY_USER", "anisabdellatif") %>
