@@ -37,4 +37,13 @@ defmodule KickTrackerWeb.PrivacyPageTest do
     Settings.put("support_page_public", false)
     assert shown.() =~ "Nothing that identifies a person"
   end
+
+  test "says what the API gives other applications and what their requests carry", %{
+    conn: conn
+  } do
+    html = html_response(get(conn, ~p"/about/privacy"), 200)
+    assert html =~ ~s(id="api")
+    assert html =~ "KickPlus"
+    assert html =~ "names the channel and nothing about the person"
+  end
 end
