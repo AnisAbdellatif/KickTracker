@@ -58,6 +58,10 @@ defmodule KickTrackerWeb.PublicSiteTest do
     end
 
     assert redirected_to(get(conn, "/search?q=dailystr")) == "/c/dailystreamer"
+
+    # A streamer is offered each way their request can be answered.
+    removal = html_response(get(conn, "/about/removal"), 200)
+    for option <- ["Hidden.", "Live only.", "Deleted."], do: assert(removal =~ option)
   end
 
   test "support figures are unknown, not 0, for a period we weren't receiving events", %{

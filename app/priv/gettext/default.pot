@@ -774,7 +774,7 @@ msgstr ""
 msgid "How the numbers are made"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:11
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:32
 #, elixir-autogen, elixir-format
 msgid "If you're in a channel's audience and want your data removed, see"
 msgstr ""
@@ -1901,7 +1901,7 @@ msgstr ""
 msgid "paused"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:14
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:35
 #, elixir-autogen, elixir-format
 msgid "privacy"
 msgstr ""
@@ -3819,11 +3819,6 @@ msgstr ""
 msgid "you"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:5
-#, elixir-autogen, elixir-format
-msgid "If you stream on Kick and don't want your channel here, write to %{contact} from an address we can connect to the channel (or send the request from the channel itself, for instance in its bio or a chat message we can see). We take its history off the site: either entirely, or keeping only whether it is live and how many are watching. We can also stop tracking it and delete everything we collected about it."
-msgstr ""
-
 #: lib/kick_tracker_web/live/admin/channels_live.ex:275
 #: lib/kick_tracker_web/live/admin/channels_live.ex:405
 #, elixir-autogen, elixir-format
@@ -4111,4 +4106,44 @@ msgstr ""
 #: lib/kick_tracker_web/live/admin/channels_live.ex:183
 #, elixir-autogen, elixir-format
 msgid "The channels being tracked. Pausing stops collection and keeps everything already collected. \"Live only\" shows a channel on the public site only while it is live, with its viewers and active chatters now; \"Hidden\" removes it from the public site and regular API keys."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:24
+#, elixir-autogen, elixir-format
+msgid "Deleted."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:12
+#, elixir-autogen, elixir-format
+msgid "Hidden."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:5
+#, elixir-autogen, elixir-format
+msgid "If you stream on Kick and don't want your channel here, write to %{contact} from an address we can connect to the channel (or send the request from the channel itself, for instance in its bio or a chat message we can see). Tell us which of these you'd like:"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:18
+#, elixir-autogen, elixir-format
+msgid "Live only."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:13
+#, elixir-autogen, elixir-format
+msgid "The channel disappears from this site and from the data we share with other applications. What we collected is kept, so it can come back if you change your mind."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:19
+#, elixir-autogen, elixir-format
+msgid "The site shows only whether you are live, with how many are watching and chatting at the moment. Your history (past streams, followers, subs, categories) is neither shown nor shared."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:25
+#, elixir-autogen, elixir-format
+msgid "We stop tracking the channel and delete everything we collected about it. This can't be undone."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/removal.html.heex:30
+#, elixir-autogen, elixir-format
+msgid "We'll reply to say what we did."
 msgstr ""
