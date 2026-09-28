@@ -20,27 +20,42 @@ defmodule KickTracker.Reports do
 
   @doc """
   Public channels: tracked ones, including paused (their history stays
-  public), but not those hidden at the streamer's request.
+  public), but not those hidden or shown only while live (§13.2).
   """
   @spec channels() :: [Channel.t()]
-  def channels, do: Repo.all(from c in Channel, where: c.public, order_by: c.slug)
+  def channels, do: Repo.all(from c in Channel, where: c.visibility == :public, order_by: c.slug)
 
-  @spec channel_by_slug(String.t()) :: Channel.t() | nil
-  def channel_by_slug(slug) do
+  @doc """
+  A channel by its slug or an old one. `visibility:` lists the levels
+  that may be found (default `[:public]`), or `:any`.
+  """
+  @spec channel_by_slug(String.t(), keyword()) :: Channel.t() | nil
+  def channel_by_slug(slug, opts \\ []) do
+    visible = Keyword.get(opts, :visibility, [:public])
+    slug = String.downcase(slug)
+
     Repo.one(
-      from c in Channel,
-        where: c.public and fragment("lower(?)", c.slug) == ^String.downcase(slug)
+      from c in Channel, where: fragment("lower(?)", c.slug) == ^slug, where: ^visible?(visible)
     ) ||
       Repo.one(
         from c in Channel,
           join: s in "channel_slugs",
           on: s.channel_id == c.id,
-          where: c.public and fragment("lower(?)", s.slug) == ^String.downcase(slug),
+          where: fragment("lower(?)", s.slug) == ^slug,
+          where: ^visible?(visible),
           limit: 1
       )
   end
 
-  @doc "Channels whose slug contains `q`."
+  @doc "The ids of channels at these visibility levels."
+  @spec channel_ids([Channel.visibility()]) :: [integer()]
+  def channel_ids(levels),
+    do: Repo.all(from c in Channel, where: c.visibility in ^levels, select: c.id)
+
+  defp visible?(:any), do: dynamic(true)
+  defp visible?(levels) when is_list(levels), do: dynamic([c], c.visibility in ^levels)
+
+  @doc "Channels whose slug contains `q`, live-only ones included (their page is the live card)."
   @spec search(String.t()) :: [Channel.t()]
   def search(q) do
     like =
@@ -48,7 +63,8 @@ defmodule KickTracker.Reports do
 
     Repo.all(
       from c in Channel,
-        where: c.public and fragment("lower(?) LIKE ?", c.slug, ^like),
+        where:
+          c.visibility in [:public, :live_only] and fragment("lower(?) LIKE ?", c.slug, ^like),
         order_by: c.slug,
         limit: 20
     )
@@ -58,39 +74,52 @@ defmodule KickTracker.Reports do
 
   @doc """
   Channels on air now: the open stream, the latest reading (if recent),
-  its category and title.
+  its category and title. A channel shown only while live (§13.2) comes
+  with its viewers alone: no stream, start, title or category.
+  `visibility:` the levels listed (default public and live-only), or `:any`.
   """
-  @spec live_now() :: [map()]
-  def live_now do
-    Repo.query!("""
-    SELECT c.id, c.slug, s.id, s.started_at, v.viewers, v.observed_at, cat.name,
-           (SELECT new_value FROM stream_changes sc
-             WHERE sc.stream_id = s.id AND sc.field = 'title'
-             ORDER BY occurred_at DESC LIMIT 1)
-    FROM streams s
-    JOIN channels c ON c.id = s.channel_id
-    LEFT JOIN LATERAL (
-      SELECT viewers, observed_at, category_id FROM viewer_samples
-      WHERE channel_id = s.channel_id AND stream_id = s.id
-        AND observed_at > now() - interval '1 day'
-      ORDER BY observed_at DESC LIMIT 1
-    ) v ON true
-    LEFT JOIN categories cat ON cat.id = v.category_id
-    WHERE s.ended_at IS NULL AND c.public
-    ORDER BY v.viewers DESC NULLS LAST
-    """).rows
-    |> Enum.map(fn [cid, slug, sid, started, viewers, at, category, title] ->
+  @spec live_now(keyword()) :: [map()]
+  def live_now(opts \\ []) do
+    levels =
+      case Keyword.get(opts, :visibility, [:public, :live_only]) do
+        :any -> ~w(public live_only hidden)
+        levels -> Enum.map(levels, &Atom.to_string/1)
+      end
+
+    Repo.query!(
+      """
+      SELECT c.id, c.slug, c.visibility, s.id, s.started_at, v.viewers, v.observed_at, cat.name,
+             (SELECT new_value FROM stream_changes sc
+               WHERE sc.stream_id = s.id AND sc.field = 'title'
+               ORDER BY occurred_at DESC LIMIT 1)
+      FROM streams s
+      JOIN channels c ON c.id = s.channel_id
+      LEFT JOIN LATERAL (
+        SELECT viewers, observed_at, category_id FROM viewer_samples
+        WHERE channel_id = s.channel_id AND stream_id = s.id
+          AND observed_at > now() - interval '1 day'
+        ORDER BY observed_at DESC LIMIT 1
+      ) v ON true
+      LEFT JOIN categories cat ON cat.id = v.category_id
+      WHERE s.ended_at IS NULL AND c.visibility = ANY($1)
+      ORDER BY v.viewers DESC NULLS LAST
+      """,
+      [levels]
+    ).rows
+    |> Enum.map(fn [cid, slug, visibility, sid, started, viewers, at, category, title] ->
       fresh? = at && DateTime.diff(DateTime.utc_now(), at) < 300
+      full? = visibility != "live_only"
 
       %{
         channel_id: cid,
         slug: slug,
-        stream_id: sid,
-        started_at: started,
+        visibility: String.to_existing_atom(visibility),
+        stream_id: if(full?, do: sid),
+        started_at: if(full?, do: started),
         viewers: if(fresh?, do: viewers),
         observed_at: at,
-        category: category,
-        title: title
+        category: if(full?, do: category),
+        title: if(full?, do: title)
       }
     end)
   end
@@ -246,7 +275,7 @@ defmodule KickTracker.Reports do
   @doc "When tracking of the earliest public channel began (nil without channels)."
   @spec earliest_tracked_since() :: DateTime.t() | nil
   def earliest_tracked_since do
-    Repo.one(from c in Channel, where: c.public, select: min(c.tracked_since))
+    Repo.one(from c in Channel, where: c.visibility == :public, select: min(c.tracked_since))
   end
 
   ## Streams
@@ -829,7 +858,7 @@ defmodule KickTracker.Reports do
              avg(w.viewers)::float,
              -- a flagged reading (a glitch) is never a peak (§19.2)
              max(w.viewers) FILTER (WHERE NOT w.flagged)
-      FROM weighted w JOIN channels c ON c.id = w.channel_id AND c.public
+      FROM weighted w JOIN channels c ON c.id = w.channel_id AND c.visibility = 'public'
       WHERE w.category_id = $1 AND w.observed_at >= $2
       GROUP BY 1, 2 ORDER BY 3 DESC
       """,
@@ -867,7 +896,7 @@ defmodule KickTracker.Reports do
                max(h.peak_viewers), sum(h.kicks), sum(h.samples)
         FROM channels c
         LEFT JOIN hourly_stats h ON h.channel_id = c.id AND h.hour >= $1 AND h.hour < $2
-        WHERE c.public AND ($3::bigint[] IS NULL OR c.id = ANY($3))
+        WHERE c.visibility = 'public' AND ($3::bigint[] IS NULL OR c.id = ANY($3))
         GROUP BY c.id, c.slug
         """,
         [from, to, channel_ids]
@@ -952,7 +981,7 @@ defmodule KickTracker.Reports do
                  max(st.peak_viewers) FILTER (WHERE e.stream_id IS NULL) OVER earlier AS best_before,
                  count(*) OVER earlier AS older
           FROM streams s
-          JOIN channels c ON c.id = s.channel_id AND c.public
+          JOIN channels c ON c.id = s.channel_id AND c.visibility = 'public'
           LEFT JOIN stream_stats st ON st.stream_id = s.id
           LEFT JOIN excluded_streams e ON e.stream_id = s.id
           WHERE s.started_at < $2
@@ -977,7 +1006,7 @@ defmodule KickTracker.Reports do
         SELECT c.slug, e.occurred_at, e.quantity, k.username,
                (SELECT id FROM streams s WHERE s.channel_id = e.channel_id AND s.started_at <= e.occurred_at
                   AND coalesce(s.ended_at, now()) >= e.occurred_at LIMIT 1)
-        FROM support_events e JOIN channels c ON c.id = e.channel_id AND c.public
+        FROM support_events e JOIN channels c ON c.id = e.channel_id AND c.visibility = 'public'
         LEFT JOIN kick_users k ON k.id = e.user_id
         WHERE e.kind = 'gift' AND e.occurred_at >= $1 AND e.occurred_at < $2 AND e.quantity >= 10
         ORDER BY e.quantity DESC, e.occurred_at DESC LIMIT $3
@@ -992,7 +1021,7 @@ defmodule KickTracker.Reports do
       Repo.query!(
         """
         SELECT c.slug, e.occurred_at, e.viewers, e.other_channel, e.kind FROM channel_events e
-        JOIN channels c ON c.id = e.channel_id AND c.public
+        JOIN channels c ON c.id = e.channel_id AND c.visibility = 'public'
         WHERE e.occurred_at >= $1 AND e.occurred_at < $2 ORDER BY e.viewers DESC NULLS LAST LIMIT $3
         """,
         [from, to, limit]

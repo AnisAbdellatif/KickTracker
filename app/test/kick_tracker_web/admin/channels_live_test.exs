@@ -63,6 +63,32 @@ defmodule KickTrackerWeb.Admin.ChannelsLiveTest do
     assert_receive {:added, ^id}
   end
 
+  test "how much the public site shows is chosen per channel, audited", %{conn: conn} do
+    {:ok, channel} = Channels.add("offlinestreamer")
+    {:ok, view, _} = live(conn, "/admin/channels")
+
+    view |> form("#visibility-#{channel.id}", %{visibility: "live_only"}) |> render_change()
+    assert %{visibility: :live_only, public: false} = Channels.get!(channel.id)
+
+    assert [%{action: "channel.visibility", target: "offlinestreamer", details: details} | _] =
+             Audit.recent()
+
+    assert details == %{"from" => "public", "to" => "live_only"}
+
+    view |> element("#channels-show-live_only") |> render_click()
+    assert has_element?(view, "#channel-#{channel.id}")
+    view |> element("#channels-show-hidden") |> render_click()
+    refute has_element?(view, "#channel-#{channel.id}")
+
+    view |> element("#channels-show-all") |> render_click()
+    view |> form("#visibility-#{channel.id}", %{visibility: "hidden"}) |> render_change()
+    assert %{visibility: :hidden, public: false} = Channels.get!(channel.id)
+    assert has_element?(view, "#channel-#{channel.id}")
+
+    view |> form("#visibility-#{channel.id}", %{visibility: "public"}) |> render_change()
+    assert %{visibility: :public, public: true} = Channels.get!(channel.id)
+  end
+
   test "the timezone can be edited", %{conn: conn} do
     {:ok, channel} = Channels.add("offlinestreamer")
     {:ok, view, _} = live(conn, "/admin/channels")

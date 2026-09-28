@@ -4,11 +4,14 @@ defmodule KickTracker.Fixtures do
   alias KickTracker.Channels.Channel
   alias KickTracker.Repo
 
-  @doc "A tracked channel."
+  @doc "A tracked channel (`visibility:` public by default)."
   def channel!(attrs \\ []) do
     n = System.unique_integer([:positive])
+    visibility = Keyword.get(attrs, :visibility, :public)
 
     Repo.insert!(%Channel{
+      visibility: visibility,
+      public: visibility == :public,
       kick_user_id: Keyword.get(attrs, :kick_user_id, 1_000_000 + n),
       slug: Keyword.get(attrs, :slug, "somestreamer#{n}"),
       chatroom_id: Keyword.get(attrs, :chatroom_id),

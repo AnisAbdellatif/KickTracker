@@ -1128,7 +1128,8 @@ a stream's per-minute detail is gone, but its per-minute counts
 ```
 -- dimensions (normal tables, may change)
 channels           (id, kick_user_id UNIQUE, kick_channel_id, chatroom_id,
-                    slug, timezone, tracked_since, active)
+                    slug, timezone, tracked_since, active,
+                    visibility public|live_only|hidden, §13.2)
 channel_slugs      (channel_id, slug, seen_from, seen_to)
 categories         (id, name, slug)
 kick_users         (id, username, seen_at)
@@ -1322,7 +1323,7 @@ channel: source URL, type, bytes, hash). A daily sweep retries any not
 copied. The site serves the copy at `/img/channels/:id/avatar?v=<hash>`
 (a year's cache, `nosniff`, a sandboxing CSP; rate-limited like `/data`),
 so a visitor's browser never contacts Kick; hidden channels' pictures
-aren't served. The avatar component shows the picture where a copy
+aren't served (live-only channels' are: they appear while live). The avatar component shows the picture where a copy
 exists and the channel's initial otherwise. Not exported between
 instances (re-fetched from the next poll or event); deleted with the
 channel. The fake Kick serves solid-colour PNGs for its channels
@@ -1367,6 +1368,19 @@ Chrome shared by all pages: period picker (7d / 30d / 90d / 1y / all /
 custom) kept in the URL, channel search, and a timezone switch (see §13.6).
 Every page is a URL that reproduces exactly what was shown, so links can be
 shared.
+
+**How much of a channel is shown** is the admin's choice per channel
+(`channels.visibility`), a removal request included:
+
+- **Public:** everything above.
+- **Live only:** only "now" while the channel is live: on the home page's
+  live list with its current viewers (no title, category, start time or
+  sparkline), and a channel page with its current viewers and active
+  chatters (distinct chatters in the last 5 whole minutes, unknown unless
+  chat coverage vouches for all of them). No history anywhere: no other
+  tab, no stream pages, no `/data`, no leaderboard, category or compare
+  entry. Search finds it.
+- **Hidden:** nowhere on the public site; the admin sees it as before.
 
 ### 13.3 The stream page
 
@@ -1557,6 +1571,8 @@ group members) are searched on the server and scroll inside their card.
     and groups, confirm.
   - Pause / resume tracking (keeps data), deactivate (stops, keeps data),
     delete data (explicit confirmation, typed slug).
+  - How much the public site shows (§13.2): public, live only or hidden,
+    audited with the level before and after.
   - **Groups** (e.g. "Tunisian streamers"): lists of channels used for public
     leaderboards and the compare page.
 - **Health:** per channel, live status, last poll, chat socket connected,
@@ -1992,7 +2008,9 @@ token: they are scrubbed from its context, as from the logs.
 - **Privacy:** GDPR (EU visitors, EU chatters whose ids we store) and
   Tunisia's data protection law. A privacy policy, a stated legal basis
   (legitimate interest), deletion requests (admin, §13.8), and a way for a
-  **streamer to ask to be removed**.
+  **streamer to ask to be removed**: answered by hiding the channel
+  (entirely, or showing only "now" while live, the admin's choice, §13.2),
+  or by deleting its data.
 - A User-Agent identifying us, with a contact address, on every request to
   Kick.
 

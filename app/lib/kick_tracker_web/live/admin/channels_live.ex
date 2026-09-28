@@ -88,15 +88,21 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
     {:noreply, load(socket)}
   end
 
-  def handle_event("toggle_public", %{"id" => id}, socket) do
+  # How much of the channel the public site shows (§13.2): a removal
+  # request is answered here too, at the level the admin chooses.
+  def handle_event("set_visibility", %{"channel_id" => id, "visibility" => level}, socket)
+      when level in ~w(public live_only hidden) do
     channel = Channels.get!(String.to_integer(id))
-    {:ok, channel} = Channels.set_public(channel, not channel.public)
+    level = String.to_existing_atom(level)
 
-    Audit.log(
-      socket.assigns.current_admin,
-      if(channel.public, do: "channel.show", else: "channel.hide"),
-      channel.slug
-    )
+    if level != channel.visibility do
+      {:ok, _} = Channels.set_visibility(channel, level)
+
+      Audit.log(socket.assigns.current_admin, "channel.visibility", channel.slug, %{
+        "from" => Atom.to_string(channel.visibility),
+        "to" => Atom.to_string(level)
+      })
+    end
 
     {:noreply, load(socket)}
   end
@@ -150,7 +156,7 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
   def handle_event("search", %{"q" => q}, socket), do: {:noreply, assign(socket, q: q)}
 
   def handle_event("show", %{"show" => show}, socket)
-      when show in ~w(all tracking paused hidden live),
+      when show in ~w(all tracking paused live_only hidden live),
       do: {:noreply, assign(socket, show: show)}
 
   @impl true
@@ -162,7 +168,8 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
           "all" => length(assigns.channels),
           "tracking" => Enum.count(assigns.channels, & &1.active),
           "paused" => Enum.count(assigns.channels, &(not &1.active)),
-          "hidden" => Enum.count(assigns.channels, &(not &1.public)),
+          "live_only" => Enum.count(assigns.channels, &(&1.visibility == :live_only)),
+          "hidden" => Enum.count(assigns.channels, &(&1.visibility == :hidden)),
           "live" => map_size(assigns.live)
         },
         deleting_channel:
@@ -174,7 +181,7 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
       <.page_header title={gettext("Channels")} icon="hero-tv">
         <:subtitle>
           {gettext(
-            "The channels being tracked. Pausing stops collection and keeps everything already collected; hiding removes a channel from the public site."
+            "The channels being tracked. Pausing stops collection and keeps everything already collected. \"Live only\" shows a channel on the public site only while it is live, with its viewers and active chatters now; \"Hidden\" removes it from the public site."
           )}
         </:subtitle>
       </.page_header>
@@ -265,6 +272,7 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
                   {"all", gettext("All")},
                   {"tracking", gettext("Tracking")},
                   {"paused", gettext("Paused")},
+                  {"live_only", gettext("Live only")},
                   {"hidden", gettext("Hidden")},
                   {"live", gettext("Live")}
                 ]
@@ -318,7 +326,12 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
                     <.status_pill tone={if c.active, do: :ok, else: :neutral}>
                       {if c.active, do: gettext("tracking"), else: gettext("paused")}
                     </.status_pill>
-                    <.status_pill :if={!c.public} tone={:warn}>{gettext("hidden")}</.status_pill>
+                    <.status_pill :if={c.visibility == :live_only} tone={:info}>
+                      {gettext("live only")}
+                    </.status_pill>
+                    <.status_pill :if={c.visibility == :hidden} tone={:warn}>
+                      {gettext("hidden")}
+                    </.status_pill>
                     <.status_pill :if={c.chat_log} tone={:info}>
                       {gettext("chat logged")}
                     </.status_pill>
@@ -377,13 +390,29 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
                             )
                       }
                     />
-                    <.icon_button
-                      id={"public-#{c.id}"}
-                      icon={if c.public, do: "hero-eye-slash", else: "hero-eye"}
-                      label={if c.public, do: gettext("Hide"), else: gettext("Show")}
-                      phx-click="toggle_public"
-                      phx-value-id={c.id}
-                    />
+                    <form id={"visibility-#{c.id}"} phx-change="set_visibility">
+                      <input type="hidden" name="channel_id" value={c.id} />
+                      <select
+                        name="visibility"
+                        class="select select-sm w-32"
+                        aria-label={gettext("Shown on the public site")}
+                        title={gettext("Shown on the public site")}
+                      >
+                        <option
+                          :for={
+                            {value, label} <- [
+                              {"public", gettext("Public")},
+                              {"live_only", gettext("Live only")},
+                              {"hidden", gettext("Hidden")}
+                            ]
+                          }
+                          value={value}
+                          selected={Atom.to_string(c.visibility) == value}
+                        >
+                          {label}
+                        </option>
+                      </select>
+                    </form>
                     <.icon_button
                       id={"ask-delete-#{c.id}"}
                       icon="hero-trash"
@@ -466,7 +495,8 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
         case show do
           "tracking" -> c.active
           "paused" -> not c.active
-          "hidden" -> not c.public
+          "live_only" -> c.visibility == :live_only
+          "hidden" -> c.visibility == :hidden
           "live" -> Map.has_key?(live, c.id)
           _ -> true
         end

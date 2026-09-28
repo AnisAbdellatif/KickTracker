@@ -90,7 +90,7 @@ defmodule KickTracker.AvatarsTest do
       poll()
       settle()
       :ok = perform_job(ChannelAvatar, %{"channel_id" => c.id})
-      {:ok, _} = Channels.set_public(c, false)
+      {:ok, _} = Channels.set_visibility(c, :hidden)
 
       assert build_conn() |> get("/img/channels/#{c.id}/avatar") |> response(404)
       assert Avatars.versions() == %{}

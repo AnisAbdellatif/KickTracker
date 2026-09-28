@@ -138,6 +138,15 @@ defmodule KickTrackerWeb.UnknownFiguresTest do
     for path <- ["/about/methodology", "/search?q=streamer"] do
       assert html_response(get(conn, path), 200), path
     end
+
+    # A channel shown only while live, live now with no reading yet.
+    other = Reports.channel_by_slug("otherstreamer")
+    {:ok, _} = KickTracker.Channels.set_visibility(other, :live_only)
+    KickTracker.Fixtures.stream!(other, DateTime.utc_now())
+
+    for path <- ["/", "/c/otherstreamer"] do
+      assert {:ok, _view, _html} = live(conn, path), path
+    end
   end
 
   describe "admin" do

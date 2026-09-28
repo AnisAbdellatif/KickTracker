@@ -16,7 +16,7 @@ defmodule KickTrackerWeb.PrivacyPageTest do
     _not_logged = channel!(slug: "quietstreamer")
     {:ok, _} = ChatLog.configure(shown, true, 30)
     {:ok, hidden} = ChatLog.configure(hidden, true, 90)
-    {:ok, _} = KickTracker.Channels.set_public(hidden, false)
+    {:ok, _} = KickTracker.Channels.set_visibility(hidden, :hidden)
 
     html = html_response(get(conn, ~p"/about/privacy"), 200)
     assert html =~ "somestreamer"

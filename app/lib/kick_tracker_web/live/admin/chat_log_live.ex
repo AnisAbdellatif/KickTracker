@@ -441,7 +441,8 @@ defmodule KickTrackerWeb.Admin.ChatLogLive do
                       />{gettext("days")}
                     </form>
                     <span :if={!c.active}>· {gettext("paused")}</span>
-                    <span :if={!c.public}>· {gettext("hidden")}</span>
+                    <span :if={c.visibility == :live_only}>· {gettext("live only")}</span>
+                    <span :if={c.visibility == :hidden}>· {gettext("hidden")}</span>
                   </div>
                 </div>
                 <input

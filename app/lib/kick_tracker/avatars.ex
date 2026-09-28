@@ -133,20 +133,23 @@ defmodule KickTracker.Avatars do
     )
   end
 
-  @doc "A public channel's copy, for serving: `%{content_type, data, sha256}` or nil."
+  @doc """
+  A listed channel's copy (public or shown while live), for serving:
+  `%{content_type, data, sha256}` or nil.
+  """
   @spec get(integer()) :: map() | nil
   def get(channel_id) do
     Repo.one(
       from a in "channel_avatars",
         join: c in "channels",
         on: c.id == a.channel_id,
-        where: a.channel_id == ^channel_id and c.public,
+        where: a.channel_id == ^channel_id and c.visibility in ["public", "live_only"],
         select: %{content_type: a.content_type, data: a.data, sha256: a.sha256}
     )
   end
 
   @doc """
-  Which public channels have a copy, by id, with a short version of it
+  Which listed channels (public or shown while live) have a copy, by id, with a short version of it
   (for URLs that change with the picture, so browsers can keep it long).
   Cached for a minute.
   """
@@ -157,7 +160,7 @@ defmodule KickTracker.Avatars do
         from a in "channel_avatars",
           join: c in "channels",
           on: c.id == a.channel_id,
-          where: c.public,
+          where: c.visibility in ["public", "live_only"],
           select: {a.channel_id, fragment("left(?, 12)", a.sha256)}
       )
       |> Map.new()

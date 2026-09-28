@@ -214,7 +214,10 @@ defmodule KickTrackerWeb.PublicUITest do
       assert get_resp_header(get(conn, src), "cache-control") == ["public, max-age=30"]
 
       # Private channels have no sparkline.
-      channel!(slug: "hiddenstreamer") |> Ecto.Changeset.change(public: false) |> Repo.update!()
+      channel!(slug: "hiddenstreamer")
+      |> Ecto.Changeset.change(public: false, visibility: :hidden)
+      |> Repo.update!()
+
       assert json_response(get(conn, "/data/v1/sparklines/hiddenstreamer"), 404)
     end
 
@@ -226,7 +229,9 @@ defmodule KickTrackerWeb.PublicUITest do
       stream!(c, DateTime.add(now, -3600))
 
       hidden =
-        channel!(slug: "hiddenstreamer") |> Ecto.Changeset.change(public: false) |> Repo.update!()
+        channel!(slug: "hiddenstreamer")
+        |> Ecto.Changeset.change(public: false, visibility: :hidden)
+        |> Repo.update!()
 
       {:ok, view, _} = live(conn, "/")
       assert has_element?(view, "#live-#{c.id}")
