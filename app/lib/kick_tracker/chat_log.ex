@@ -246,15 +246,19 @@ defmodule KickTracker.ChatLog do
     |> Repo.stream(max_rows: 2000)
   end
 
-  @doc "Other chat-feed events on logged channels, newest first (filters as `messages/1`, without users)."
+  @doc """
+  Other chat-feed events on logged channels, newest first (filters as
+  `messages/1`, without users; `:before` is an `{occurred_at, id}` cursor).
+  """
   @spec events(map()) :: [map()]
   def events(filters) do
     from(e in "chat_log_events",
       join: c in "channels",
       on: c.id == e.channel_id,
-      order_by: [desc: e.occurred_at],
+      order_by: [desc: e.occurred_at, desc: e.id],
       limit: ^Map.get(filters, :limit, 200),
       select: %{
+        id: e.id,
         channel_id: e.channel_id,
         slug: c.slug,
         occurred_at: e.occurred_at,
@@ -265,8 +269,14 @@ defmodule KickTracker.ChatLog do
     |> where_in(:channel_id, filters[:channel_ids])
     |> where_time(:occurred_at, filters[:from], filters[:to])
     |> local_time(:occurred_at, filters[:tz])
+    |> events_page(filters[:before])
     |> Repo.all()
   end
+
+  defp events_page(query, nil), do: query
+
+  defp events_page(query, {at, id}),
+    do: where(query, [e], e.occurred_at < ^at or (e.occurred_at == ^at and e.id < ^id))
 
   @doc "Channels with a log, or logging on, for the admin's filters."
   @spec channels() :: [map()]
@@ -303,8 +313,9 @@ defmodule KickTracker.ChatLog do
   end
 
   @doc """
-  The channels logging is on for, for the privacy page: public ones by
-  slug with their retention, hidden ones only counted.
+  The channels logging is on for, for the privacy page: ones the site
+  shows (public or live only) by slug with their retention, hidden ones
+  only counted.
   """
   @spec disclosed() :: %{listed: [map()], hidden: non_neg_integer()}
   def disclosed do
@@ -313,11 +324,15 @@ defmodule KickTracker.ChatLog do
         from c in Channel,
           where: c.chat_log,
           order_by: c.slug,
-          select: %{slug: c.slug, public: c.public, retention_days: c.chat_log_retention_days}
+          select: %{
+            slug: c.slug,
+            visibility: c.visibility,
+            retention_days: c.chat_log_retention_days
+          }
       )
 
-    {listed, hidden} = Enum.split_with(logged, & &1.public)
-    %{listed: listed, hidden: length(hidden)}
+    {listed, hidden} = Enum.split_with(logged, &(&1.visibility != :hidden))
+    %{listed: Enum.map(listed, &Map.delete(&1, :visibility)), hidden: length(hidden)}
   end
 
   @doc "Kick user ids for a username (as last seen) or an id typed by an admin."

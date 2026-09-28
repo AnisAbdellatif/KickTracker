@@ -38,6 +38,27 @@ defmodule KickTracker.Anomalies do
     |> Enum.reverse()
   end
 
+  @doc """
+  What was found across `channels`, most recent first: every finding in
+  each channel's latest `per_channel` streams, with its channel and
+  stream. `live?` says whether any of those streams is still live (its
+  findings can still change, and new ones appear).
+  """
+  @spec recent([Channel.t()], pos_integer()) :: %{
+          findings: [%{channel: Channel.t(), stream: map(), finding: Rules.finding()}],
+          live?: boolean()
+        }
+  def recent(channels, per_channel \\ 20) do
+    results = for c <- channels, r <- channel_streams(c, per_channel), do: {c, r}
+
+    %{
+      findings:
+        for({c, r} <- results, f <- r.findings, do: %{channel: c, stream: r.stream, finding: f})
+        |> Enum.sort_by(& &1.finding.from, {:desc, DateTime}),
+      live?: Enum.any?(results, fn {_, r} -> is_nil(r.stream.ended_at) end)
+    }
+  end
+
   @doc "One stream's findings, or nil when there is no such stream."
   @spec stream(Channel.t(), integer()) :: result() | nil
   def stream(%Channel{} = channel, stream_id) do

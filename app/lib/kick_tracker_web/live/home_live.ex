@@ -87,9 +87,9 @@ defmodule KickTrackerWeb.HomeLive do
     end
   end
 
-  # The broadcast names every channel Kick reports live, private ones and
+  # The broadcast names every channel Kick reports live, hidden ones and
   # ones without an open stream here included. Only a change among the
-  # public ones reads the list again, once (not every minute while, say, a
+  # listed ones (public and live-only) reads the list again, once (not every minute while, say, a
   # private channel is live); otherwise the viewers are updated in place.
   @impl true
   def handle_info({:live, %{viewers: viewers} = msg}, socket) do
@@ -118,7 +118,9 @@ defmodule KickTrackerWeb.HomeLive do
   def handle_info(_other, socket), do: {:noreply, socket}
 
   defp public_ids do
-    Cache.fetch({:public_channel_ids}, 60, fn -> MapSet.new(Reports.channels(), & &1.id) end)
+    Cache.fetch({:listed_channel_ids}, 60, fn ->
+      MapSet.new(Reports.channel_ids([:public, :live_only]))
+    end)
   end
 
   defp metric_label("hours_watched"), do: gettext("Hours watched")
@@ -182,7 +184,11 @@ defmodule KickTrackerWeb.HomeLive do
           <ul id="live-now" class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <li :for={l <- @live} id={"live-#{l.channel_id}"} class="min-w-0">
               <.link
-                navigate={~p"/c/#{l.slug}/streams/#{l.stream_id}"}
+                navigate={
+                  if l.stream_id,
+                    do: ~p"/c/#{l.slug}/streams/#{l.stream_id}",
+                    else: ~p"/c/#{l.slug}"
+                }
                 class="card-surface block p-4"
               >
                 <div class="flex items-center gap-3">
@@ -192,7 +198,7 @@ defmodule KickTrackerWeb.HomeLive do
                       <span class="truncate font-semibold">{l.slug}</span>
                       <.live_badge />
                     </div>
-                    <div class="mt-0.5 text-xs text-base-content/60">
+                    <div :if={l.started_at} class="mt-0.5 text-xs text-base-content/60">
                       {gettext("live for %{duration}", duration: live_for(l.started_at))}
                     </div>
                   </div>
@@ -203,14 +209,19 @@ defmodule KickTrackerWeb.HomeLive do
                     <div class="text-[0.7rem] text-base-content/60">{gettext("viewers")}</div>
                   </div>
                 </div>
-                <div class="mt-3 flex min-w-0 items-center gap-2 text-xs">
+                <div
+                  :if={l.visibility == :public}
+                  class="mt-3 flex min-w-0 items-center gap-2 text-xs"
+                >
                   <span
                     :if={l.category}
                     class="badge badge-sm shrink-0 border-base-300 bg-base-200"
                   >{l.category}</span>
                   <span class="truncate text-base-content/70" title={l.title}>{l.title}</span>
                 </div>
+                <%!-- Recent history: not for a channel shown only while live. --%>
                 <div
+                  :if={l.visibility == :public}
                   id={"spark-#{l.channel_id}"}
                   phx-hook="Chart"
                   phx-update="ignore"
@@ -220,7 +231,10 @@ defmodule KickTrackerWeb.HomeLive do
                   class="inset-well relative mt-3 h-14"
                 >
                 </div>
-                <div class="mt-1 flex justify-between text-[0.65rem] text-base-content/70">
+                <div
+                  :if={l.visibility == :public}
+                  class="mt-1 flex justify-between text-[0.65rem] text-base-content/70"
+                >
                   <span>{gettext("3 h ago")}</span><span>{gettext("now")}</span>
                 </div>
               </.link>

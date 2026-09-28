@@ -158,10 +158,19 @@ defmodule KickTracker.Channels do
     end
   end
 
-  @doc "Shows or hides a channel on the public site (a removal request, §18.3)."
-  @spec set_public(Channel.t(), boolean()) :: {:ok, Channel.t()}
-  def set_public(%Channel{} = channel, public?) do
-    result = channel |> Ecto.Changeset.change(public: public?) |> Repo.update()
+  @doc """
+  How much of a channel the public site shows (§13.2): all of it, only
+  "now" while it is live, or nothing (admin only). A removal request is
+  answered with either level, or with deletion (§18.3).
+  """
+  @spec set_visibility(Channel.t(), Channel.visibility()) :: {:ok, Channel.t()}
+  def set_visibility(%Channel{} = channel, visibility)
+      when visibility in [:public, :live_only, :hidden] do
+    result =
+      channel
+      |> Ecto.Changeset.change(visibility: visibility, public: visibility == :public)
+      |> Repo.update()
+
     KickTracker.Cache.clear()
     result
   end

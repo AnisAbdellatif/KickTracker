@@ -29,7 +29,9 @@ continuously and without gaps from day one; the website is the easy part.
 
 ## 2. Where the data comes from
 
-Four sources, each used for what only it does well.
+Four sources, each used for what only it does well. The full reference of
+what is known about each (fields, quirks, what production has received)
+is [KICK.md](KICK.md); this section is the part the design rests on.
 
 ### 2.1 Official public API: polling
 
@@ -991,7 +993,8 @@ kick_tracker/
 │  │     │  └─ admin/                   # channels, groups, health, dead letters,
 │  │     │                              #   subscriptions, reprocess, corrections,
 │  │     │                              #   annotations, privacy, settings, audit
-│  │     ├─ controllers/data/           # /data/v1 JSON, cacheable (§13.5)
+│  │     ├─ controllers/data/           # /data/v1 JSON, our pages only (§13.5)
+│  │     ├─ controllers/api/v1/         # the public read API, keyed (§13.10)
 │  │     ├─ components/                 # stat cards, period picker, chart, tables
 │  │     └─ admin_auth.ex               # admin sessions, on_mount
 │  ├─ assets/js/
@@ -1079,7 +1082,9 @@ per-channel time ranges, period totals, **distinct counts** and
 - **UTC everywhere** (`timestamptz`). Kick's time (`occurred_at`) is kept
   apart from ours (`observed_at` for polls, `received_at` for events). Events
   without their own timestamp (`channel.followed`) use the
-  `Kick-Event-Message-Timestamp` header.
+  `Kick-Event-Message-Timestamp` header, and so do subscription renewals,
+  whose `created_at` is when the subscription first started, not the
+  renewal (KICK.md §4.1).
 - **Channel timezone** (`channels.timezone`) for everything daily: rollups
   are by UTC hour and turned into days in the channel's timezone when read,
   hour by hour: a stream that crosses midnight counts in both days, each
@@ -1124,7 +1129,8 @@ a stream's per-minute detail is gone, but its per-minute counts
 ```
 -- dimensions (normal tables, may change)
 channels           (id, kick_user_id UNIQUE, kick_channel_id, chatroom_id,
-                    slug, timezone, tracked_since, active)
+                    slug, timezone, tracked_since, active,
+                    visibility public|live_only|hidden, §13.2)
 channel_slugs      (channel_id, slug, seen_from, seen_to)
 categories         (id, name, slug)
 kick_users         (id, username, seen_at)
@@ -1297,8 +1303,9 @@ logging is still on or not. An admin can view a channel's or a user's log
 period (a collector job, audited). Privacy deletions remove a person's
 messages and scrub events naming them; replies to them keep their text
 but no longer say whom they answered. Never shown on the public site or
-the data API; not in exports between instances; the shadow collector
-never logs (it doesn't copy the setting).
+`/data`; readable outside the admin only with an admin API key (§13.10);
+not in exports between instances; the shadow collector never logs (it
+doesn't copy the setting).
 
 Storage at production's volume (~270 000 messages a day across 42
 channels, the busiest ~117 000): about 150 bytes per message with
@@ -1318,7 +1325,7 @@ channel: source URL, type, bytes, hash). A daily sweep retries any not
 copied. The site serves the copy at `/img/channels/:id/avatar?v=<hash>`
 (a year's cache, `nosniff`, a sandboxing CSP; rate-limited like `/data`),
 so a visitor's browser never contacts Kick; hidden channels' pictures
-aren't served. The avatar component shows the picture where a copy
+aren't served (live-only channels' are: they appear while live). The avatar component shows the picture where a copy
 exists and the channel's initial otherwise. Not exported between
 instances (re-fetched from the next poll or event); deleted with the
 channel. The fake Kick serves solid-colour PNGs for its channels
@@ -1363,6 +1370,19 @@ Chrome shared by all pages: period picker (7d / 30d / 90d / 1y / all /
 custom) kept in the URL, channel search, and a timezone switch (see §13.6).
 Every page is a URL that reproduces exactly what was shown, so links can be
 shared.
+
+**How much of a channel is shown** is the admin's choice per channel
+(`channels.visibility`), a removal request included:
+
+- **Public:** everything above.
+- **Live only:** only "now" while the channel is live: on the home page's
+  live list with its current viewers (no title, category, start time or
+  sparkline), and a channel page with its current viewers and active
+  chatters (distinct chatters in the last 5 whole minutes, unknown unless
+  chat coverage vouches for all of them). No history anywhere: no other
+  tab, no stream pages, no `/data`, no leaderboard, category or compare
+  entry. Search finds it.
+- **Hidden:** nowhere on the public site; the admin sees it as before.
 
 ### 13.3 The stream page
 
@@ -1421,13 +1441,24 @@ Kicks likewise with ingress coverage.
   (the stream page), `/data/v1/streams/:id/chatters?window=5` and
   `/data/v1/compare?c=a,b&metric=…`. `res` can only ask for fewer points.
   Compact column format (`{"t":[…unix seconds…],"avg":[…],"max":[…]}`).
-  Responses get an ETag and a `Cache-Control`, so Caddy or Cloudflare can
-  serve repeat visitors without touching the app: a day for ranges ending
-  more than two days ago, 30s for ranges reaching into the last two days
-  (rollups and late events can still change them). A range that reaches
-  now (a live stream, a rolling period) is revalidated every time, so a
-  chart refreshing it (every minute while live) sees each new reading;
-  an unchanged answer is a 304. The admin's anomalies page reads a live
+  Responses get an ETag and a browser-only `Cache-Control` (`private`): a
+  day for ranges ending more than two days ago, 30s for ranges reaching
+  into the last two days (rollups and late events can still change them).
+  A range that reaches now (a live stream, a rolling period) is
+  revalidated every time, so a chart refreshing it (every minute while
+  live) sees each new reading; an unchanged answer is a 304.
+- **`/data/v1` is internal to our pages.** Every page carries a signed
+  token (`<meta name="data-token">`, `Phoenix.Token`, 6 hours); the chart
+  hook sends it in `x-data-token`, and `/data/v1` answers 403
+  `{"error":"data_token"}` without a valid one, or when the browser says
+  the request comes from another site (`Sec-Fetch-Site` other than
+  `same-origin`). A page left open longer asks its LiveView for a new
+  token and tries once more. Not a secret (anyone can load a page), so
+  not a wall: it makes `/data/v1` useless to build on, and its format
+  changes with our charts. Outside use goes through `/api/v1` with a key
+  (§13.10). Shared caches can't serve `/data/v1` past the check, hence
+  `private`; nothing caches it today anyway (Caddy has no cache,
+  Cloudflare doesn't cache JSON without a rule). The admin's anomalies page reads a live
   stream again every minute too, findings and chart.
 - **Live over LiveView:** the page subscribes to `"channel:<id>"`; new
   readings are pushed to the chart hook with `push_event` (append a point),
@@ -1456,8 +1487,6 @@ Kicks likewise with ingress coverage.
   key repeats for a minute and the cache hits. "all" starts at the
   channel's tracking start, or on pages across channels at the earliest
   public channel's.
-- The JSON endpoints are the seed of a **public read API** later; they are
-  versioned from the start (`/data/v1/...`).
 
 ### 13.6 Time, numbers, languages
 
@@ -1529,7 +1558,7 @@ auth check.
 Layout: a sidebar of sections with icons (Monitor: health, anomalies,
 audit log, errors, dashboard; Channels: channels, groups, subscriptions;
 Data: corrections, chat log, export / import, dead letters; People:
-privacy requests, admins; Site: settings, the public site), the admin's
+privacy requests, admins; Site: settings, API keys, the public site), the admin's
 account, the theme and logging out at its foot; on a phone, a drawer
 opened from a top bar (daisyUI's, no script). Every page is built from
 the same pieces (`KickTrackerWeb.AdminComponents`): a page header with
@@ -1553,6 +1582,8 @@ group members) are searched on the server and scroll inside their card.
     and groups, confirm.
   - Pause / resume tracking (keeps data), deactivate (stops, keeps data),
     delete data (explicit confirmation, typed slug).
+  - How much the public site shows (§13.2): public, live only or hidden,
+    audited with the level before and after.
   - **Groups** (e.g. "Tunisian streamers"): lists of channels used for public
     leaderboards and the compare page.
 - **Health:** per channel, live status, last poll, chat socket connected,
@@ -1607,6 +1638,9 @@ group members) are searched on the server and scroll inside their card.
   user removed on either side stays removed. The collector does the work
   (`Workers.Transfer`, its own queue); the files live in `TRANSFER_DIR`,
   shared by both roles, for 7 days.
+- **API keys:** issue a key for an application (shown once), choose the
+  channels, scopes and limits it has or make it an admin key, edit what it
+  reaches, revoke it (§13.10).
 - **Settings:** feature flags (show the support page publicly, show top
   chatters and supporters by name), the assumptions behind the revenue
   estimate; public groups on their own page. Polling cadences stay in code,
@@ -1625,8 +1659,8 @@ the database every minute, so a lost message only delays the change.
 New tables for this: `admins`, `admin_tokens` (sessions, invitations), `channel_groups`,
 `channel_group_members`, `stream_overrides` (merge / split / exclude),
 `annotations`, `admin_audit_log`, `settings`, `transfers` (export and
-import log). The `web` role is read-only against the collected data and
-writes only these. `removals` (Kick ids whose removal was carried out) is
+import log), `api_keys` (§13.10). The `web` role is read-only against the
+collected data and writes only these. `removals` (Kick ids whose removal was carried out) is
 written by the collector, with the deletion itself.
 
 ### 13.9 Performance targets
@@ -1638,6 +1672,46 @@ written by the collector, with the deletion itself.
   summary card converted to PNG, so shared links show the channel's numbers.
 - A visitor on a live page costs one LiveView process with no chart data in
   it; thousands of concurrent visitors fit on the same server.
+
+### 13.10 Public read API
+
+Other applications read our data at `/api/v1`, with a key an admin issues
+by hand (`/admin/api-keys`); `API.md` at the repo root documents it and is
+what the owner sends with a key. Its format is a contract (`v1` only gains
+fields), kept apart from `/data/v1`, which follows our charts and answers
+our pages only (§13.5).
+
+- **Keys** (`api_keys`, an admin table): a name and contact, the key's
+  SHA-256 (the key, `kt_` and 43 characters, is shown once), its first
+  characters to tell keys apart, what it reaches, its limits, expiry,
+  revocation, last use (written at most every 5 minutes). Sent as
+  `Authorization: Bearer`, never in the URL. A key is looked up at most
+  every 30 seconds per web node, so a revoked or edited key takes effect
+  within 30 seconds. Created, edited and revoked keys are audited.
+- **Channels** (`ApiKeys.Access`, pure): a regular key reaches every
+  channel or chosen channels and groups; within that, a public channel
+  fully, a live-only one only "now" (`/now`, `/live`), a hidden one never.
+  A channel or stream the key doesn't reach is a 404, like one that
+  doesn't exist.
+- **Scopes:** `channels` (the list, streams, a stream's timeline), `live`,
+  `viewers` (with the heatmap), `chat`, `followers`, `support` (granted by
+  the key, whatever `support_page_public` says), `categories`. A stream
+  row carries only the figures of the key's scopes.
+- **Limits** per key: requests a minute (600 by default, counted per key
+  on each web node; 60 a minute per address without a valid key), how far
+  back it reads (`from` moved forward, `"clamped": true`), the finest
+  resolution (per-minute active chatters refused below it), the addresses
+  it works from (CIDRs), an end date.
+- **Admin keys** reach every channel, hidden ones included, every scope,
+  and the logged chat of channels with chat logging on
+  (`/channels/:slug/chat-log/messages` and `/events`, a page at a time).
+  The admin page asks for them to be kept to people who could be admins,
+  and suggests limiting their addresses.
+- Endpoints reuse the site's queries (`Series`, `Reports`), which don't
+  filter by visibility; the key's access decides. Same rules as the site:
+  `null` is unknown, gaps are listed, at most 2 000 points a series,
+  estimates labelled. Answers have an ETag and are `private` to the
+  client.
 
 ## 14. Collection rules
 
@@ -1776,9 +1850,9 @@ Answered:
 
 Partly answered:
 
-- **Sub, gift and Kicks webhooks with the app token:** subscriptions are
-  accepted for a channel that hasn't authorized us; no delivery of those
-  types observed yet. Seven of the ten event types are still uncaptured:
+- **Sub, gift and Kicks webhooks with the app token:** delivered in
+  production for channels that never authorized us (KICK.md §4.1), but
+  not recorded into fixtures yet. Seven of the ten event types are still uncaptured:
   `channel.subscription.new`, `.renewal`, `.gifts`, `kicks.gifted`,
   `moderation.banned`, `channel.reward.redemption.updated` and
   `chat.message.sent`. Record a busy channel where people subscribe, gift
@@ -1792,12 +1866,11 @@ Still open:
 1. **Kick's webhook retry policy:** stop the ingress, trigger an event, watch
    whether and when it is delivered again. Decides how urgent stages 2 and 3
    are.
-2. **Does v2 answer from the VPS** (datacenter IP), not just from home?
-   And `api.kick.com/private/v1/channels/{slug}` (§2.3b): if v2 is blocked
-   from a datacenter and this isn't, it becomes the follower source. Run
-   `mix record.probe` and `mix record.v2` from the VPS.
-3. **Pusher from a datacenter IP**, any limit on subscriptions per
-   connection. Host events: answered and parsed (§2.4).
+2. ~~Does v2 answer from the VPS?~~ Yes: production has read followers
+   from the VPS since 2026-09-24 without a failed reading (KICK.md §5.1).
+3. **Pusher limits** per connection or IP. From a datacenter IP it works:
+   production keeps every channel's socket up from the VPS. Host events:
+   answered and parsed (§2.4).
 4. **Outgoing raids:** answered: the hosting channel's `channel.<id>` feed
    carries `ChatMoveToSupportedChannelEvent`.
 
@@ -1982,6 +2055,8 @@ token: they are scrubbed from its context, as from the logs.
 ### 18.3 Legal and privacy
 
 - **Kick's developer terms:** read for rules on storing and displaying data,
+  and on handing it on (the read API, §13.10, gives other applications our
+  data),
   attribution and rate limits. v2 and Pusher are the grey area; both can
   already be switched off.
 - **Public name without "Kick"** in it or its logo (trademark). The repo name
@@ -1989,7 +2064,9 @@ token: they are scrubbed from its context, as from the logs.
 - **Privacy:** GDPR (EU visitors, EU chatters whose ids we store) and
   Tunisia's data protection law. A privacy policy, a stated legal basis
   (legitimate interest), deletion requests (admin, §13.8), and a way for a
-  **streamer to ask to be removed**.
+  **streamer to ask to be removed**: answered by hiding the channel
+  (entirely, or showing only "now" while live, the admin's choice, §13.2),
+  or by deleting its data.
 - A User-Agent identifying us, with a contact address, on every request to
   Kick.
 
@@ -2030,7 +2107,8 @@ Done after everything else is set up and working (§20, phase 6).
 ### 19.3 Security
 
 - Rate limits on public pages and `/data` (PlugAttack: pages 120/min,
-  `/data` 600/min, admin logins 10/min and a one-hour ban after 20 failures
+  `/data` 600/min, counted before its page token is checked, `/api` per key
+  (600/min by default) and 60/min per address without a valid key, admin logins 10/min and a one-hour ban after 20 failures
   in 10 minutes), keyed on the visitor's address as our own proxies saw it.
 - Security headers (CSP with a per-request script nonce, HSTS, frame
   options), from the app and again from Caddy.
@@ -2046,6 +2124,12 @@ Signs that a stream's audience may not be what its viewer count says
 public site. None is proof: a front-page placement, a followers-only chat
 or a watch party can look the same, so the page says what was seen and
 the figures it rests on, not a verdict.
+
+The page lists every finding across the channels, most recent first
+(from each channel's latest 20 streams): when, the channel and its
+stream, the kind and the figures. A row opens its stream: all its
+findings, the stream's chart with them shaded, and its figures against
+the channel's usual ones.
 
 - **Rules, not a model** (`Metrics.Anomalies`, pure): each finding is a
   plain rule with its evidence, so it can be checked and argued with.
@@ -2248,4 +2332,9 @@ clustered), and deploy script details.
 
 **Later** (not planned yet): history before tracking from v2's VOD list
 (marked as imported), streamer accounts via Kick login with private stats and
-embeds, Discord notifications, a public read API, Open Graph images.
+embeds, Discord notifications, Open Graph images.
+
+**Read API built** (2026-09-28, §13.10, §13.2, §13.5). Two levels of hiding
+(live only, hidden), `/data/v1` kept to our pages by a page token, and
+`/api/v1` with keys issued from `/admin/api-keys`: channels and scopes per
+key, limits, admin keys with logged chat; `API.md` for the keys' holders.

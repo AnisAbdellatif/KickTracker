@@ -21,7 +21,11 @@ defmodule KickTrackerWeb.DataApiTest do
     %{c: c, s: s}
   end
 
-  defp hide!(c), do: Repo.query!("UPDATE channels SET public = false WHERE id = $1", [c.id])
+  defp hide!(c),
+    do:
+      Repo.query!("UPDATE channels SET public = false, visibility = 'hidden' WHERE id = $1", [
+        c.id
+      ])
 
   test "a hidden channel's data isn't served, stream chatters included", %{
     conn: conn,

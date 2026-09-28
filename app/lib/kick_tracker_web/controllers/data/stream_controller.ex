@@ -73,7 +73,7 @@ defmodule KickTrackerWeb.Data.StreamController do
   defp public_stream(id) do
     with {id, ""} <- Integer.parse(id),
          %{} = stream <- Reports.stream(id),
-         %{public: true} = channel <- Channels.get!(stream.channel_id) do
+         %{visibility: :public} = channel <- Channels.get!(stream.channel_id) do
       {:ok, stream, channel}
     else
       _ -> :error

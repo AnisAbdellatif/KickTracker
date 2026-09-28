@@ -32,7 +32,7 @@ defmodule KickTracker.Workers.DeleteChannelTest do
 
   test "a hidden channel disappears from every public list but keeps its data" do
     gone = Channels.get_by_slug("gonestreamer")
-    {:ok, _} = Channels.set_public(gone, false)
+    {:ok, _} = Channels.set_visibility(gone, :hidden)
 
     assert Reports.channel_by_slug("gonestreamer") == nil
     assert Enum.map(Reports.channels(), & &1.slug) == ["stayingstreamer"]

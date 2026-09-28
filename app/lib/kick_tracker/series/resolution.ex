@@ -62,6 +62,19 @@ defmodule KickTracker.Series.Resolution do
     if requested && rank(requested) >= rank(auto), do: requested, else: auto
   end
 
+  @doc """
+  The coarser of two resolutions (nil counts as none).
+
+      iex> KickTracker.Series.Resolution.coarsest(:m5, :hour)
+      :hour
+      iex> KickTracker.Series.Resolution.coarsest(:day, nil)
+      :day
+  """
+  @spec coarsest(t() | nil, t() | nil) :: t() | nil
+  def coarsest(nil, b), do: b
+  def coarsest(a, nil), do: a
+  def coarsest(a, b), do: if(rank(a) >= rank(b), do: a, else: b)
+
   defp rank(:raw), do: 0
   defp rank(:m5), do: 1
   defp rank(:m15), do: 2

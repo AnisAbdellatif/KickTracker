@@ -141,10 +141,11 @@ defmodule Sim.Payloads do
   end
 
   @doc """
-  The body of a `channel.subscription.new` or `.renewal` webhook.
+  The body of a `channel.subscription.new` webhook, sent at `at`.
 
   **Not yet recorded**: these shapes follow Kick's documentation, since no
-  sub or gift event has been captured yet (project.md §16). Re-check them
+  sub or gift event has been captured yet (project.md §16), and the key
+  names of production's stored bodies (KICK.md §4.1). Re-check them
   against `fixtures/` once one is.
   """
   @spec subscription(Channel.t(), pos_integer(), pos_integer(), DateTime.t()) :: map()
@@ -156,6 +157,18 @@ defmodule Sim.Payloads do
       "created_at" => iso(at),
       "expires_at" => at |> DateTime.add(30, :day) |> iso()
     }
+  end
+
+  @doc """
+  The body of a `channel.subscription.renewal` webhook, sent at `at`. As
+  in production (KICK.md §4.1), `created_at` is when the subscription
+  first started, `months` before, not the renewal's time.
+  """
+  @spec renewal(Channel.t(), pos_integer(), pos_integer(), DateTime.t()) :: map()
+  def renewal(%Channel{} = channel, subscriber_id, months, at) do
+    channel
+    |> subscription(subscriber_id, months, at)
+    |> Map.put("created_at", at |> DateTime.add(-30 * months, :day) |> iso())
   end
 
   @doc "The body of a `channel.subscription.gifts` webhook. Not yet recorded (see `subscription/4`)."

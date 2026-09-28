@@ -111,11 +111,8 @@ defmodule KickTracker.TransferTest do
     end
 
     test "the channel list alone creates the channels with their settings", %{dir: dir} do
-      c = channel!(chatroom_id: 77)
-
-      Repo.query!("UPDATE channels SET timezone = 'Africa/Tunis', public = false WHERE id = $1", [
-        c.id
-      ])
+      c = channel!(chatroom_id: 77, visibility: :live_only)
+      Repo.query!("UPDATE channels SET timezone = 'Africa/Tunis' WHERE id = $1", [c.id])
 
       history!(c)
       zip = export!(dir, [c.id], :channels)
@@ -124,11 +121,30 @@ defmodule KickTracker.TransferTest do
       {:ok, summary} = Import.run(zip, Path.join(dir, "in"))
       assert summary["tables"]["streams"] == %{"in_file" => 0, "added" => 0}
 
-      assert [%{kick_user_id: kid, timezone: "Africa/Tunis", public: false, chatroom_id: 77}] =
-               rows("channels", ["id"])
+      assert [
+               %{
+                 kick_user_id: kid,
+                 timezone: "Africa/Tunis",
+                 public: false,
+                 visibility: "live_only",
+                 chatroom_id: 77
+               }
+             ] = rows("channels", ["id"])
 
       assert kid == c.kick_user_id
       assert rows("streams", ["id"]) == []
+    end
+
+    test "a channel hidden in a file from before visibility levels is hidden", %{dir: dir} do
+      c = channel!()
+      # What an older version wrote: only `public`, no `visibility` column.
+      Repo.query!("UPDATE channels SET public = false WHERE id = $1", [c.id])
+      zip = export!(dir, [c.id], :channels)
+      zip = drop_column!(zip, dir, "channels.csv", "visibility")
+      wipe!()
+
+      {:ok, _} = Import.run(zip, Path.join(dir, "in"))
+      assert [%{public: false, visibility: "hidden"}] = rows("channels", ["id"])
     end
 
     test "with history a channel keeps when it was first tracked; the list alone doesn't claim it",
@@ -302,6 +318,35 @@ defmodule KickTracker.TransferTest do
     ])
 
     c
+  end
+
+  # The zip with one column left out of one CSV (a file from an older
+  # version). The CSVs here have no quoted commas.
+  defp drop_column!(zip, dir, file, column) do
+    work = Path.join(dir, "drop-#{System.unique_integer([:positive])}")
+    {:ok, files} = :zip.extract(String.to_charlist(zip), cwd: String.to_charlist(work))
+    csv = Path.join(work, file)
+    [header | _] = lines = File.read!(csv) |> String.split("\n")
+    i = header |> String.split(",") |> Enum.find_index(&(&1 == column))
+
+    File.write!(
+      csv,
+      Enum.map_join(lines, "\n", fn
+        "" -> ""
+        line -> line |> String.split(",") |> List.delete_at(i) |> Enum.join(",")
+      end)
+    )
+
+    edited = Path.join(dir, "edited-#{System.unique_integer([:positive])}.zip")
+
+    {:ok, _} =
+      :zip.create(
+        String.to_charlist(edited),
+        Enum.map(files, &(&1 |> Path.relative_to(work) |> String.to_charlist())),
+        cwd: String.to_charlist(work)
+      )
+
+    edited
   end
 
   defp export!(dir, ids, scope \\ :data) do

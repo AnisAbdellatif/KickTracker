@@ -23,9 +23,21 @@ defmodule KickTrackerWeb.Router do
     plug :fetch_current_admin
   end
 
+  # /data/v1: our own pages' chart data, nobody else's (§13.5). Counted
+  # before the token is checked, so requests without one are limited too.
   pipeline :api do
     plug :accepts, ["json"]
     plug KickTrackerWeb.Plugs.RateLimit
+    plug KickTrackerWeb.Plugs.DataToken
+  end
+
+  # The public read API (§13.10): a key issued by an admin, counted per
+  # key by the rate limit, then required.
+  pipeline :public_api do
+    plug :accepts, ["json"]
+    plug KickTrackerWeb.Plugs.ApiKey, :fetch
+    plug KickTrackerWeb.Plugs.RateLimit
+    plug KickTrackerWeb.Plugs.ApiKey, :require
   end
 
   # JSON for admin pages' charts: the admin's session, no page around it
@@ -50,7 +62,7 @@ defmodule KickTrackerWeb.Router do
     get "/about/removal", AboutController, :removal
     get "/search", AboutController, :search
 
-    live_session :public do
+    live_session :public, on_mount: [KickTrackerWeb.DataToken] do
       live "/", HomeLive
       live "/compare", CompareLive
       live "/category/:slug", CategoryLive
@@ -77,7 +89,8 @@ defmodule KickTrackerWeb.Router do
     get "/channels/:id/avatar", AvatarController, :show
   end
 
-  # History as cacheable JSON (§13.5), versioned from the start.
+  # History as JSON for our own pages' charts (§13.5); outside use goes
+  # to /api/v1 with a key.
   scope "/data/v1", KickTrackerWeb.Data do
     pipe_through :api
 
@@ -86,6 +99,21 @@ defmodule KickTrackerWeb.Router do
     get "/streams/:id/chatters", StreamController, :chatters
     get "/compare", CompareController, :show
     get "/sparklines/:slug", SparklineController, :show
+  end
+
+  scope "/api/v1", KickTrackerWeb.Api.V1 do
+    pipe_through :public_api
+
+    get "/channels", ChannelController, :index
+    get "/live", ChannelController, :live
+    get "/channels/:slug", ChannelController, :show
+    get "/channels/:slug/now", ChannelController, :now
+    get "/channels/:slug/streams", ChannelController, :streams
+    get "/channels/:slug/chat-log/messages", ChatLogController, :messages
+    get "/channels/:slug/chat-log/events", ChatLogController, :events
+    get "/channels/:slug/:series", ChannelController, :series
+    get "/streams/:id", StreamController, :show
+    get "/streams/:id/chatters", StreamController, :chatters
   end
 
   ## Admin (project.md §13.8)
@@ -117,6 +145,7 @@ defmodule KickTrackerWeb.Router do
       live "/", HealthLive
       live "/channels", ChannelsLive
       live "/groups", GroupsLive
+      live "/api-keys", ApiKeysLive
       live "/subscriptions", SubscriptionsLive
       live "/dead-letters", DeadLettersLive
       live "/data", DataLive

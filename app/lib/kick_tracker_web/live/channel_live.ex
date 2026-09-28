@@ -6,7 +6,8 @@ defmodule KickTrackerWeb.ChannelLive do
 
   History comes from `/data/v1` (cacheable JSON fetched by the chart hook);
   only "now" (the live badge, current viewers) comes over LiveView, from
-  the channel's PubSub topic.
+  the channel's PubSub topic. A channel shown only while live (§13.2) has
+  just its overview, with "now" and nothing else.
   """
 
   use KickTrackerWeb, :live_view
@@ -17,7 +18,7 @@ defmodule KickTrackerWeb.ChannelLive do
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
-    case Reports.channel_by_slug(slug) do
+    case Reports.channel_by_slug(slug, visibility: [:public, :live_only]) do
       nil ->
         raise KickTrackerWeb.NotFoundError, "no channel #{slug}"
 
@@ -30,8 +31,15 @@ defmodule KickTrackerWeb.ChannelLive do
   end
 
   defp assign_live(socket) do
-    live = Enum.find(Reports.live_now(), &(&1.channel_id == socket.assigns.channel.id))
-    assign(socket, live: live)
+    channel = socket.assigns.channel
+    live = Enum.find(Reports.live_now(), &(&1.channel_id == channel.id))
+
+    # The page of a channel shown only while live has its active chatters
+    # now in place of any history.
+    chatters =
+      if live && channel.visibility == :live_only, do: Series.chatters_now(channel.id)
+
+    assign(socket, live: live, chatters_now: chatters)
   end
 
   @impl true
@@ -39,30 +47,55 @@ defmodule KickTrackerWeb.ChannelLive do
     params = PageParams.clean(params)
     channel = socket.assigns.channel
     # A renamed channel's old slug lands on the current one.
-    if params["slug"] != channel.slug do
-      {:noreply,
-       push_patch(socket,
-         to: page_path(channel, socket.assigns.live_action, Map.delete(params, "slug"))
-       )}
-    else
-      period = Period.parse(params, since: channel.tracked_since)
-      params = Map.delete(params, "slug")
+    cond do
+      params["slug"] != channel.slug ->
+        {:noreply,
+         push_patch(socket,
+           to: page_path(channel, socket.assigns.live_action, Map.delete(params, "slug"))
+         )}
 
-      socket =
-        socket
-        |> assign(period: period, params: params, query: data_query(period, params))
-        |> assign(refresh: Period.refresh(period))
-        |> assign(page_title: title(channel, socket.assigns.live_action))
-        |> assign(
-          page_description:
-            gettext("Viewers, streams, chat and support of %{channel}, tracked over time.",
-              channel: channel.slug
-            )
-        )
-        |> load(socket.assigns.live_action)
+      channel.visibility == :live_only ->
+        live_only(socket)
 
-      {:noreply, socket}
+      true ->
+        load_page(socket, params)
     end
+  end
+
+  defp live_only(socket) do
+    if socket.assigns.live_action != :overview,
+      do: raise(KickTrackerWeb.NotFoundError, "only shown while live")
+
+    {:noreply,
+     assign(socket,
+       page_title: socket.assigns.channel.slug,
+       page_description:
+         gettext("Whether %{channel} is live, and how many are watching.",
+           channel: socket.assigns.channel.slug
+         )
+     )}
+  end
+
+  defp load_page(socket, params) do
+    channel = socket.assigns.channel
+
+    period = Period.parse(params, since: channel.tracked_since)
+    params = Map.delete(params, "slug")
+
+    socket =
+      socket
+      |> assign(period: period, params: params, query: data_query(period, params))
+      |> assign(refresh: Period.refresh(period))
+      |> assign(page_title: title(channel, socket.assigns.live_action))
+      |> assign(
+        page_description:
+          gettext("Viewers, streams, chat and support of %{channel}, tracked over time.",
+            channel: channel.slug
+          )
+      )
+      |> load(socket.assigns.live_action)
+
+    {:noreply, socket}
   end
 
   defp data_query(period, _params), do: URI.encode_query(Period.to_params(period))
@@ -170,8 +203,19 @@ defmodule KickTrackerWeb.ChannelLive do
 
   @impl true
   def handle_info({:viewers, %{viewers: v, at: at}}, socket) do
-    live = socket.assigns.live && %{socket.assigns.live | viewers: v, observed_at: at}
-    {:noreply, if(live, do: assign(socket, live: live), else: assign_live(socket))}
+    %{live: live, channel: channel} = socket.assigns
+    live = live && %{live | viewers: v, observed_at: at}
+
+    cond do
+      is_nil(live) ->
+        {:noreply, assign_live(socket)}
+
+      channel.visibility == :live_only ->
+        {:noreply, assign(socket, live: live, chatters_now: Series.chatters_now(channel.id))}
+
+      true ->
+        {:noreply, assign(socket, live: live)}
+    end
   end
 
   def handle_info({event, _, _}, socket) when event in [:stream_ended],
@@ -234,6 +278,55 @@ defmodule KickTrackerWeb.ChannelLive do
   ## Render
 
   @impl true
+  def render(%{channel: %{visibility: :live_only}} = assigns) do
+    ~H"""
+    <Layouts.app flash={@flash}>
+      <div id="channel-page" phx-hook="Format">
+        <header class="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <.avatar
+            name={@channel.slug}
+            channel_id={@channel.id}
+            class="size-12 text-xl sm:size-14 sm:text-2xl"
+          />
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <h1 class="truncate text-2xl font-semibold tracking-tight sm:text-3xl">
+                {@channel.slug}
+              </h1>
+              <.live_badge :if={@live} />
+            </div>
+          </div>
+        </header>
+
+        <section
+          :if={@live}
+          id="live-only-now"
+          class="mt-6 grid max-w-md grid-cols-2 gap-3"
+        >
+          <.kpi label={gettext("Watching now")} metric={:avg} value={@live.viewers} />
+          <.kpi
+            label={gettext("Active chatters")}
+            metric={:chat}
+            value={@chatters_now}
+            hint={gettext("People who chatted in the last 5 minutes")}
+          />
+        </section>
+        <div
+          :if={!@live}
+          id="live-only-offline"
+          class="card-surface mt-6 flex items-center gap-3 p-6 text-sm text-base-content/70"
+        >
+          <.icon name="hero-moon" class="size-5 opacity-60" />
+          {gettext("Not live right now.")}
+        </div>
+        <p class="mt-4 text-xs text-base-content/60">
+          {gettext("Only live figures are published for this channel.")}
+        </p>
+      </div>
+    </Layouts.app>
+    """
+  end
+
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash}>

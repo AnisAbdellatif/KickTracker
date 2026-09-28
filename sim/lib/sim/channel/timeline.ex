@@ -109,7 +109,7 @@ defmodule Sim.Channel.Timeline do
     do: {"channel.subscription.new", Payloads.subscription(channel, user_id, months, at)}
 
   defp to_emission({:resub, user_id, months}, channel, at),
-    do: {"channel.subscription.renewal", Payloads.subscription(channel, user_id, months, at)}
+    do: {"channel.subscription.renewal", Payloads.renewal(channel, user_id, months, at)}
 
   defp to_emission({:gift, gifter, giftees}, channel, at),
     do: {"channel.subscription.gifts", Payloads.subscription_gifts(channel, gifter, giftees, at)}

@@ -269,6 +269,26 @@ defmodule KickTracker.Series do
     }
   end
 
+  @doc """
+  Active chatters now: how many distinct people chatted in the last
+  `window` whole minutes. `nil` when chat coverage doesn't vouch for all
+  of them (we weren't listening, so a count would be too low).
+  """
+  @spec chatters_now(integer(), pos_integer(), DateTime.t()) :: non_neg_integer() | nil
+  def chatters_now(channel_id, window \\ 5, now \\ DateTime.utc_now())
+      when window in 1..60 do
+    to = DateTime.from_unix!(div(DateTime.to_unix(now), 60) * 60)
+    from = DateTime.add(to, -window * 60)
+
+    if complete?(covered_fraction(channel_id, "chat", from, to)) do
+      Repo.one(
+        from u in "chat_minute_users",
+          where: u.channel_id == ^channel_id and u.minute >= ^from and u.minute < ^to,
+          select: count(u.user_id, :distinct)
+      )
+    end
+  end
+
   @doc "From when per-minute chatter detail (`chat_minute_users`) is kept."
   @spec chat_detail_since(DateTime.t()) :: DateTime.t()
   def chat_detail_since(now \\ DateTime.utc_now()),

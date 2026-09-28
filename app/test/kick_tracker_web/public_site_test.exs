@@ -177,7 +177,7 @@ defmodule KickTrackerWeb.PublicSiteTest do
 
   test "closed ranges are cached long, and a repeat with its ETag is a 304", %{conn: conn} do
     conn1 = get(conn, "/data/v1/channels/dailystreamer/viewers?#{@range}")
-    assert get_resp_header(conn1, "cache-control") == ["public, max-age=86400"]
+    assert get_resp_header(conn1, "cache-control") == ["private, max-age=86400"]
     [etag] = get_resp_header(conn1, "etag")
 
     conn2 =
@@ -190,7 +190,7 @@ defmodule KickTrackerWeb.PublicSiteTest do
     # A range reaching now is checked back every time: a chart refreshing
     # it sees each new reading (an unchanged answer is a 304).
     conn3 = get(conn, "/data/v1/channels/dailystreamer/viewers?period=7d")
-    assert get_resp_header(conn3, "cache-control") == ["public, max-age=0, must-revalidate"]
+    assert get_resp_header(conn3, "cache-control") == ["private, max-age=0, must-revalidate"]
     [etag3] = get_resp_header(conn3, "etag")
 
     assert conn
@@ -201,7 +201,7 @@ defmodule KickTrackerWeb.PublicSiteTest do
     # A recent range that has ended is cached briefly.
     to = DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.to_unix()
     conn4 = get(conn, "/data/v1/channels/dailystreamer/viewers?from=#{to - 86_400}&to=#{to}")
-    assert get_resp_header(conn4, "cache-control") == ["public, max-age=30"]
+    assert get_resp_header(conn4, "cache-control") == ["private, max-age=30"]
   end
 
   test "the home page updates live from the aggregated broadcast", %{conn: conn} do

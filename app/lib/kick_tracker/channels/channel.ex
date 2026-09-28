@@ -4,6 +4,7 @@ defmodule KickTracker.Channels.Channel do
   use Ecto.Schema
 
   @type t :: %__MODULE__{}
+  @type visibility :: :public | :live_only | :hidden
 
   schema "channels" do
     field :kick_user_id, :integer
@@ -13,7 +14,10 @@ defmodule KickTracker.Channels.Channel do
     field :timezone, :string, default: "Etc/UTC"
     field :tracked_since, :utc_datetime_usec, read_after_writes: true
     field :active, :boolean, default: true
+    # Kept equal to `visibility == :public` until no running code reads it.
     field :public, :boolean, default: true
+    # public; live_only: only "now" while live; hidden: admin only (§13.2).
+    field :visibility, Ecto.Enum, values: [:public, :live_only, :hidden], default: :public
     # Chat logging (§12.8): message text kept for this channel, admin only.
     field :chat_log, :boolean, default: false
     field :chat_log_retention_days, :integer, default: 90

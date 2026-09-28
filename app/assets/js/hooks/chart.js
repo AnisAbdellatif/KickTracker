@@ -30,6 +30,37 @@
 let loading = null
 const load = () => (loading ||= import("../charts/index.js"))
 
+// /data/v1 answers our own pages only (project.md §13.5): each request
+// carries the page's token. A page left open past the token's life gets a
+// 403 and asks its LiveView for a new one (one request at a time for every
+// chart on the page), then tries once more.
+const tokenMeta = () => document.querySelector("meta[name='data-token']")
+
+let renewing = null
+function renewToken(hook) {
+  renewing ||= new Promise((resolve) => {
+    // Without an answer (the socket is down), the retry fails as before.
+    const timer = setTimeout(resolve, 10000)
+    hook.pushEvent("data_token", {}, (reply) => {
+      const meta = tokenMeta()
+      if (meta && reply && reply.token) meta.content = reply.token
+      clearTimeout(timer)
+      resolve()
+    })
+  }).finally(() => (renewing = null))
+  return renewing
+}
+
+function fetchData(hook, url, init = {}) {
+  const go = () => {
+    const meta = tokenMeta()
+    const headers = {accept: "application/json", "x-data-token": meta ? meta.content : ""}
+    return fetch(url, {...init, headers})
+  }
+  const data = new URL(url, location.href).pathname.startsWith("/data/")
+  return go().then((r) => (r.status === 403 && data ? renewToken(hook).then(go) : r))
+}
+
 export const Chart = {
   mounted() {
     this.opts = JSON.parse(this.el.dataset.opts || "{}")
@@ -135,7 +166,7 @@ export const Chart = {
     if (!quiet) this.el.classList.add("chart-loading")
     // A refresh asks for the data as it is now: the browser checks back with
     // the server (a 304 when nothing changed) rather than reusing its copy.
-    fetch(src, {headers: {accept: "application/json"}, cache: quiet ? "no-cache" : "default"})
+    fetchData(this, src, {cache: quiet ? "no-cache" : "default"})
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((data) => {
         // A newer request was made while this was on its way: it draws.
@@ -164,7 +195,7 @@ export const Chart = {
     const url = new URL(this.el.dataset.chattersSrc, location.href)
     url.searchParams.set("window", window)
     const seq = (this.chattersSeq = (this.chattersSeq || 0) + 1)
-    fetch(url, {headers: {accept: "application/json"}})
+    fetchData(this, url)
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((c) => {
         if (seq !== this.chattersSeq || !this.data) return

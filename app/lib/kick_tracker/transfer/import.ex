@@ -193,14 +193,17 @@ defmodule KickTracker.Transfer.Import do
        "INSERT INTO removals (kind, kick_user_id, removed_at) SELECT kind, kick_user_id, removed_at FROM s_removals ON CONFLICT DO NOTHING",
        []},
       # A new channel keeps its settings; it's paused if another tracked
-      # channel holds its slug now (a rename since).
+      # channel holds its slug now (a rename since). A file from before
+      # `visibility` has only `public`: a channel hidden there is hidden.
       {"channels",
        """
-       INSERT INTO channels (kick_user_id, kick_channel_id, chatroom_id, slug, timezone, tracked_since, active, public, inserted_at, updated_at)
+       INSERT INTO channels (kick_user_id, kick_channel_id, chatroom_id, slug, timezone, tracked_since, active, public, visibility, inserted_at, updated_at)
        SELECT s.kick_user_id, s.kick_channel_id, s.chatroom_id, s.slug, s.timezone,
               #{if history?, do: "s.tracked_since", else: "now()"},
               s.active AND NOT EXISTS (SELECT 1 FROM channels a WHERE a.active AND lower(a.slug) = lower(s.slug)),
-              s.public, now(), now()
+              s.public AND s.visibility = 'public',
+              CASE WHEN NOT s.public AND s.visibility = 'public' THEN 'hidden' ELSE s.visibility END,
+              now(), now()
        FROM s_channels s
        WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.kick_user_id = s.kick_user_id) AND #{@not_removed_channel}
        RETURNING id
