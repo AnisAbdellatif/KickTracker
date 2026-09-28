@@ -67,11 +67,6 @@ msgstr ""
 msgid "A stream is identified by the time Kick says it started. Kick's own end event decides when it ended; when that event is missing, the stream ends at the last moment we saw it live (marked with *). A short drop where Kick keeps the same start time continues the same stream."
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:24
-#, elixir-autogen, elixir-format
-msgid "About visitors to this site: no accounts, no tracking cookies, no analytics, no access logs. Your IP address is held in memory to limit abusive request rates: about a minute, or an hour after repeated failed admin logins, then forgotten."
-msgstr ""
-
 #: lib/kick_tracker_web/live/admin/invite_live.ex:22
 #, elixir-autogen, elixir-format
 msgid "Accept invitation"
@@ -1448,7 +1443,7 @@ msgstr ""
 msgid "Stream start and end, title and category changes, follows, subscriptions, gifted subscriptions and Kicks: Kick's official webhooks, delivered to us as they happen."
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:109
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:116
 #, elixir-autogen, elixir-format
 msgid "Streamers can ask for their channel to be removed:"
 msgstr ""
@@ -1692,7 +1687,7 @@ msgstr ""
 msgid "Who"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:71
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:78
 #, elixir-autogen, elixir-format
 msgid "Why"
 msgstr ""
@@ -1712,7 +1707,7 @@ msgstr ""
 msgid "You can't disable yourself."
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:101
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:108
 #, elixir-autogen, elixir-format
 msgid "Your rights"
 msgstr ""
@@ -1912,7 +1907,7 @@ msgstr ""
 msgid "public"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:112
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:119
 #, elixir-autogen, elixir-format
 msgid "removal requests"
 msgstr ""
@@ -2849,11 +2844,6 @@ msgstr ""
 msgid "Chat logging is not turned on for any channel."
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:32
-#, elixir-autogen, elixir-format
-msgid "Chat logging is off unless we turn it on for a channel, which we do only with the streamer's agreement. On those channels we keep every chat message (its text, who sent it, when, and which message it answered) and other chat events such as bans, deleted messages and pins. The log is kept for a set time per channel, then deleted. It is never published: only this site's administrators can read it."
-msgstr ""
-
 #: lib/kick_tracker_web/live/admin/anomalies_live.ex:124
 #, elixir-autogen, elixir-format
 msgid "Chatters per minute per 100 viewers"
@@ -2954,7 +2944,7 @@ msgstr ""
 msgid "Drop without chat"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:65
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:72
 #, elixir-autogen, elixir-format
 msgid "Encrypted backups, stored away from our server, are kept for about a week, so what we delete leaves them within that time. A standby copy on a second server keeps the last 30 days and follows deletions within minutes."
 msgstr ""
@@ -3081,7 +3071,7 @@ msgstr ""
 msgid "Hosts naming them"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:55
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:62
 #, elixir-autogen, elixir-format
 msgid "How long we keep it"
 msgstr ""
@@ -3119,11 +3109,6 @@ msgstr ""
 #: lib/kick_tracker_web/live/admin/settings_live.ex:58
 #, elixir-autogen, elixir-format
 msgid "Kick's price for one subscription."
-msgstr ""
-
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:4
-#, elixir-autogen, elixir-format
-msgid "Last updated 26 September 2026."
 msgstr ""
 
 #: lib/kick_tracker_web/live/admin/data_live.ex:187
@@ -3166,17 +3151,12 @@ msgstr ""
 msgid "Logged chat events mentioning the id"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:96
-#, elixir-autogen, elixir-format
-msgid "Logged chat is never published. We don't sell personal data or share it with anyone."
-msgstr ""
-
 #: lib/kick_tracker_web/live/admin/privacy_live.ex:120
 #, elixir-autogen, elixir-format
 msgid "Logged chat messages"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:58
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:65
 #, elixir-autogen, elixir-format
 msgid "Logged chat: the time set for its channel (listed above)."
 msgstr ""
@@ -3343,7 +3323,7 @@ msgstr ""
 msgid "Nothing stood out in what we observed."
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:92
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:99
 #, elixir-autogen, elixir-format
 msgid "Nothing that identifies a person in a channel's audience is shown on this site."
 msgstr ""
@@ -3368,7 +3348,7 @@ msgstr ""
 msgid "Open the menu"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:73
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:80
 #, elixir-autogen, elixir-format
 msgid "Our legal basis is legitimate interest: publishing statistics about public live streams, built only from public information, with the least personal data that makes them possible; and, on channels whose streamer agreed, keeping a record of their chat."
 msgstr ""
@@ -3508,7 +3488,7 @@ msgstr ""
 msgid "Site"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:60
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:67
 #, elixir-autogen, elixir-format
 msgid "Statistics, follows, subscriptions, gifts and Kicks: kept, as the history this site exists to show."
 msgstr ""
@@ -3669,17 +3649,17 @@ msgstr ""
 msgid "What the streamer receives for one Kick."
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:88
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:95
 #, elixir-autogen, elixir-format
 msgid "What this site shows about people in an audience: a channel's top supporters, by Kick username, with how many subscriptions, gifts or Kicks. Nothing else about a person is published."
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:80
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:87
 #, elixir-autogen, elixir-format
 msgid "What this site shows about people in an audience: a stream's top chatters and supporters, and a channel's top supporters, by Kick username, with how many messages, subscriptions, gifts or Kicks. Nothing else about a person is published."
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:84
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:91
 #, elixir-autogen, elixir-format
 msgid "What this site shows about people in an audience: a stream's top chatters and supporters, by Kick username, with how many messages, subscriptions, gifts or Kicks. Nothing else about a person is published."
 msgstr ""
@@ -3694,7 +3674,7 @@ msgstr ""
 msgid "Which events Kick sends us for each tracked channel. Where deliveries go is set once in the Kick app's settings; a sync every 15 minutes adds what is missing and removes the rest."
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:57
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:64
 #, elixir-autogen, elixir-format
 msgid "Who chatted in which minute: 90 days. Per-stream counts are kept."
 msgstr ""
@@ -3704,7 +3684,7 @@ msgstr ""
 msgid "Why exclude it"
 msgstr ""
 
-#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:103
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:110
 #, elixir-autogen, elixir-format
 msgid "You can ask what we hold about your Kick account, object to it, and ask us to delete it: your username, the per-person rows, your logged chat messages, and the raw records naming you. Aggregate counts that no longer identify you stay. Write to %{contact} with your Kick username."
 msgstr ""
@@ -4156,4 +4136,34 @@ msgstr ""
 #: lib/kick_tracker_web/live/admin/api_keys_live.ex:451
 #, elixir-autogen, elixir-format
 msgid "Shared key: count the limit per address (for a key many people use, such as one built into an app)"
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:24
+#, elixir-autogen, elixir-format
+msgid "About visitors to this site and users of its API: no accounts, no tracking cookies, no analytics, no access logs (the server's log notes which page or API path was asked for, and when, never by whom). Your IP address is held in memory to limit abusive request rates: about a minute, or an hour after repeated failed admin logins, then forgotten."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:32
+#, elixir-autogen, elixir-format
+msgid "Chat logging is off unless we turn it on for a channel, which we do only with the streamer's agreement. On those channels we keep every chat message (its text, who sent it, when, and which message it answered) and other chat events such as bans, deleted messages and pins. The log is kept for a set time per channel, then deleted. It is never published: only this site's administrators can read it, here or through an administrator's API key."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:4
+#, elixir-autogen, elixir-format
+msgid "Last updated 28 September 2026."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:103
+#, elixir-autogen, elixir-format
+msgid "Logged chat is never published. We don't sell personal data or share it with anyone: our API gives other applications channel statistics and counts, not information about people."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:57
+#, elixir-autogen, elixir-format
+msgid "Other applications can read this site's statistics through an API, with a key we issue to each of them. A key reaches the same public statistics about channels that this site shows, for the channels shown here, and nothing about people in a channel's audience beyond counts. One of these applications is the KickPlus browser extension: its live chart asks for the figures of the channel its user is watching, once a minute. Such a request names the channel and nothing about the person; like any request, its IP address is held in memory for about a minute to limit request rates, then forgotten."
+msgstr ""
+
+#: lib/kick_tracker_web/controllers/about_html/privacy.html.heex:55
+#, elixir-autogen, elixir-format
+msgid "Our data API"
 msgstr ""

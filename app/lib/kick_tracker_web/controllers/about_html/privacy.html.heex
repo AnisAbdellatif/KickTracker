@@ -1,7 +1,7 @@
 <Layouts.app flash={@flash} wide={false} active={:about}>
   <article class="space-y-4 text-sm leading-relaxed">
     <h1 class="text-2xl font-semibold">{gettext("Privacy")}</h1>
-    <p class="opacity-70">{gettext("Last updated 26 September 2026.")}</p>
+    <p class="opacity-70">{gettext("Last updated 28 September 2026.")}</p>
 
     <h2 class="text-lg font-semibold">{gettext("What we store")}</h2>
     <ul class="list-disc ps-5 space-y-1">
@@ -22,7 +22,7 @@
       </li>
       <li>
         {gettext(
-          "About visitors to this site: no accounts, no tracking cookies, no analytics, no access logs. Your IP address is held in memory to limit abusive request rates: about a minute, or an hour after repeated failed admin logins, then forgotten."
+          "About visitors to this site and users of its API: no accounts, no tracking cookies, no analytics, no access logs (the server's log notes which page or API path was asked for, and when, never by whom). Your IP address is held in memory to limit abusive request rates: about a minute, or an hour after repeated failed admin logins, then forgotten."
         )}
       </li>
     </ul>
@@ -30,7 +30,7 @@
     <h2 id="chat-logging" class="text-lg font-semibold">{gettext("Chat logging")}</h2>
     <p>
       {gettext(
-        "Chat logging is off unless we turn it on for a channel, which we do only with the streamer's agreement. On those channels we keep every chat message (its text, who sent it, when, and which message it answered) and other chat events such as bans, deleted messages and pins. The log is kept for a set time per channel, then deleted. It is never published: only this site's administrators can read it."
+        "Chat logging is off unless we turn it on for a channel, which we do only with the streamer's agreement. On those channels we keep every chat message (its text, who sent it, when, and which message it answered) and other chat events such as bans, deleted messages and pins. The log is kept for a set time per channel, then deleted. It is never published: only this site's administrators can read it, here or through an administrator's API key."
       )}
     </p>
     <%= if @chat_log.listed == [] and @chat_log.hidden == 0 do %>
@@ -51,6 +51,13 @@
         )}
       </p>
     <% end %>
+
+    <h2 id="api" class="text-lg font-semibold">{gettext("Our data API")}</h2>
+    <p>
+      {gettext(
+        "Other applications can read this site's statistics through an API, with a key we issue to each of them. A key reaches the same public statistics about channels that this site shows, for the channels shown here, and nothing about people in a channel's audience beyond counts. One of these applications is the KickPlus browser extension: its live chart asks for the figures of the channel its user is watching, once a minute. Such a request names the channel and nothing about the person; like any request, its IP address is held in memory for about a minute to limit request rates, then forgotten."
+      )}
+    </p>
 
     <h2 class="text-lg font-semibold">{gettext("How long we keep it")}</h2>
     <ul class="list-disc ps-5 space-y-1">
@@ -94,7 +101,7 @@
           )}
       <% end %>
       {gettext(
-        "Logged chat is never published. We don't sell personal data or share it with anyone."
+        "Logged chat is never published. We don't sell personal data or share it with anyone: our API gives other applications channel statistics and counts, not information about people."
       )}
     </p>
 
