@@ -153,10 +153,25 @@ jobs:
       - run: docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 deploy/release.sh deploy/release-test.sh
       - run: deploy/release-test.sh
 
+  # The webhook failover Worker (ingress/worker): deployed by hand with
+  # wrangler, tested here.
+  worker:
+    name: Ingress Worker
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ingress/worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm test
+
   images:
     name: Images
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [sim, receiver, app, dialyzer, release]
+    needs: [sim, receiver, app, dialyzer, release, worker]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
