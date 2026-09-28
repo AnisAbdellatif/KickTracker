@@ -74,6 +74,8 @@ jobs:
             ingress/receiver/_build
           key: receiver-${{ runner.os }}-${{ hashFiles('ingress/receiver/mix.lock') }}
       - run: mix deps.get
+      # Deployed like the app: its dependencies' advisories matter as much.
+      - run: mix hex.audit
       - run: mix format --check-formatted
       - run: mix compile --warnings-as-errors
       - run: mix test
@@ -144,19 +146,41 @@ jobs:
       - run: mix deps.get
       - run: mix dialyzer --format github
 
-  # Which groups deploy/release.sh deploys for a change (a fake kit, no server).
+  # Which groups deploy/release.sh deploys for a change, and what the shadow
+  # machine's scripts deploy and when (fakes, no server).
   release:
-    name: Release script
+    name: Release scripts
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 deploy/release.sh deploy/release-test.sh
+      - run: >-
+          docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -x
+          deploy/release.sh deploy/release-test.sh deploy/shadow.sh deploy/shadow-test.sh
+          deploy/shadow-follow.sh deploy/shadow-follow-test.sh deploy/secrets/decrypt.sh
+          .kamal/steps/migrate .kamal/steps/server-sync
       - run: deploy/release-test.sh
+      - run: deploy/shadow-test.sh
+      - run: deploy/shadow-follow-test.sh
+
+  # The webhook failover Worker (ingress/worker): deployed by hand with
+  # wrangler, tested here.
+  worker:
+    name: Ingress Worker
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ingress/worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm test
 
   images:
     name: Images
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [sim, receiver, app, dialyzer, release]
+    needs: [sim, receiver, app, dialyzer, release, worker]
     runs-on: ubuntu-24.04
     permissions:
       contents: read

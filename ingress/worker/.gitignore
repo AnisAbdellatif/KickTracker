@@ -1,0 +1,4 @@
+# The real settings (hostnames): from wrangler.toml.example.
+wrangler.toml
+.wrangler/
+node_modules/

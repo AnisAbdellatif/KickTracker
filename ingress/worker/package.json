@@ -1,0 +1,9 @@
+{
+  "name": "kicktracker-ingress-worker",
+  "private": true,
+  "type": "module",
+  "description": "Webhook failover in front of the receivers (README.md)",
+  "scripts": {
+    "test": "node --test"
+  }
+}

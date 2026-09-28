@@ -1,0 +1,57 @@
+# The shadow collector as Kamal runs it (project.md §10.5): one collector
+# on the shadow machine, with its own database (../compose.shadow.yml, on
+# the same Docker network, "kamal"), collecting the same channels as the
+# main VPS all the time. The main VPS fills its own gaps from it.
+#
+# One role, no standby: a deploy stops it, starts the new build and waits
+# until it's healthy, or puts the previous build back (.kamal/groups/shadow).
+# The few seconds it's down only matter if the main VPS is down at the same
+# moment. Deployed with deploy/shadow.sh, by hand or by the follower
+# (deploy/shadow-follow.sh), never with release.sh.
+#
+# `service: kicktracker` because the image is the app's, and Kamal only
+# runs an image whose `service` label matches. The role guard keeps the
+# main VPS's groups apart: this config's only role is `shadow`.
+#
+# The machine, user and folder come from the environment
+# (.kamal/kit.local.env): KT_SHADOW_HOST (its Tailscale address),
+# KT_SHADOW_SSH_USER, KT_SHADOW_DEPLOY_DIR. Its secrets are decrypted there
+# (deploy/server-sync.sh), as on the main VPS.
+<%
+  host = ENV.fetch("KT_SHADOW_HOST") { raise "KT_SHADOW_HOST isn't set: put the shadow machine in .kamal/kit.local.env" }
+  dir = ENV.fetch("KT_SHADOW_DEPLOY_DIR", "/srv/kick_tracker")
+  secrets = "#{dir}/deploy/secrets"
+%>
+service: kicktracker
+image: <%= ENV.fetch("KT_IMAGE_OWNER", "anisabdellatif") %>/kicktracker-app
+
+primary_role: shadow
+
+servers:
+  shadow:
+    hosts: [<%= host %>]
+    proxy: false
+    stop_timeout: 60
+    env:
+      clear: {ROLE: collector, COLLECTOR_MODE: shadow, COLLECTOR_ID: shadow}
+    options:
+      env-file: <%= secrets %>/shadow.env
+      restart: always
+      volume: kicktracker-shadow_journal:/journal
+
+registry:
+  server: <%= ENV.fetch("KT_REGISTRY", "ghcr.io") %>
+  username: <%= ENV.fetch("KT_REGISTRY_USER", "anisabdellatif") %>
+  password: [KAMAL_REGISTRY_PASSWORD]
+
+builder:
+  arch: amd64
+  context: app
+  dockerfile: app/Dockerfile
+
+ssh:
+  user: <%= ENV.fetch("KT_SHADOW_SSH_USER") { raise "KT_SHADOW_SSH_USER isn't set: put the shadow machine's deploy user in .kamal/kit.local.env" } %>
+  port: <%= ENV.fetch("KT_SHADOW_SSH_PORT", 22) %>
+
+deploy_timeout: 180
+retain_containers: 5

@@ -34,7 +34,8 @@ mix run --no-halt
 ```
 
 `GET http://127.0.0.1:4060/health` answers `{"ok", "rabbitmq", "spooled",
-"spool_bytes", "spool_over_limit"}`. It never waits on RabbitMQ or on a
+"spool_bytes", "spool_over_limit", "build"}` (`build`: the commit the image
+was built from, `BUILD_SHA`; null outside an image). It never waits on RabbitMQ or on a
 publish in progress (the connection state is read from memory), so the
 load balancer's 2s health timeout holds whatever the broker does.
 

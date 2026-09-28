@@ -25,12 +25,14 @@ images; it deploys nothing and holds no key to the server.
 | `server-sync.sh` | Run on the server before each deploy: checkout up to the commit, secrets decrypted |
 | `../.kamal/` | deploy-kit: its settings (`kit.env`), the groups (`groups/`), the project's steps (`steps/`), the vendored kit (`kit/`) |
 | `compose.single.yml` | Stage 1 infrastructure: database, queue, bundled Caddy |
-| `compose.backup-receiver.yml` | Stage 2: a backup receiver on a second VPS |
-| `compose.shadow.yml`, `deploy.sh` | Stage 2: the shadow collector on the second VPS (§10.5), deployed with `ROLE=shadow ./deploy.sh` there |
+| `shadow.sh` | **Deploys the shadow machine** (the shadow collector and the backup receiver), by hand at any time |
+| `shadow-follow.sh` | The follower on the shadow machine: deploys what the main VPS runs once it has been live and healthy there for `KT_SHADOW_SOAK` (6h) |
+| `kamal/shadow.yml`, `kamal/backup-receiver.yml` | Kamal's configs for the shadow machine: one shadow collector, one backup receiver |
+| `compose.shadow.yml` | The shadow machine's database |
 | `shadow/readers.sql` | Read-only users for the primary / shadow pair |
+| `shadow/kicktracker-follow.*` | The follower's systemd timer on the shadow machine |
 | `Caddyfile` | The bundled Caddy (profile `caddy`): HTTPS, from `caddy/sites.caddy` |
 | `caddy/sites.caddy` | The sites: the admin allowlist, the web pair, the receivers' failover; imported by the bundled Caddy or the host's own |
-| `caddy/backup-receiver.caddy` | The stage 2 backup receiver's Caddy (a Cloudflare origin certificate) |
 | `db/` | TimescaleDB with WAL-G (continuous backups) |
 | `backup/` | Base backups and the scripted restore test |
 | `ops/check-host.sh` | Disk and certificate checks |
@@ -267,73 +269,125 @@ deploy-kit. The move, without a gap in collection or webhook intake:
    `DEPLOY_KNOWN_HOSTS`, `DEPLOY_HOST`, `DEPLOY_USER`) and that key's line
    in the server's `authorized_keys`.
 
-## The backup receiver (stage 2, §15.2)
+## The shadow machine (§10.5, §15.2)
 
-A second receiver on the stage 2 machine takes webhooks while the main VPS
-is down, spools them, and forwards them to the main RabbitMQ once it
-answers again (`compose.backup-receiver.yml`).
+A second machine, independent of the main VPS (another provider or
+network, its own power), that keeps collecting when the main VPS can't.
+It needs no open port: Tailscale links it to the main VPS, and Cloudflare
+Tunnel brings it webhooks. It runs:
 
-1. Link the two machines privately (WireGuard or Tailscale) and set
-   `PRIVATE_IP` in the main VPS's `deploy/.env` to its private address,
-   then `docker compose -f compose.single.yml up -d rabbitmq`: AMQP (5672)
-   is then published on that address only (loopback while it is unset).
-   AMQP is plain here, the tunnel is what encrypts it, so never set
-   `PRIVATE_IP` to a public address. Docker's published ports bypass
-   `ufw`: allow only the backup machine's private address, with the
-   tunnel's own rules (Tailscale ACLs, WireGuard `AllowedIPs`) or an
-   `iptables -I DOCKER-USER` rule.
-2. On the backup machine, `secrets/receiver.env` from its example with
-   `AMQP_URL=amqp://receiver:<password>@<main private address>:5672`,
-   and `secrets/stack.env` with `INGRESS_HOST`.
-3. Certificates: Cloudflare's load balancer sends the ingress host to the
-   main VPS while it is healthy, so an ACME challenge for it never reaches
-   the backup machine and Caddy can't get a public certificate there.
-   Create a Cloudflare Origin CA certificate for the ingress host
-   (Cloudflare dashboard, SSL/TLS, Origin Server) and save it as
-   `secrets/origin-cert.pem` and its key as `secrets/origin-key.pem`
-   (git-ignored; `chmod 600` the key). Set the zone's SSL mode to
-   "Full (strict)". The main VPS keeps its public certificate (Caddy
-   renews it a month ahead, so a renewal missed during a failover is
-   retried); it may use the same origin certificate instead.
-4. `docker compose -f compose.backup-receiver.yml up -d`, then add both
-   machines to the Cloudflare load balancer's pool for the ingress host,
-   with a monitor on `https://<ingress host>/health`.
+- **the shadow collector** (`kamal/shadow.yml`): polls and chat for the
+  same channels, all the time, into its own database
+  (`compose.shadow.yml`). The main VPS fills its own gaps from it every 5
+  minutes (`Workers.Backfill`), for the last `BACKFILL_DAYS` (7);
+- **the backup receiver** (`kamal/backup-receiver.yml`): the ingress
+  Worker (`ingress/worker`) sends it each webhook the main VPS can't take;
+  it spools it and publishes to the main RabbitMQ over Tailscale once
+  that answers;
+- **the follower** (`shadow-follow.sh`, a systemd timer): deploys what
+  the main VPS runs, once it has been live and healthy there for
+  `KT_SHADOW_SOAK` (6h).
 
-## The shadow collector (§10.5)
+Each is one role, no standby: a deploy stops it, starts the new build,
+waits until it's healthy, and puts the previous build back if it never
+is. A few seconds without the shadow only matter if the main VPS is down
+at that moment.
 
-An independent collector on a second machine (the stage 2 one), with its
-own database, collecting the same channels all the time. When the main VPS
-is down, it keeps polling and chatting; when the main VPS is back, the
-primary side fills what it missed from the shadow's database, every 5
-minutes, for the last `BACKFILL_DAYS` (7).
+### Setting it up (once)
 
-1. Link the two machines privately (WireGuard or Tailscale) and set
-   `PRIVATE_IP` in each `deploy/.env` to that machine's private address:
-   each database is then published on it (main on 5432, shadow on 5433),
-   and on nothing public (the main VPS's RabbitMQ too, on 5672, for the
-   backup receiver).
-2. Register a second app on kick.com for the shadow (its own token and rate
-   limits).
-3. On the shadow machine: `secrets/shadow.env` and `secrets/shadow-db.env`
-   from their examples, `SHADOW_IMAGE` pinned in `deploy/.env`, then
+1. **The machine**: Docker, git, `psql` (postgresql-client) and Kamal (or
+   `KIT_RUNNER=docker`), a deploy user in the `docker` group, joined to
+   the tailnet. In its firmware, power on after a power cut.
+2. **Tailscale ACLs**, only these (tag the two machines):
+   the shadow machine to the main VPS's 5432 (the database, as
+   `shadow_reader`) and 5672 (RabbitMQ, as the publish-only `receiver`);
+   the main VPS to the shadow machine's 5433 (its database, as
+   `backfill_reader`). SSH to the shadow machine from wherever you deploy.
+3. **The main VPS**: `PRIVATE_IP=<its Tailscale address>` in its
+   `deploy/.env`, then `docker compose -f compose.single.yml up -d db
+   rabbitmq` (a restart of a few seconds: the collectors' journals and the
+   receivers' spools hold what arrives meanwhile). Docker's published ports
+   bypass `ufw`: the ACLs are what limit them. Then the read-only users
+   (`shadow/readers.sql`, `shadow_reader` part) on the main database.
+4. **A second Kick app** on kick.com, for the shadow (its own token and
+   rate limits; it subscribes to nothing).
+5. **Secrets**: an age key on the shadow machine; its public key in
+   `../.sops.yaml`'s first rule (then `sops updatekeys` those files).
+   From the examples in `secrets/`: `shadow.sops.env` (the shadow's Kick
+   app, `MAIN_DATABASE_URL` with the main VPS's Tailscale address),
+   `shadow-db.sops.env`, `backup-receiver.sops.env` (`AMQP_URL` with the
+   main VPS's Tailscale address). The main VPS can't read these, and the
+   shadow machine can't read the main VPS's.
+6. **The checkout the deploys sync** (like the main VPS's): clone the repo
+   to `KT_SHADOW_DEPLOY_DIR` (e.g. `/srv/kick_tracker`) and in its
+   `deploy/.env`: `PRIVATE_IP=<its Tailscale address>` and
+   `SECRETS="shadow shadow-db backup-receiver"` (`secrets/decrypt.sh`
+   then decrypts only those). `docker network create kamal`, then
+   `deploy/secrets/decrypt.sh` and `docker compose -f compose.shadow.yml
+   up -d`; on its database, the `backfill_reader` part of
+   `shadow/readers.sql`.
+7. **Wherever you deploy it from**, in `.kamal/kit.local.env`:
+   `KT_SHADOW_HOST` (the Tailscale address), `KT_SHADOW_SSH_USER`,
+   `KT_SHADOW_DEPLOY_DIR`. The first deploy: `deploy/shadow.sh`.
+8. **On the main VPS's side**, `SHADOW_DATABASE_URL` in `collector.env`
+   (`backfill_reader`, the shadow machine's Tailscale address, port
+   5433), then `kit group deploy collectors`: the backfill starts, and the
+   health page shows the shadow.
+9. **Webhooks**: on the shadow machine's tunnel, a public hostname to
+   `http://localhost:4060`; then the Worker on the webhook hostname
+   (`ingress/worker/README.md`). The main VPS keeps its hostname and
+   Caddy as they are: the Worker reaches it through the same hostname.
+10. **The follower**, on the shadow machine: a second checkout of `main`
+    that only deploys (`~/kicktracker-deployer`), with the step 7 settings
+    in its `.kamal/kit.local.env`, plus `KT_FOLLOW_SITE_HEALTH` (the
+    site's `/healthz`) and `KT_FOLLOW_INGRESS_HEALTH` (the webhook
+    hostname's `/health`; one the backup answered doesn't count), the
+    kit's notification settings, a GitHub token that can
+    read the repo's checks and attestations (`gh auth login`), and
+    `KT_REGISTRY_PASSWORD` (a read-only GHCR token). Then the timer:
+    `shadow/kicktracker-follow.service` says how.
+11. **Check it before relying on it**: stop the main receivers
+    (`kit kamal app stop -c deploy/kamal/receiver.yml`), send a test
+    webhook through the Worker (the answer says `x-ingress-target:
+    backup`), start them again and see it reach RabbitMQ; stop the shadow
+    collector and see the "shadow collector" alert after 15 minutes; see
+    the backfill fill a gap (`coverage` rows with `collector = 'shadow'`).
 
-       docker compose -f compose.shadow.yml up -d db
-       docker compose -f compose.shadow.yml run --rm migrate
-       docker compose -f compose.shadow.yml up -d
+### Day to day
 
-4. Create the read-only users (`shadow/readers.sql`): `shadow_reader` on
-   the main database, `backfill_reader` on the shadow's. Set
-   `MAIN_DATABASE_URL` in `shadow.env` and `SHADOW_DATABASE_URL` in
-   `collector.env`, and redeploy the collectors.
-5. Set the shadow's own `HEARTBEAT_URL`, and alerts (it tells you when it
-   can't reach the main VPS; the main side's alerts may be down with it).
+    deploy/shadow.sh --status             # what each runs
+    deploy/shadow.sh                      # this checkout's commit, now
+    deploy/shadow.sh --version <sha>      # another build (a rollback)
+    deploy/shadow.sh --only shadow        # one of the two
+    deploy/shadow-follow.sh --status      # on the shadow machine: the soak clocks
+    deploy/shadow-follow.sh --now         # the main VPS's builds, now
+    deploy/shadow-follow.sh --pause / --resume
 
-Deploy it on that machine, from `deploy/` in its checkout, after
-`git pull`: `ROLE=shadow ./deploy.sh` (standby first, like the main
-collectors; `TAG=<sha>` for another build). The health page shows it as "shadow, on another
-machine", and an alert fires when it hasn't been seen collecting for 15
-minutes. It keeps `SHADOW_KEEP_DAYS` (30) of data and isn't backed up: its
-data only matters until the main side has filled its gaps.
+`shadow.sh` is the kit's usual deploy (the same gates: `main`, clean and
+pushed, CI green, attestations; then the shadow machine's checkout and
+secrets, and its own database's migrations) without the main VPS's smoke
+tests. A group already on the build is left alone. Releases of the main
+VPS (`release.sh`) never touch the shadow machine.
+
+The follower checks every 10 minutes what the main VPS runs (the leading
+collector's build; the receivers' `/health`) and whether it's healthy (a
+leader, no open alert, the site and the receivers answering). A build
+healthy for `KT_SHADOW_SOAK` is deployed to the group that runs it; any
+unhealthy check starts the clock again. It follows the main VPS moving,
+not what the shadow runs: a build you deployed by hand stays until the
+main VPS changes. A failed deploy is retried after `KT_FOLLOW_RETRY` (1h);
+the kit notifies each deploy and failure. Its log: `journalctl --user -u
+kicktracker-follow`.
+
+**The shadow runs up to `KT_SHADOW_SOAK` behind the main VPS**, so the
+main VPS's backfill reads the shadow's database written by an older
+build: a column it reads there must already exist one soak earlier
+(AGENTS.md §8).
+
+The shadow's data is kept `SHADOW_KEEP_DAYS` (30) and isn't backed up: it
+only matters until the main side has filled its gaps. The shadow
+notifies when it can't reach the main VPS (its own `NTFY_URL`); set its
+own `HEARTBEAT_URL`, so the shadow dying is noticed too.
 
 ## Backups (§18.1)
 

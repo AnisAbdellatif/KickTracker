@@ -50,4 +50,8 @@ config :receiver,
   peer_health_url: System.get_env("PEER_HEALTH_URL"),
   # /health flags the spool (spool_over_limit) past this size; nothing is
   # refused for it.
-  spool_warn_bytes: String.to_integer(System.get_env("SPOOL_WARN_BYTES", "1073741824"))
+  spool_warn_bytes: String.to_integer(System.get_env("SPOOL_WARN_BYTES", "1073741824")),
+  # The commit the image was built from (BUILD_SHA, set by the image
+  # build), or nil outside one: in /health, which the shadow machine's
+  # follower reads to learn what the main VPS runs (deploy/shadow-follow.sh).
+  build: System.get_env("BUILD_SHA")

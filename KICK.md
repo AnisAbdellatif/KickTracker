@@ -183,7 +183,12 @@ Details worth knowing:
   every type; an end event arrived 5s after its `ended_at`. *(production,
   recording)*
 - **Retries** are implied by the docs ("for over a day") but the policy is
-  not documented or observed (§8).
+  not documented, and **not seen**: on 2026-09-28 our receivers were
+  unreachable for 26 minutes (the main VPS lost its network); of the
+  webhooks Kick sent then, only the two that got through at the time
+  exist, and none arrived afterwards (checked two hours later).
+  *(production, once)* Treat a failed delivery as lost; the ingress
+  Worker retries on the backup receiver itself (project.md §15.2).
 - **Missed webhooks are lost.** Stream state and metadata can be recovered
   by polling; follows, subs, gifts and Kicks cannot.
 - No viewer-count event and **no raid/host event** among webhooks.
@@ -319,8 +324,9 @@ name only the message id: the text has to come from the chat log.
 
 ## 8. Open questions
 
-- **Webhook retry policy**: whether and when Kick redelivers after a failed
-  delivery. Test: stop the ingress, trigger an event, watch.
+- **Webhook retry policy**: whether Kick ever redelivers after a failed
+  delivery. Seen once not to within two hours (§4); a deliberate test
+  (stop the ingress, trigger an event, watch for a day) would settle it.
 - **Subscription removal limit**: 50 per `DELETE` works, ~330 doesn't; the
   real limit is unknown.
 - **Public API rate limits**: unknown (no headers); not to be probed.

@@ -25,6 +25,9 @@ ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8 SPOOL_PATH=/data/spool
 WORKDIR /app
 RUN useradd --system --home /app app && mkdir /data && chown app /app /data
 COPY --from=build --chown=app /app/_build/prod/rel/receiver ./
+# The commit this image was built from (CI passes it): /health reports it.
+ARG BUILD_SHA=""
+ENV BUILD_SHA=${BUILD_SHA}
 USER app
 VOLUME /data
 EXPOSE 4060

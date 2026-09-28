@@ -1,0 +1,20 @@
+# The follower (deploy/shadow-follow.sh) on the shadow machine, as the
+# deploy user: a user unit, run by kicktracker-follow.timer. Install:
+#
+#   cp deploy/shadow/kicktracker-follow.* ~/.config/systemd/user/
+#   (edit WorkingDirectory if the checkout isn't ~/kicktracker-deployer)
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now kicktracker-follow.timer
+#   loginctl enable-linger "$USER"   # runs without anyone logged in
+#
+# Its output: journalctl --user -u kicktracker-follow
+[Unit]
+Description=KickTracker shadow follower (deploys what the main VPS runs, once soaked)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/kicktracker-deployer
+ExecStart=%h/kicktracker-deployer/deploy/shadow-follow.sh
+# A deploy waits for a collector's health (up to 4 minutes) and may pull.
+TimeoutStartSec=30min

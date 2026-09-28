@@ -1,11 +1,14 @@
 -- Read-only users for the primary / shadow pair (project.md §10.5).
 -- Replace CHANGE_ME with passwords kept in the secrets (secrets/README.md).
 
--- On the MAIN database: what the shadow reads (MAIN_DATABASE_URL).
+-- On the MAIN database: what the shadow reads (MAIN_DATABASE_URL): the
+-- channel list and removals; and for the follower on the shadow machine
+-- (deploy/shadow-follow.sh), which build the main collectors run and
+-- whether any alert is open.
 CREATE ROLE shadow_reader LOGIN PASSWORD 'CHANGE_ME';
 GRANT CONNECT ON DATABASE kick_tracker TO shadow_reader;
 GRANT USAGE ON SCHEMA public TO shadow_reader;
-GRANT SELECT ON channels, removals TO shadow_reader;
+GRANT SELECT ON channels, removals, collector_nodes, alerts TO shadow_reader;
 
 -- On the SHADOW database: what the primary side's backfill reads
 -- (SHADOW_DATABASE_URL).
