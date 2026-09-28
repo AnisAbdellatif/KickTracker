@@ -334,15 +334,15 @@ at that moment.
    5433), then `kit group deploy collectors`: the backfill starts, and the
    health page shows the shadow.
 9. **Webhooks**: on the shadow machine's tunnel, a public hostname to
-   `http://localhost:4060`; a hostname of its own for the main VPS (DNS to
-   it, proxied, and in the host Caddy's import line for `sites.caddy`);
-   then the Worker on the webhook hostname (`ingress/worker/README.md`).
+   `http://localhost:4060`; then the Worker on the webhook hostname
+   (`ingress/worker/README.md`). The main VPS keeps its hostname and
+   Caddy as they are: the Worker reaches it through the same hostname.
 10. **The follower**, on the shadow machine: a second checkout of `main`
     that only deploys (`~/kicktracker-deployer`), with the step 7 settings
     in its `.kamal/kit.local.env`, plus `KT_FOLLOW_SITE_HEALTH` (the
-    site's `/healthz`) and `KT_FOLLOW_INGRESS_HEALTH` (the main VPS's
-    receivers' `/health`, by the main VPS's own hostname, not the
-    Worker's), the kit's notification settings, a GitHub token that can
+    site's `/healthz`) and `KT_FOLLOW_INGRESS_HEALTH` (the webhook
+    hostname's `/health`; one the backup answered doesn't count), the
+    kit's notification settings, a GitHub token that can
     read the repo's checks and attestations (`gh auth login`), and
     `KT_REGISTRY_PASSWORD` (a read-only GHCR token). Then the timer:
     `shadow/kicktracker-follow.service` says how.

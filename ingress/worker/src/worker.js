@@ -12,10 +12,16 @@
 // delivered to both (the main one took it but its answer was lost) is
 // harmless: the app ignores repeats by message id.
 //
-// Settings (wrangler.toml [vars]): MAIN_URL and BACKUP_URL, each an
-// origin like https://ingress-main.<domain>, never the hostname this
-// Worker is routed on; MAIN_TIMEOUT_MS (default 5000) and
-// BACKUP_TIMEOUT_MS (default 10000).
+// Settings (wrangler.toml [vars]): BACKUP_URL, the backup receiver's
+// origin (its Cloudflare Tunnel hostname); MAIN_URL, the main VPS's,
+// by default this Worker's own hostname: a Worker's fetch() to its own
+// zone goes straight to the origin, never back through a Worker (unless
+// the global_fetch_strictly_public flag is on: never turn it on here);
+// MAIN_TIMEOUT_MS (default 5000) and BACKUP_TIMEOUT_MS (default 10000).
+
+// Marks the requests this Worker sends: one that comes back to it would
+// be a loop (the flag above turned on), and is refused.
+const HOP = "x-ingress-worker";
 
 // Headers that describe the hop to this Worker, not the delivery.
 const HOP_HEADERS = ["host", "content-length", "connection", "cf-connecting-ip", "cf-ray", "cf-visitor", "cf-ipcountry", "x-forwarded-proto", "x-real-ip"];
@@ -28,24 +34,19 @@ export default {
 
 export async function handle(request, env, fetchImpl) {
   const incoming = new URL(request.url);
+  if (request.headers.has(HOP)) return fail(508, "the ingress Worker reached itself: is global_fetch_strictly_public on?");
+  if (!env.BACKUP_URL) return fail(500, "BACKUP_URL isn't set");
   const targets = [
-    { name: "main", origin: env.MAIN_URL, timeout: Number(env.MAIN_TIMEOUT_MS || 5000) },
+    { name: "main", origin: env.MAIN_URL || incoming.origin, timeout: Number(env.MAIN_TIMEOUT_MS || 5000) },
     { name: "backup", origin: env.BACKUP_URL, timeout: Number(env.BACKUP_TIMEOUT_MS || 10000) },
   ];
-
-  for (const t of targets) {
-    if (!t.origin) return fail(500, `${t.name.toUpperCase()}_URL isn't set`);
-    // Sending to the hostname this Worker is routed on would loop.
-    if (new URL(t.origin).host === incoming.host) {
-      return fail(500, `${t.name.toUpperCase()}_URL must not be this Worker's own hostname`);
-    }
-  }
 
   // Read once: a request body can only be consumed once, and both
   // attempts need it.
   const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer();
   const headers = new Headers(request.headers);
   for (const h of HOP_HEADERS) headers.delete(h);
+  headers.set(HOP, "1");
 
   let last = null;
   for (const t of targets) {

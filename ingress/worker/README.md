@@ -23,15 +23,16 @@ No dependencies: `src/worker.js` is the whole Worker.
 
 ## Deploy
 
-1. Two hostnames besides the webhook one, each proxied by Cloudflare:
-   - the main VPS (a DNS record to it, and the hostname in the host
-     Caddy's import line for `deploy/caddy/sites.caddy`);
-   - the backup receiver: a public hostname on the shadow machine's
-     Cloudflare Tunnel, to `http://localhost:4060`.
+1. The backup receiver's hostname: a public hostname on the shadow
+   machine's Cloudflare Tunnel, to `http://localhost:4060`. The main VPS
+   needs nothing new: the Worker reaches it through the webhook hostname
+   itself, since a Worker's `fetch()` to its own zone goes straight to the
+   origin (never turn on the `global_fetch_strictly_public` flag here; a
+   request that comes back to the Worker anyway is refused with a 508).
 2. `cp wrangler.toml.example wrangler.toml` (git-ignored) and fill in the
-   route and both URLs.
+   route and `BACKUP_URL`.
 3. `npx wrangler deploy` (asks to log in to Cloudflare the first time).
 
 Check it: `curl -si https://<ingress host>/health` answers with
 `x-ingress-target: main`. The failover test is in deploy/README.md,
-"The backup receiver".
+"The shadow machine".

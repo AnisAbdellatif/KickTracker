@@ -64,9 +64,12 @@ fi
 
 target=$(git rev-parse --verify "${version:-HEAD}^{commit}" 2>/dev/null) || die "no commit ${version:-HEAD} here (git fetch?)"
 
-# The shadow machine's own settings: its notifications say so. KT_* and
-# KIT_* from the environment beat the kit's files.
+# The shadow machine's own settings: its notifications say so, and the
+# main VPS's smoke URLs never judge it (a shadow deploy while the main VPS
+# is down must still work). KT_* and KIT_* from the environment beat the
+# kit's files.
 export KIT_NOTIFY_PREFIX="${KIT_NOTIFY_PREFIX:-[kicktracker/shadow]}"
+export KIT_SMOKE_URLS=""
 
 echo "shadow: ${target:0:7}$([ "$dry_run" = true ] && echo ' (dry run: nothing is deployed)')"
 for g in $groups; do

@@ -97,9 +97,32 @@ test("neither can take it: Kick gets an error, never a 2xx", async () => {
   assert.equal((await handle(delivery(), env, both.impl)).status, 502);
 });
 
-test("an origin set to the Worker's own hostname is refused, not looped", async () => {
+test("without MAIN_URL, the main VPS is the Worker's own hostname (fetch goes to the origin)", async () => {
+  const { impl, calls } = fake({ "https://ingress.example.test": { status: 200 } });
+  const res = await handle(delivery(), { ...env, MAIN_URL: undefined }, impl);
+  assert.equal(res.headers.get("x-ingress-target"), "main");
+  assert.equal(calls[0].url, "https://ingress.example.test/webhooks/kick?x=1");
+});
+
+test("its own requests are marked, and one coming back to it is refused, not looped", async () => {
+  const { impl, calls } = fake({ [env.MAIN_URL]: { status: 200 } });
+  await handle(delivery(), env, impl);
+  assert.equal(calls[0].headers.get("x-ingress-worker"), "1");
+
+  const looped = new Request("https://ingress.example.test/webhooks/kick", {
+    method: "POST",
+    headers: { "x-ingress-worker": "1" },
+    body: "{}",
+  });
+  const again = fake({});
+  const res = await handle(looped, env, again.impl);
+  assert.equal(res.status, 508);
+  assert.equal(again.calls.length, 0);
+});
+
+test("BACKUP_URL unset is an error, not a silent single target", async () => {
   const { impl, calls } = fake({});
-  const res = await handle(delivery(), { ...env, MAIN_URL: "https://ingress.example.test" }, impl);
+  const res = await handle(delivery(), { ...env, BACKUP_URL: "" }, impl);
   assert.equal(res.status, 500);
   assert.equal(calls.length, 0);
 });

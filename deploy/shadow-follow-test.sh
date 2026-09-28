@@ -34,6 +34,10 @@ case "${*: -1}" in
   *healthz) [ "${SITE_DOWN:-}" != true ] ;;
   *health)
     [ "${INGRESS_DOWN:-}" != true ] || exit 22
+    # -D FILE: the headers, as the ingress Worker adds them.
+    for ((i = 1; i < $#; i++)); do
+      [ "${!i}" = -D ] && { j=$((i + 1)); printf 'HTTP/2 200\r\nx-ingress-target: %s\r\n\r\n' "${TARGET:-main}" >"${!j}"; }
+    done
     printf '{"ok":true,"rabbitmq":true,"spooled":0,"build":"%s"}' "${RECEIVERS:-}"
     ;;
 esac
@@ -48,7 +52,7 @@ chmod +x "$tmp/bin/"* "$tmp/deploy/shadow-follow.sh"
 export PATH="$tmp/bin:$PATH" CALLS="$tmp/calls" \
   KT_FOLLOW_STATE="$tmp/state" KT_FOLLOW_NO_FETCH=true KT_FOLLOW_SHADOW_SH="$tmp/bin/fake-shadow" \
   KT_FOLLOW_MAIN_DB_URL=ecto://shadow_reader:pw@main.test:5432/kick_tracker \
-  KT_FOLLOW_SITE_HEALTH=https://site.test/healthz KT_FOLLOW_INGRESS_HEALTH=https://ingress-main.test/health
+  KT_FOLLOW_SITE_HEALTH=https://site.test/healthz KT_FOLLOW_INGRESS_HEALTH=https://ingress.test/health
 
 t0=1790000000
 # run MINUTES [ARGS]: one run at t0 + MINUTES, with the environment as set.
@@ -72,7 +76,7 @@ check() {
   fi
 }
 
-fresh() { rm -rf "$tmp/state"; unset DB_DOWN ALERTS SITE_DOWN INGRESS_DOWN DEPLOY_FAILS KT_SHADOW_SOAK; }
+fresh() { rm -rf "$tmp/state"; unset DB_DOWN ALERTS SITE_DOWN INGRESS_DOWN DEPLOY_FAILS TARGET KT_SHADOW_SOAK; }
 
 fresh
 export LEADER=$A RECEIVERS=$A
@@ -116,6 +120,15 @@ for problem in DB_DOWN SITE_DOWN INGRESS_DOWN; do
   run 361
   check "$problem restarts the clock" ""
 done
+
+fresh
+export LEADER=$A RECEIVERS=$A
+run 0
+export TARGET=backup
+run 100
+unset TARGET
+run 361
+check "the backup answering /health (the main receivers down) restarts the clock" ""
 
 fresh
 export LEADER="" RECEIVERS=$A

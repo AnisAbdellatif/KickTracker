@@ -8,8 +8,10 @@
 # Each run:
 #   1. reads what the main VPS runs: the leading collector's build (its
 #      collector_nodes row, through the shadow's read-only user) and the
-#      receivers' build (their /health, straight from the main VPS, never
-#      through the ingress Worker, which would answer with the backup's);
+#      receivers' build (the webhook hostname's /health: the ingress Worker
+#      sends it to the main VPS first; one the backup answered, by its
+#      x-ingress-target header, isn't the main VPS's and counts as
+#      unhealthy);
 #   2. says whether the main VPS is healthy: a leader heard from in the
 #      last 90s, no open alert, the site's /healthz and the receivers'
 #      /health answering;
@@ -34,8 +36,8 @@
 # Settings (the environment, or .kamal/kit.local.env, parsed here, never
 # sourced): KT_SHADOW_SOAK (6h; s, m, h, d or seconds), KT_FOLLOW_RETRY
 # (1h), KT_FOLLOW_SITE_HEALTH (the site's /healthz URL),
-# KT_FOLLOW_INGRESS_HEALTH (the main VPS's receivers' /health, by its own
-# hostname), KT_FOLLOW_MAIN_DB_URL (default: MAIN_DATABASE_URL from the
+# KT_FOLLOW_INGRESS_HEALTH (the webhook hostname's /health),
+# KT_FOLLOW_MAIN_DB_URL (default: MAIN_DATABASE_URL from the
 # shadow's decrypted shadow.env under KT_SHADOW_DEPLOY_DIR), KT_FOLLOW_PSQL
 # (the psql command; default psql), KT_FOLLOW_STATE (the state folder;
 # default ~/.local/state/kicktracker-follow).
@@ -100,7 +102,7 @@ query() {
 
 # observe: sets collectors_build, receivers_build, healthy, problems.
 observe() {
-  local alerts body
+  local alerts body headers
   problems=""
   collectors_build=$(query "SELECT status->>'build' FROM collector_nodes
     WHERE state = 'leader' AND heartbeat_at > now() - interval '90 seconds'
@@ -110,9 +112,14 @@ observe() {
     [ "$alerts" = 0 ] || problems="$problems; $alerts open alert(s)"
   fi
   curl -fsS -m 10 -o /dev/null "$site_health" 2>/dev/null || problems="$problems; the site's /healthz doesn't answer"
-  if body=$(curl -fsS -m 10 "$ingress_health" 2>/dev/null); then
+  headers=$state_dir/.health-headers
+  if body=$(curl -fsS -m 10 -D "$headers" "$ingress_health" 2>/dev/null); then
     receivers_build=$(printf '%s' "$body" | sed -n 's/.*"build":"\([0-9a-f]\{40\}\)".*/\1/p')
     [ -n "$receivers_build" ] || problems="$problems; the receivers' /health says no build"
+    if grep -qi '^x-ingress-target: *backup' "$headers" 2>/dev/null; then
+      receivers_build=""
+      problems="$problems; the backup receiver answered /health, not the main VPS"
+    fi
   else
     receivers_build=""
     problems="$problems; the receivers' /health doesn't answer"
@@ -204,7 +211,7 @@ main() {
   site_health=$(setting KT_FOLLOW_SITE_HEALTH "")
   ingress_health=$(setting KT_FOLLOW_INGRESS_HEALTH "")
   [ -n "$site_health" ] || die "KT_FOLLOW_SITE_HEALTH isn't set (the site's /healthz)"
-  [ -n "$ingress_health" ] || die "KT_FOLLOW_INGRESS_HEALTH isn't set (the main VPS's receivers' /health, by its own hostname)"
+  [ -n "$ingress_health" ] || die "KT_FOLLOW_INGRESS_HEALTH isn't set (the webhook hostname's /health)"
   psql=$(setting KT_FOLLOW_PSQL psql)
   shadow=${KT_FOLLOW_SHADOW_SH:-deploy/shadow.sh}
   now=${KT_FOLLOW_NOW:-$(date +%s)}

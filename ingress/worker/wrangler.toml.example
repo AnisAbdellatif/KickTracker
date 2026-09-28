@@ -3,6 +3,8 @@
 name = "kicktracker-ingress"
 main = "src/worker.js"
 compatibility_date = "2026-09-01"
+# Never add global_fetch_strictly_public: the Worker reaches the main VPS
+# through its own hostname, which that flag would send back to the Worker.
 
 # The hostname Kick sends webhooks to (the one in the Kick app's settings).
 routes = [
@@ -10,9 +12,9 @@ routes = [
 ]
 
 [vars]
-# The main VPS's receivers (Caddy), and the shadow machine's backup
-# receiver (its Cloudflare Tunnel). Neither may be the route's hostname.
-MAIN_URL = "https://<main ingress host>"
+# The shadow machine's backup receiver: its Cloudflare Tunnel hostname.
 BACKUP_URL = "https://<backup ingress host>"
+# The main VPS: by default the route's own hostname (to its origin).
+# MAIN_URL = "https://<ingress host>"
 MAIN_TIMEOUT_MS = "5000"
 BACKUP_TIMEOUT_MS = "10000"
