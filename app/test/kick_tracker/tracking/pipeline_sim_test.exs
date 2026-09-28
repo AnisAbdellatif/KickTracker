@@ -61,8 +61,17 @@ defmodule KickTracker.Tracking.PipelineSimTest do
     assert rows("subscriber_samples", ["channel_id"]) |> Enum.map(& &1.channel_id) |> Enum.sort() ==
              Enum.sort([live.id, off.id])
 
-    assert rows("coverage", ["id"]) |> Enum.map(&{&1.source, &1.ok}) |> Enum.frequencies() ==
-             %{{"api", true} => 2, {"subscribers", true} => 2}
+    assert rows("coverage", ["id"])
+           |> Enum.filter(&(&1.source in ["api", "subscribers"]))
+           |> Enum.map(&{&1.source, &1.ok})
+           |> Enum.frequencies() == %{{"api", true} => 2, {"subscribers", true} => 2}
+
+    # The stream's start asks for a follower reading, which the source
+    # makes a second later on its own: waited for, not raced.
+    assert eventually(fn ->
+             rows("coverage", ["id"])
+             |> Enum.any?(&(&1.source == "followers" and &1.channel_id == live.id and &1.ok))
+           end)
 
     # The poll's title and category are the stream's first values.
     assert {%{"title" => title, "category" => _}, _} =
