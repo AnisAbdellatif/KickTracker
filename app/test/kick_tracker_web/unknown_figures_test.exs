@@ -135,6 +135,31 @@ defmodule KickTrackerWeb.UnknownFiguresTest do
       assert json_response(get(conn, path), 200), path
     end
 
+    # The public read API, with a key that reaches everything.
+    {:ok, _key, raw} = KickTracker.ApiKeys.create(nil, %{name: "some app", admin: true})
+    api = put_req_header(conn, "authorization", "Bearer " <> raw)
+
+    api_paths =
+      for(
+        s <- ~w(viewers chat support followers heatmap categories),
+        do: "/api/v1/channels/dailystreamer/#{s}?#{@range}"
+      ) ++
+        [
+          "/api/v1/channels",
+          "/api/v1/live",
+          "/api/v1/channels/dailystreamer",
+          "/api/v1/channels/dailystreamer/now",
+          "/api/v1/channels/dailystreamer/streams?#{@range}",
+          "/api/v1/channels/dailystreamer/chat-log/messages?#{@range}",
+          "/api/v1/channels/dailystreamer/chat-log/events?#{@range}",
+          "/api/v1/streams/#{stream.id}",
+          "/api/v1/streams/#{stream.id}/chatters?window=5"
+        ]
+
+    for path <- api_paths do
+      assert json_response(get(api, path), 200), path
+    end
+
     for path <- ["/about/methodology", "/search?q=streamer"] do
       assert html_response(get(conn, path), 200), path
     end
@@ -156,7 +181,7 @@ defmodule KickTrackerWeb.UnknownFiguresTest do
       null_every_unknown_figure!()
 
       for path <-
-            ~w(/admin /admin/channels /admin/groups /admin/data /admin/privacy /admin/settings /admin/audit /admin/transfer) do
+            ~w(/admin /admin/channels /admin/groups /admin/data /admin/privacy /admin/settings /admin/audit /admin/transfer /admin/api-keys) do
         assert {:ok, _view, _html} = live(conn, path), path
       end
     end

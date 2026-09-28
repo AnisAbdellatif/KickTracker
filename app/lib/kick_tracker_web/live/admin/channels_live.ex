@@ -181,7 +181,7 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
       <.page_header title={gettext("Channels")} icon="hero-tv">
         <:subtitle>
           {gettext(
-            "The channels being tracked. Pausing stops collection and keeps everything already collected. \"Live only\" shows a channel on the public site only while it is live, with its viewers and active chatters now; \"Hidden\" removes it from the public site."
+            "The channels being tracked. Pausing stops collection and keeps everything already collected. \"Live only\" shows a channel on the public site only while it is live, with its viewers and active chatters now; \"Hidden\" removes it from the public site and regular API keys."
           )}
         </:subtitle>
       </.page_header>
@@ -394,7 +394,7 @@ defmodule KickTrackerWeb.Admin.ChannelsLive do
                       <input type="hidden" name="channel_id" value={c.id} />
                       <select
                         name="visibility"
-                        class="select select-sm w-32"
+                        class="select select-sm w-28"
                         aria-label={gettext("Shown on the public site")}
                         title={gettext("Shown on the public site")}
                       >

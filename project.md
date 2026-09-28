@@ -993,7 +993,8 @@ kick_tracker/
 │  │     │  └─ admin/                   # channels, groups, health, dead letters,
 │  │     │                              #   subscriptions, reprocess, corrections,
 │  │     │                              #   annotations, privacy, settings, audit
-│  │     ├─ controllers/data/           # /data/v1 JSON, cacheable (§13.5)
+│  │     ├─ controllers/data/           # /data/v1 JSON, our pages only (§13.5)
+│  │     ├─ controllers/api/v1/         # the public read API, keyed (§13.10)
 │  │     ├─ components/                 # stat cards, period picker, chart, tables
 │  │     └─ admin_auth.ex               # admin sessions, on_mount
 │  ├─ assets/js/
@@ -1302,8 +1303,9 @@ logging is still on or not. An admin can view a channel's or a user's log
 period (a collector job, audited). Privacy deletions remove a person's
 messages and scrub events naming them; replies to them keep their text
 but no longer say whom they answered. Never shown on the public site or
-the data API; not in exports between instances; the shadow collector
-never logs (it doesn't copy the setting).
+`/data`; readable outside the admin only with an admin API key (§13.10);
+not in exports between instances; the shadow collector never logs (it
+doesn't copy the setting).
 
 Storage at production's volume (~270 000 messages a day across 42
 channels, the busiest ~117 000): about 150 bytes per message with
@@ -1556,7 +1558,7 @@ auth check.
 Layout: a sidebar of sections with icons (Monitor: health, anomalies,
 audit log, errors, dashboard; Channels: channels, groups, subscriptions;
 Data: corrections, chat log, export / import, dead letters; People:
-privacy requests, admins; Site: settings, the public site), the admin's
+privacy requests, admins; Site: settings, API keys, the public site), the admin's
 account, the theme and logging out at its foot; on a phone, a drawer
 opened from a top bar (daisyUI's, no script). Every page is built from
 the same pieces (`KickTrackerWeb.AdminComponents`): a page header with
@@ -1636,6 +1638,9 @@ group members) are searched on the server and scroll inside their card.
   user removed on either side stays removed. The collector does the work
   (`Workers.Transfer`, its own queue); the files live in `TRANSFER_DIR`,
   shared by both roles, for 7 days.
+- **API keys:** issue a key for an application (shown once), choose the
+  channels, scopes and limits it has or make it an admin key, edit what it
+  reaches, revoke it (§13.10).
 - **Settings:** feature flags (show the support page publicly, show top
   chatters and supporters by name), the assumptions behind the revenue
   estimate; public groups on their own page. Polling cadences stay in code,
@@ -1654,8 +1659,8 @@ the database every minute, so a lost message only delays the change.
 New tables for this: `admins`, `admin_tokens` (sessions, invitations), `channel_groups`,
 `channel_group_members`, `stream_overrides` (merge / split / exclude),
 `annotations`, `admin_audit_log`, `settings`, `transfers` (export and
-import log). The `web` role is read-only against the collected data and
-writes only these. `removals` (Kick ids whose removal was carried out) is
+import log), `api_keys` (§13.10). The `web` role is read-only against the
+collected data and writes only these. `removals` (Kick ids whose removal was carried out) is
 written by the collector, with the deletion itself.
 
 ### 13.9 Performance targets
@@ -1667,6 +1672,46 @@ written by the collector, with the deletion itself.
   summary card converted to PNG, so shared links show the channel's numbers.
 - A visitor on a live page costs one LiveView process with no chart data in
   it; thousands of concurrent visitors fit on the same server.
+
+### 13.10 Public read API
+
+Other applications read our data at `/api/v1`, with a key an admin issues
+by hand (`/admin/api-keys`); `API.md` at the repo root documents it and is
+what the owner sends with a key. Its format is a contract (`v1` only gains
+fields), kept apart from `/data/v1`, which follows our charts and answers
+our pages only (§13.5).
+
+- **Keys** (`api_keys`, an admin table): a name and contact, the key's
+  SHA-256 (the key, `kt_` and 43 characters, is shown once), its first
+  characters to tell keys apart, what it reaches, its limits, expiry,
+  revocation, last use (written at most every 5 minutes). Sent as
+  `Authorization: Bearer`, never in the URL. A key is looked up at most
+  every 30 seconds per web node, so a revoked or edited key takes effect
+  within 30 seconds. Created, edited and revoked keys are audited.
+- **Channels** (`ApiKeys.Access`, pure): a regular key reaches every
+  channel or chosen channels and groups; within that, a public channel
+  fully, a live-only one only "now" (`/now`, `/live`), a hidden one never.
+  A channel or stream the key doesn't reach is a 404, like one that
+  doesn't exist.
+- **Scopes:** `channels` (the list, streams, a stream's timeline), `live`,
+  `viewers` (with the heatmap), `chat`, `followers`, `support` (granted by
+  the key, whatever `support_page_public` says), `categories`. A stream
+  row carries only the figures of the key's scopes.
+- **Limits** per key: requests a minute (600 by default, counted per key
+  on each web node; 60 a minute per address without a valid key), how far
+  back it reads (`from` moved forward, `"clamped": true`), the finest
+  resolution (per-minute active chatters refused below it), the addresses
+  it works from (CIDRs), an end date.
+- **Admin keys** reach every channel, hidden ones included, every scope,
+  and the logged chat of channels with chat logging on
+  (`/channels/:slug/chat-log/messages` and `/events`, a page at a time).
+  The admin page asks for them to be kept to people who could be admins,
+  and suggests limiting their addresses.
+- Endpoints reuse the site's queries (`Series`, `Reports`), which don't
+  filter by visibility; the key's access decides. Same rules as the site:
+  `null` is unknown, gaps are listed, at most 2 000 points a series,
+  estimates labelled. Answers have an ETag and are `private` to the
+  client.
 
 ## 14. Collection rules
 
@@ -2010,6 +2055,8 @@ token: they are scrubbed from its context, as from the logs.
 ### 18.3 Legal and privacy
 
 - **Kick's developer terms:** read for rules on storing and displaying data,
+  and on handing it on (the read API, §13.10, gives other applications our
+  data),
   attribution and rate limits. v2 and Pusher are the grey area; both can
   already be switched off.
 - **Public name without "Kick"** in it or its logo (trademark). The repo name
@@ -2060,7 +2107,8 @@ Done after everything else is set up and working (§20, phase 6).
 ### 19.3 Security
 
 - Rate limits on public pages and `/data` (PlugAttack: pages 120/min,
-  `/data` 600/min, counted before its page token is checked, admin logins 10/min and a one-hour ban after 20 failures
+  `/data` 600/min, counted before its page token is checked, `/api` per key
+  (600/min by default) and 60/min per address without a valid key, admin logins 10/min and a one-hour ban after 20 failures
   in 10 minutes), keyed on the visitor's address as our own proxies saw it.
 - Security headers (CSP with a per-request script nonce, HSTS, frame
   options), from the app and again from Caddy.
@@ -2284,4 +2332,9 @@ clustered), and deploy script details.
 
 **Later** (not planned yet): history before tracking from v2's VOD list
 (marked as imported), streamer accounts via Kick login with private stats and
-embeds, Discord notifications, a public read API, Open Graph images.
+embeds, Discord notifications, Open Graph images.
+
+**Read API built** (2026-09-28, §13.10, §13.2, §13.5). Two levels of hiding
+(live only, hidden), `/data/v1` kept to our pages by a page token, and
+`/api/v1` with keys issued from `/admin/api-keys`: channels and scopes per
+key, limits, admin keys with logged chat; `API.md` for the keys' holders.

@@ -243,6 +243,7 @@ defmodule KickTrackerWeb.Layouts do
       {gettext("Site"),
        [
          {:settings, "hero-cog-6-tooth", gettext("Settings"), ~p"/admin/settings", :live},
+         {:api_keys, "hero-key", gettext("API keys"), ~p"/admin/api-keys", :live},
          {:site, "hero-globe-alt", gettext("Public site"), ~p"/", :external}
        ]}
     ]

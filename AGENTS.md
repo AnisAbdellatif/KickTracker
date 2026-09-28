@@ -102,6 +102,7 @@ understanding their intent first.
 | `sim/` | The fake Kick + the recorder (§17) | All development and tests run against it |
 | `fixtures/` | Recorded, anonymized Kick payloads (§17.1) | Source for the simulator and parser tests |
 | `contracts/` | The event envelope (§8.1) | The only thing app and ingress share |
+| `API.md` | The public read API, `/api/v1` (§13.10) | A contract for other applications: sent with each key; `v1` only gains fields. Update it with any change to `/api` |
 | `deploy/` | Kamal configs (`kamal/`), compose files (infrastructure, stage 2), Caddy, RabbitMQ definitions, `release.sh` (a release, run by a person with deploy-kit; deploys only the groups a change touches, checked by `release-test.sh`), `server-sync.sh` (run on the server before each deploy) | `compose.dev.yml` runs TimescaleDB (55432) and RabbitMQ (55672) for development and tests; `rehearsal/rehearse.sh` runs the sandbox under load and upgrades it with the kit: run it after changing anything on the deploy path |
 | `.kamal/` | deploy-kit: settings (`kit.env`), groups, project steps, the sandbox (`sandbox/`: the production stack on this machine, `kit sandbox up`), the vendored kit (`kit/`) | Update the kit with `kit update --from <deploy-kit checkout or URL> --ref <tag>`, and check the vendored copy matches the tag (before 0.6.0 the update ran the old kit's file list, so a release adding a folder needed a second `kit update`); never edit `.kamal/kit/` by hand. The sandbox and the rehearsal never reach a real server: never weaken `deploy/kamal/*.sandbox.yml` or the kit's checks to make them work |
 
@@ -167,8 +168,9 @@ one, stop and ask.
   chat-feed events as sent (`chat_log_events`) kept, for the channel's retention
   (90 days by default). A message's text must not reach anything but that path: the
   socket passes it on only for a logged channel. Logged data is admin-only (never on
-  the public site or `/data`), is covered by privacy deletions, and doesn't travel
-  with exports or to the shadow collector.
+  the public site or `/data`; outside the admin interface only through an admin API
+  key, project.md §13.10), is covered by privacy deletions, and doesn't travel with
+  exports or to the shadow collector.
 - Estimates (revenue, anything modeled) are labeled as such wherever they appear.
 
 ## 8. Architecture rules
@@ -199,8 +201,14 @@ one, stop and ask.
 
 - The server chooses resolution by range; **no series over ~2 000 points** reaches the
   browser (§13.4). Buckets carry avg and max; empty buckets are `null`, never 0.
-- **History over cacheable JSON** (`/data/v1/...`), **only "now" over LiveView**. Chart
+- **History over JSON** (`/data/v1/...`), **only "now" over LiveView**. Chart
   data is never kept in LiveView assigns; it goes to the hook with `push_event`.
+  `/data/v1` answers our own pages only (a page token, project.md §13.5) and its format
+  follows our charts; anything for other applications goes in `/api/v1`, whose format
+  is a contract (`API.md`).
+- **What a channel shows follows its visibility** (public, live only, hidden,
+  project.md §13.2), on the site and in the API (§13.10). A new public page, list or
+  endpoint filters on it; a regular API key never reaches a hidden channel.
 - One chart library (ECharts), one hook, a fixed set of chart kinds in `assets/js/charts/`.
   The server sends data and a kind, never ECharts options.
 - Gaps are drawn as breaks with "no data" shading, never as zero or interpolated.

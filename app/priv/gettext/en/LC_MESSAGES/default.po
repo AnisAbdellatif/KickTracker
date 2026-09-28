@@ -237,8 +237,8 @@ msgstr ""
 msgid "Assumed value of one Kick to the streamer (USD)"
 msgstr ""
 
-#: lib/kick_tracker_web/components/layouts.ex:332
-#: lib/kick_tracker_web/components/layouts.ex:347
+#: lib/kick_tracker_web/components/layouts.ex:333
+#: lib/kick_tracker_web/components/layouts.ex:348
 #, elixir-autogen, elixir-format
 msgid "Attempting to reconnect"
 msgstr ""
@@ -301,6 +301,7 @@ msgstr ""
 msgid "By"
 msgstr ""
 
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:445
 #: lib/kick_tracker_web/live/admin/channels_live.ex:255
 #: lib/kick_tracker_web/live/admin/channels_live.ex:479
 #: lib/kick_tracker_web/live/admin/chat_log_live.ex:867
@@ -354,6 +355,7 @@ msgstr ""
 
 #: lib/kick_tracker_web/components/layouts.ex:221
 #: lib/kick_tracker_web/components/layouts.ex:223
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:316
 #: lib/kick_tracker_web/live/admin/channels_live.ex:16
 #: lib/kick_tracker_web/live/admin/channels_live.ex:181
 #: lib/kick_tracker_web/live/admin/chat_log_live.ex:370
@@ -509,6 +511,7 @@ msgid "Dashboard"
 msgstr ""
 
 #: lib/kick_tracker_web/components/layouts.ex:228
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:397
 #, elixir-autogen, elixir-format
 msgid "Data"
 msgstr ""
@@ -598,6 +601,7 @@ msgstr ""
 msgid "Duration"
 msgstr ""
 
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:245
 #: lib/kick_tracker_web/live/admin/groups_live.ex:121
 #, elixir-autogen, elixir-format
 msgid "Edit"
@@ -1309,6 +1313,7 @@ msgid "Revenue is an estimate, not a measurement: subscriptions (new, renewed an
 msgstr ""
 
 #: lib/kick_tracker_web/live/admin/admins_live.ex:162
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:252
 #: lib/kick_tracker_web/live/admin/data_live.ex:283
 #, elixir-autogen, elixir-format
 msgid "Revoke"
@@ -1319,6 +1324,7 @@ msgstr ""
 msgid "Revoked; figures are being recomputed."
 msgstr ""
 
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:447
 #: lib/kick_tracker_web/live/admin/channels_live.ex:351
 #: lib/kick_tracker_web/live/admin/groups_live.ex:206
 #: lib/kick_tracker_web/live/admin/settings_live.ex:126
@@ -1414,7 +1420,7 @@ msgstr ""
 msgid "Since"
 msgstr ""
 
-#: lib/kick_tracker_web/components/layouts.ex:339
+#: lib/kick_tracker_web/components/layouts.ex:340
 #, elixir-autogen, elixir-format
 msgid "Something went wrong!"
 msgstr ""
@@ -1425,6 +1431,7 @@ msgid "Start"
 msgstr ""
 
 #: lib/kick_tracker_web/live/admin/admins_live.ex:82
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:202
 #: lib/kick_tracker_web/live/admin/channels_live.ex:301
 #: lib/kick_tracker_web/live/admin/transfer_live.ex:401
 #, elixir-autogen, elixir-format
@@ -1633,7 +1640,7 @@ msgstr ""
 msgid "Viewers, live status, title and category: Kick's public API, read every 60 seconds for every tracked channel (Kick itself refreshes its viewer count about once a minute)."
 msgstr ""
 
-#: lib/kick_tracker_web/components/layouts.ex:324
+#: lib/kick_tracker_web/components/layouts.ex:325
 #, elixir-autogen, elixir-format
 msgid "We can't find the internet"
 msgstr ""
@@ -1711,6 +1718,7 @@ msgid "Your rights"
 msgstr ""
 
 #: lib/kick_tracker_web/live/admin/admins_live.ex:101
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:508
 #, elixir-autogen, elixir-format
 msgid "active"
 msgstr ""
@@ -1828,6 +1836,7 @@ msgstr ""
 msgid "gifted subs"
 msgstr ""
 
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:471
 #: lib/kick_tracker_web/live/admin/channels_live.ex:333
 #: lib/kick_tracker_web/live/admin/chat_log_live.ex:445
 #, elixir-autogen, elixir-format
@@ -2232,6 +2241,7 @@ msgstr ""
 msgid "done"
 msgstr ""
 
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:507
 #: lib/kick_tracker_web/live/admin/transfer_live.ex:463
 #, elixir-autogen, elixir-format
 msgid "expired"
@@ -2397,7 +2407,7 @@ msgstr ""
 msgid "Couldn't load this chart."
 msgstr ""
 
-#: lib/kick_tracker_web/components/layouts.ex:375
+#: lib/kick_tracker_web/components/layouts.ex:376
 #, elixir-autogen, elixir-format
 msgid "Dark theme"
 msgstr ""
@@ -2450,7 +2460,7 @@ msgstr ""
 msgid "Last day"
 msgstr ""
 
-#: lib/kick_tracker_web/components/layouts.ex:374
+#: lib/kick_tracker_web/components/layouts.ex:375
 #, elixir-autogen, elixir-format
 msgid "Light theme"
 msgstr ""
@@ -2492,7 +2502,7 @@ msgstr ""
 msgid "Something went wrong"
 msgstr ""
 
-#: lib/kick_tracker_web/components/layouts.ex:373
+#: lib/kick_tracker_web/components/layouts.ex:374
 #, elixir-autogen, elixir-format
 msgid "System theme"
 msgstr ""
@@ -2517,7 +2527,7 @@ msgstr ""
 msgid "The tracked channels streaming %{category}, ranked by hours watched."
 msgstr ""
 
-#: lib/kick_tracker_web/components/layouts.ex:366
+#: lib/kick_tracker_web/components/layouts.ex:367
 #, elixir-autogen, elixir-format
 msgid "Theme"
 msgstr ""
@@ -2537,7 +2547,7 @@ msgstr ""
 msgid "Viewers, streams, chat and support of %{channel}, tracked over time."
 msgstr ""
 
-#: lib/kick_tracker_web/components/layouts.ex:406
+#: lib/kick_tracker_web/components/layouts.ex:407
 #, elixir-autogen, elixir-format
 msgid "Viewers, streams, chat and support of Kick channels, tracked over time. Not affiliated with Kick."
 msgstr ""
@@ -3216,6 +3226,8 @@ msgstr ""
 msgid "Monitor"
 msgstr ""
 
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:197
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:292
 #: lib/kick_tracker_web/live/admin/groups_live.ex:80
 #, elixir-autogen, elixir-format
 msgid "Name"
@@ -3403,7 +3415,7 @@ msgstr ""
 msgid "Public page"
 msgstr ""
 
-#: lib/kick_tracker_web/components/layouts.ex:246
+#: lib/kick_tracker_web/components/layouts.ex:247
 #: lib/kick_tracker_web/live/admin/settings_live.ex:82
 #, elixir-autogen, elixir-format
 msgid "Public site"
@@ -3449,6 +3461,7 @@ msgstr ""
 msgid "Sat"
 msgstr ""
 
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:365
 #: lib/kick_tracker_web/live/admin/channel_picker.ex:87
 #: lib/kick_tracker_web/live/admin/channels_live.ex:293
 #: lib/kick_tracker_web/live/admin/chat_log_live.ex:388
@@ -3843,11 +3856,6 @@ msgstr ""
 msgid "Shown on the public site"
 msgstr ""
 
-#: lib/kick_tracker_web/live/admin/channels_live.ex:183
-#, elixir-autogen, elixir-format
-msgid "The channels being tracked. Pausing stops collection and keeps everything already collected. \"Live only\" shows a channel on the public site only while it is live, with its viewers and active chatters now; \"Hidden\" removes it from the public site."
-msgstr ""
-
 #: lib/kick_tracker_web/live/channel_live.ex:306
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Watching now"
@@ -3858,8 +3866,249 @@ msgstr ""
 msgid "Whether %{channel} is live, and how many are watching."
 msgstr ""
 
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:470
 #: lib/kick_tracker_web/live/admin/channels_live.ex:330
 #: lib/kick_tracker_web/live/admin/chat_log_live.ex:444
 #, elixir-autogen, elixir-format, fuzzy
 msgid "live only"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:222
+#, elixir-autogen, elixir-format, fuzzy
+msgid "%{n}/min"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:177
+#, elixir-autogen, elixir-format
+msgid "API key"
+msgstr ""
+
+#: lib/kick_tracker_web/components/layouts.ex:246
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:22
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:148
+#, elixir-autogen, elixir-format
+msgid "API keys"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:307
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Admin key"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:310
+#, elixir-autogen, elixir-format
+msgid "An admin key reaches every channel, hidden ones included, and every kind of data, logged chat included. Keep it to people you would make admins, and limit the addresses it works from."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:426
+#, elixir-autogen, elixir-format
+msgid "Any"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:295
+#, elixir-autogen, elixir-format
+msgid "Contact (optional)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:447
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Create key"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:268
+#, elixir-autogen, elixir-format
+msgid "Create one for each application that reads our data."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:420
+#, elixir-autogen, elixir-format
+msgid "Days back (empty: all)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:179
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Done"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:185
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Edit key"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:326
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Every channel, now and later"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:425
+#, elixir-autogen, elixir-format
+msgid "Finest resolution"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:477
+#, elixir-autogen, elixir-format
+msgid "Follower totals over time"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:340
+#, elixir-autogen, elixir-format
+msgid "Hidden channels are never reached by a regular key; channels shown only while live, only through \"live\"."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:479
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Hours watched per category"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:198
+#, elixir-autogen, elixir-format
+msgid "Key"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:192
+#, elixir-autogen, elixir-format
+msgid "Keys"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:150
+#, elixir-autogen, elixir-format
+msgid "Keys to the read API (/api/v1) for other applications. Each key reaches the channels and kinds of data you choose; send it to its holder yourself, with API.md."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:201
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Last used"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:200
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:415
+#, elixir-autogen, elixir-format
+msgid "Limits"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:476
+#, elixir-autogen, elixir-format
+msgid "Messages and chatters over time"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:156
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:185
+#, elixir-autogen, elixir-format, fuzzy
+msgid "New key"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:267
+#, elixir-autogen, elixir-format
+msgid "No keys yet."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:439
+#, elixir-autogen, elixir-format
+msgid "Only from these addresses (one address or CIDR a line; empty: anywhere)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:336
+#, elixir-autogen, elixir-format
+msgid "Only these"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:199
+#, elixir-autogen, elixir-format
+msgid "Reaches"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:416
+#, elixir-autogen, elixir-format
+msgid "Requests a minute"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:257
+#, elixir-autogen, elixir-format
+msgid "Revoke the key for %{name}? It stops working within 30 seconds."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:478
+#, elixir-autogen, elixir-format
+msgid "Subs, gifted subs and Kicks"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:169
+#, elixir-autogen, elixir-format
+msgid "The key for %{name}. Copy it now: it won't be shown again."
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:473
+#, elixir-autogen, elixir-format
+msgid "The list of channels and their streams"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:475
+#, elixir-autogen, elixir-format
+msgid "Viewers over time, and the weekday × hour heatmap"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:474
+#, elixir-autogen, elixir-format
+msgid "Who is live now: viewers and active chatters"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:293
+#, elixir-autogen, elixir-format
+msgid "Who or what it's for"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:432
+#, elixir-autogen, elixir-format
+msgid "Works until (empty: no end)"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:215
+#, elixir-autogen, elixir-format
+msgid "admin key: everything"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:500
+#, elixir-autogen, elixir-format
+msgid "and %{n} more"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:481
+#, elixir-autogen, elixir-format, fuzzy
+msgid "every channel"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:356
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:487
+#, elixir-autogen, elixir-format, fuzzy
+msgid "group"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:223
+#, elixir-autogen, elixir-format
+msgid "last %{n} days"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:493
+#, elixir-autogen, elixir-format, fuzzy
+msgid "no channel"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:224
+#, elixir-autogen, elixir-format
+msgid "resolution ≥ %{res}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:506
+#, elixir-autogen, elixir-format, fuzzy
+msgid "revoked"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/api_keys_live.ex:235
+#, elixir-autogen, elixir-format
+msgid "until %{date}"
+msgstr ""
+
+#: lib/kick_tracker_web/live/admin/channels_live.ex:183
+#, elixir-autogen, elixir-format, fuzzy
+msgid "The channels being tracked. Pausing stops collection and keeps everything already collected. \"Live only\" shows a channel on the public site only while it is live, with its viewers and active chatters now; \"Hidden\" removes it from the public site and regular API keys."
 msgstr ""

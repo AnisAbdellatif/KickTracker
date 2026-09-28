@@ -31,6 +31,15 @@ defmodule KickTrackerWeb.Router do
     plug KickTrackerWeb.Plugs.DataToken
   end
 
+  # The public read API (§13.10): a key issued by an admin, counted per
+  # key by the rate limit, then required.
+  pipeline :public_api do
+    plug :accepts, ["json"]
+    plug KickTrackerWeb.Plugs.ApiKey, :fetch
+    plug KickTrackerWeb.Plugs.RateLimit
+    plug KickTrackerWeb.Plugs.ApiKey, :require
+  end
+
   # JSON for admin pages' charts: the admin's session, no page around it
   # (the controller answers 401 without an admin).
   pipeline :admin_api do
@@ -92,6 +101,21 @@ defmodule KickTrackerWeb.Router do
     get "/sparklines/:slug", SparklineController, :show
   end
 
+  scope "/api/v1", KickTrackerWeb.Api.V1 do
+    pipe_through :public_api
+
+    get "/channels", ChannelController, :index
+    get "/live", ChannelController, :live
+    get "/channels/:slug", ChannelController, :show
+    get "/channels/:slug/now", ChannelController, :now
+    get "/channels/:slug/streams", ChannelController, :streams
+    get "/channels/:slug/chat-log/messages", ChatLogController, :messages
+    get "/channels/:slug/chat-log/events", ChatLogController, :events
+    get "/channels/:slug/:series", ChannelController, :series
+    get "/streams/:id", StreamController, :show
+    get "/streams/:id/chatters", StreamController, :chatters
+  end
+
   ## Admin (project.md §13.8)
 
   scope "/admin", KickTrackerWeb.Admin do
@@ -121,6 +145,7 @@ defmodule KickTrackerWeb.Router do
       live "/", HealthLive
       live "/channels", ChannelsLive
       live "/groups", GroupsLive
+      live "/api-keys", ApiKeysLive
       live "/subscriptions", SubscriptionsLive
       live "/dead-letters", DeadLettersLive
       live "/data", DataLive

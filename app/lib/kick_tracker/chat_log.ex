@@ -246,15 +246,19 @@ defmodule KickTracker.ChatLog do
     |> Repo.stream(max_rows: 2000)
   end
 
-  @doc "Other chat-feed events on logged channels, newest first (filters as `messages/1`, without users)."
+  @doc """
+  Other chat-feed events on logged channels, newest first (filters as
+  `messages/1`, without users; `:before` is an `{occurred_at, id}` cursor).
+  """
   @spec events(map()) :: [map()]
   def events(filters) do
     from(e in "chat_log_events",
       join: c in "channels",
       on: c.id == e.channel_id,
-      order_by: [desc: e.occurred_at],
+      order_by: [desc: e.occurred_at, desc: e.id],
       limit: ^Map.get(filters, :limit, 200),
       select: %{
+        id: e.id,
         channel_id: e.channel_id,
         slug: c.slug,
         occurred_at: e.occurred_at,
@@ -265,8 +269,14 @@ defmodule KickTracker.ChatLog do
     |> where_in(:channel_id, filters[:channel_ids])
     |> where_time(:occurred_at, filters[:from], filters[:to])
     |> local_time(:occurred_at, filters[:tz])
+    |> events_page(filters[:before])
     |> Repo.all()
   end
+
+  defp events_page(query, nil), do: query
+
+  defp events_page(query, {at, id}),
+    do: where(query, [e], e.occurred_at < ^at or (e.occurred_at == ^at and e.id < ^id))
 
   @doc "Channels with a log, or logging on, for the admin's filters."
   @spec channels() :: [map()]

@@ -24,6 +24,23 @@ defmodule KickTracker.Groups do
   @spec get_by_slug(String.t()) :: map() | nil
   def get_by_slug(slug), do: Enum.find(list(), &(&1.slug == slug))
 
+  @doc "The groups each channel is in, by channel id (channels in none are left out)."
+  @spec by_channel() :: %{integer() => [integer()]}
+  def by_channel do
+    Repo.all(from m in "channel_group_members", select: {m.channel_id, m.group_id})
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+  end
+
+  @doc "The groups a channel is in."
+  @spec of_channel(integer()) :: [integer()]
+  def of_channel(channel_id),
+    do:
+      Repo.all(
+        from m in "channel_group_members",
+          where: m.channel_id == ^channel_id,
+          select: m.group_id
+      )
+
   defp members_by_group(ids) do
     Repo.all(
       from m in "channel_group_members",

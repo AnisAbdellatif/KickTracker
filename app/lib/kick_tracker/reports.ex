@@ -76,7 +76,8 @@ defmodule KickTracker.Reports do
   Channels on air now: the open stream, the latest reading (if recent),
   its category and title. A channel shown only while live (§13.2) comes
   with its viewers alone: no stream, start, title or category.
-  `visibility:` the levels listed (default public and live-only), or `:any`.
+  `visibility:` the levels listed (default public and live-only), or `:any`;
+  `full: true` gives every channel's stream, title and category (an admin key).
   """
   @spec live_now(keyword()) :: [map()]
   def live_now(opts \\ []) do
@@ -108,7 +109,7 @@ defmodule KickTracker.Reports do
     ).rows
     |> Enum.map(fn [cid, slug, visibility, sid, started, viewers, at, category, title] ->
       fresh? = at && DateTime.diff(DateTime.utc_now(), at) < 300
-      full? = visibility != "live_only"
+      full? = visibility != "live_only" or Keyword.get(opts, :full, false)
 
       %{
         channel_id: cid,
