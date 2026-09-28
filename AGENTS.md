@@ -99,11 +99,12 @@ understanding their intent first.
 | `KICK.md` | Everything known about Kick as a source: API, webhooks, website endpoints, Pusher, each fact with where it was seen | Correct it first when Kick behaves differently; new facts go here |
 | `app/` | Phoenix app, roles `collector` and `web` (§10) | One image, role chosen by `ROLE`. `app/AGENTS.md` holds Phoenix's own framework guidelines: follow them in `app/`; this file wins on conflict |
 | `ingress/receiver/` | Webhook receiver (§8.4) | Separate deployable, rarely changed, **never touches the database** |
+| `ingress/worker/` | Cloudflare Worker on the webhook hostname: each delivery to the main VPS, else the backup receiver (§15.2) | No dependencies; tested with `node --test`, deployed by hand with wrangler (its README) |
 | `sim/` | The fake Kick + the recorder (§17) | All development and tests run against it |
 | `fixtures/` | Recorded, anonymized Kick payloads (§17.1) | Source for the simulator and parser tests |
 | `contracts/` | The event envelope (§8.1) | The only thing app and ingress share |
 | `API.md` | The public read API, `/api/v1` (§13.10) | A contract for other applications: sent with each key; `v1` only gains fields. Update it with any change to `/api` |
-| `deploy/` | Kamal configs (`kamal/`), compose files (infrastructure, stage 2), Caddy, RabbitMQ definitions, `release.sh` (a release, run by a person with deploy-kit; deploys only the groups a change touches, checked by `release-test.sh`), `server-sync.sh` (run on the server before each deploy) | `compose.dev.yml` runs TimescaleDB (55432) and RabbitMQ (55672) for development and tests; `rehearsal/rehearse.sh` runs the sandbox under load and upgrades it with the kit: run it after changing anything on the deploy path |
+| `deploy/` | Kamal configs (`kamal/`), compose files (infrastructure, stage 2), Caddy, RabbitMQ definitions, `release.sh` (a release, run by a person with deploy-kit; deploys only the groups a change touches, checked by `release-test.sh`), `server-sync.sh` (run on the server before each deploy), `shadow.sh` and `shadow-follow.sh` (the shadow machine's deploys: by hand, or once a build has been live and healthy on the main VPS for `KT_SHADOW_SOAK`; checked by `shadow-test.sh` and `shadow-follow-test.sh`) | `compose.dev.yml` runs TimescaleDB (55432) and RabbitMQ (55672) for development and tests; `rehearsal/rehearse.sh` runs the sandbox under load and upgrades it with the kit: run it after changing anything on the deploy path |
 | `.kamal/` | deploy-kit: settings (`kit.env`), groups, project steps, the sandbox (`sandbox/`: the production stack on this machine, `kit sandbox up`), the vendored kit (`kit/`) | Update the kit with `kit update --from <deploy-kit checkout or URL> --ref <tag>`, and check the vendored copy matches the tag (before 0.6.0 the update ran the old kit's file list, so a release adding a folder needed a second `kit update`); never edit `.kamal/kit/` by hand. The sandbox and the rehearsal never reach a real server: never weaken `deploy/kamal/*.sandbox.yml` or the kit's checks to make them work |
 
 Follow the phase order in §20. Don't build ahead of the current phase without asking.
@@ -193,7 +194,10 @@ one, stop and ask.
   parsers are pure modules with no processes, database or network. GenServers only carry
   state and call them.
 - **Migrations are expand-then-contract**: add first, remove only once no running code
-  uses it; `collector` and `web` may run different versions for a while. Unique keys on
+  uses it; `collector` and `web` may run different versions for a while. The shadow
+  collector runs up to `KT_SHADOW_SOAK` (6h) behind the main VPS on purpose (§10.5):
+  a column `Workers.Backfill` starts reading in the shadow's database ships a release
+  after the migration that adds it, never with it. Unique keys on
   hypertables include the time column. Continuous aggregates are expensive to change:
   design them carefully and say so when a change requires recreating one.
 

@@ -10,7 +10,8 @@ git-ignored and live only on the server.
 | `stack.env` | The bundled Caddy, `ops/check-host.sh` (which parses it, never sources it) | `SITE_HOST`, `INGRESS_HOST`, `ACME_EMAIL`, `ADMIN_ALLOW` (with the host's own Caddy, only the hosts are read) |
 | `app.env` | web, migrate | see `app.env.example` |
 | `collector.env` | both collectors | see `collector.env.example` (no web secrets) |
-| `shadow.env`, `shadow-db.env` | the shadow machine (`compose.shadow.yml`) | see their examples |
+| `shadow.env`, `shadow-db.env` | the shadow machine: its collector (`kamal/shadow.yml`) and its database (`compose.shadow.yml`) | see their examples |
+| `backup-receiver.env` | the shadow machine's backup receiver (`kamal/backup-receiver.yml`) | see `backup-receiver.env.example` |
 | `receiver.env` | both receivers | see `receiver.env.example` |
 | `deployer.env` | the machine that deploys (Kamal's registry login) | see `deployer.env.example` |
 | `db.env` | the database and the backups (`backup/*.sh` also read `POSTGRES_*`, `WALG_*`, `AWS_*` and the backup heartbeat URLs here) | see `db.env.example` |
@@ -32,12 +33,18 @@ git-ignored and live only on the server.
 ## On the server
 
 Before each deploy the kit runs `deploy/server-sync.sh` there, which runs
-`decrypt.sh`: every `*.sops.env` decrypted with the server's age key,
-swapped in only if all of them decrypted. By hand:
+`decrypt.sh`: the machine's `*.sops.env` decrypted with its age key,
+swapped in only if all of them decrypted. Which are the machine's: those
+named by `SECRETS` in its `deploy/.env` (the shadow machine: `SECRETS="shadow
+shadow-db backup-receiver"`), or, unset, all but those three (the main
+VPS). The shadow machine's files are encrypted to its key and the admins'
+only (`../../.sops.yaml`'s first rule), the others never to its key. By
+hand:
 
     deploy/secrets/decrypt.sh
 
-`app.env`, `collector.env` and `receiver.env` reach the containers as
+`app.env`, `collector.env`, `receiver.env`, `shadow.env` and
+`backup-receiver.env` reach the containers as
 `docker run --env-file` (deploy/kamal/*.yml), which takes values
 literally: `KEY="value"` would keep its quotes. `decrypt.sh` refuses such
 values and changes nothing; remove the quotes (`sops app.sops.env`).

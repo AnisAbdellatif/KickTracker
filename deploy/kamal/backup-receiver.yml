@@ -1,0 +1,49 @@
+# The backup webhook receiver as Kamal runs it (project.md §15.2): one
+# receiver on the shadow machine, reached through its Cloudflare Tunnel
+# (a public hostname to http://localhost:4060). The ingress Worker
+# (ingress/worker) sends it a webhook when the main VPS can't take it; it
+# spools it and publishes to the main VPS's RabbitMQ over Tailscale once
+# that answers.
+#
+# One role (.kamal/groups/backup-receiver), deployed with deploy/shadow.sh,
+# never with release.sh. `service: kicktracker-receiver` for the same
+# reason as shadow.yml: the image's label. The rest as in shadow.yml.
+<%
+  host = ENV.fetch("KT_SHADOW_HOST") { raise "KT_SHADOW_HOST isn't set: put the shadow machine in .kamal/kit.local.env" }
+  dir = ENV.fetch("KT_SHADOW_DEPLOY_DIR", "/srv/kick_tracker")
+  secrets = "#{dir}/deploy/secrets"
+%>
+service: kicktracker-receiver
+image: <%= ENV.fetch("KT_IMAGE_OWNER", "anisabdellatif") %>/kicktracker-receiver
+
+primary_role: receiver_backup
+
+servers:
+  receiver_backup:
+    hosts: [<%= host %>]
+    proxy: false
+    env:
+      # No peer: this one never steps aside, it's the last place to go.
+      clear: {RECEIVER_ID: "shadow/1"}
+    options:
+      env-file: <%= secrets %>/backup-receiver.env
+      # Only for the tunnel's cloudflared on this machine.
+      publish: 127.0.0.1:<%= ENV.fetch("KT_BACKUP_RECEIVER_PORT", 4060) %>:4060
+      volume: kicktracker-shadow_spool:/data
+
+registry:
+  server: <%= ENV.fetch("KT_REGISTRY", "ghcr.io") %>
+  username: <%= ENV.fetch("KT_REGISTRY_USER", "anisabdellatif") %>
+  password: [KAMAL_REGISTRY_PASSWORD]
+
+builder:
+  arch: amd64
+  context: ingress/receiver
+  dockerfile: ingress/receiver/Dockerfile
+
+ssh:
+  user: <%= ENV.fetch("KT_SHADOW_SSH_USER") { raise "KT_SHADOW_SSH_USER isn't set: put the shadow machine's deploy user in .kamal/kit.local.env" } %>
+  port: <%= ENV.fetch("KT_SHADOW_SSH_PORT", 22) %>
+
+deploy_timeout: 120
+retain_containers: 5

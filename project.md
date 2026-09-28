@@ -911,15 +911,16 @@ its `ChannelSup`, sync its webhook subscriptions. No redeploy.
 
 ### 10.5 The shadow collector
 
-An independent collector on a second machine (the stage 2 one, §15.2),
+An independent collector on a second machine (the shadow machine, §15.2),
 with **its own database**, collecting the same channels **all the time**:
 viewers, subscriber and follower totals, chat. It shares nothing with the
 primary side but a private network link, so it keeps collecting through
 anything that stops the main VPS, and there is no takeover: it was
 already running.
 
-- **Mode**: the same image, `COLLECTOR_MODE=shadow`, two collectors with
-  their own lease like the primary side's. No webhook consumer and no
+- **Mode**: the same image, `COLLECTOR_MODE=shadow`, one collector with
+  its own lease (no standby: a deploy replaces it in place, and its few
+  seconds down only matter during an outage of the main VPS). No webhook consumer and no
   subscription management (webhooks are the receivers', and a backup
   receiver on the same machine spools them, §15.2); no site; its own jobs
   only.
@@ -944,6 +945,16 @@ already running.
   50 channels a minute, one more chat connection per channel.
 - It keeps 30 days (the primary backfills from the last 7) and isn't
   backed up.
+- **Deploys**: with deploy-kit, like the main VPS, but never with its
+  releases (`deploy/shadow.sh`): by hand at any time, or by the
+  **follower** on the shadow machine (`deploy/shadow-follow.sh`, every 10
+  minutes), which deploys a build once it has been live and healthy on the
+  main VPS for `KT_SHADOW_SOAK` (6 hours by default; healthy: a leader, no
+  open alert, the site and receivers answering). So the shadow runs the
+  last build that proved itself, and a bad release on the main VPS isn't
+  also on the shadow. The price: the backfill reads a database written by
+  a build up to a soak older, so a column it reads there must exist a
+  soak earlier (§15.3).
 
 **Growing past one collecting node:** partition the channels between
 collectors (a lease per partition), each with its own journal. Not needed
@@ -1008,7 +1019,7 @@ kick_tracker/
 ├─ ingress/
 │  ├─ receiver/                      # Elixir: Bandit + Plug + amqp + SQLite spool
 │  │  └─ Dockerfile
-│  └─ cloudflare/                    # later: Worker → queue
+│  └─ worker/                        # Cloudflare Worker: webhook failover (§15.2)
 ├─ sim/                              # the fake Kick (§17.2) + recorder (§17.1)
 ├─ fixtures/                         # recorded, anonymized Kick payloads
 ├─ contracts/
@@ -1016,7 +1027,8 @@ kick_tracker/
 │  └─ envelope.schema.json
 └─ deploy/                          # runbook: deploy/README.md
    ├─ compose.single.yml             # stage 1, one VPS
-   ├─ compose.backup-receiver.yml    # stage 2, second VPS
+   ├─ compose.shadow.yml             # stage 2: the shadow machine's database
+   ├─ shadow.sh, shadow-follow.sh    # stage 2: deploys of the shadow machine (§10.5)
    ├─ Caddyfile                      # the bundled Caddy (profile "caddy")
    ├─ caddy/sites.caddy              # the sites, also imported by a host's own Caddy
    ├─ db/                            # TimescaleDB + WAL-G
@@ -1773,17 +1785,21 @@ Caddy → two receivers (`lb_policy first`, active health checks) → RabbitMQ
 crashes and updates, collector crashes and updates, and database restarts;
 app deploys never touch webhook intake.
 
-**Stage 2: backup receiver on a second VPS.**
-Same receiver image on another provider or region, with its own spool,
-publishing to RabbitMQ over a private network (WireGuard or Tailscale; the
-main VPS publishes AMQP on its private address only). The
-webhook hostname is routed by **Cloudflare Load Balancing** (health-checked
-failover between the two machines); the backup machine serves it with a
-Cloudflare Origin CA certificate, since an ACME challenge for a host routed
-to the main VPS never reaches it. Covers the main VPS or Caddy going down:
-events are received and spooled on the backup until RabbitMQ is back. The
-same machine runs the **shadow collector** (§10.5), so polls and chat are
-collected through the outage too and backfilled after it.
+**Stage 2: the shadow machine.**
+A second machine that fails independently of the main VPS (another
+provider or network, its own power; it needs no open port), linked to it
+by Tailscale. It runs the same receiver image as a **backup receiver**,
+with its own spool, publishing to the main RabbitMQ over Tailscale (the
+main VPS publishes AMQP on its private address only), and the **shadow
+collector** (§10.5), so polls and chat are collected through an outage
+too and backfilled after it. Webhooks reach the backup through a
+**Cloudflare Worker** on the webhook hostname (`ingress/worker`): each
+delivery goes to the main VPS first and, if it can't take it (no
+connection, a timeout, a 5xx), the same request goes to the backup through
+its Cloudflare Tunnel. Per request, not by health check, because Kick
+doesn't seem to redeliver a webhook that failed. Covers the main VPS or
+Caddy going down: events are received and spooled on the backup until
+RabbitMQ is back.
 
 **Stage 3 (if ever needed): a redundant queue.**
 A 3-node RabbitMQ cluster (quorum queues replicate across nodes), or managed
@@ -1798,6 +1814,12 @@ change to the app beyond producer config.
   (the rollback), so a contract step ships only once the build before the
   current one no longer uses what it removes: one deploy later than "no
   running code".
+- **The shadow lags on purpose** (§10.5): the main VPS's backfill reads
+  the shadow's database, written by a build up to `KT_SHADOW_SOAK` older.
+  A column the backfill starts reading there ships at least a soak after
+  the migration that adds it (in practice: the migration in one release,
+  the backfill reading it in a later one, once the follower has brought
+  the migration to the shadow).
 - The receiver never touches the database, so app migrations never affect it.
 - The envelope changes only in a backward-compatible way (new optional
   fields); a breaking change means a new `version` and a consumer that reads

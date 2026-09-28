@@ -1,0 +1,11 @@
+# Every 10 minutes (kicktracker-follow.service says how to install it).
+[Unit]
+Description=Run the KickTracker shadow follower every 10 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

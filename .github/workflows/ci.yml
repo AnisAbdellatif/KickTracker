@@ -144,14 +144,21 @@ jobs:
       - run: mix deps.get
       - run: mix dialyzer --format github
 
-  # Which groups deploy/release.sh deploys for a change (a fake kit, no server).
+  # Which groups deploy/release.sh deploys for a change, and what the shadow
+  # machine's scripts deploy and when (fakes, no server).
   release:
-    name: Release script
+    name: Release scripts
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 deploy/release.sh deploy/release-test.sh
+      - run: >-
+          docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -x
+          deploy/release.sh deploy/release-test.sh deploy/shadow.sh deploy/shadow-test.sh
+          deploy/shadow-follow.sh deploy/shadow-follow-test.sh deploy/secrets/decrypt.sh
+          .kamal/steps/migrate .kamal/steps/server-sync
       - run: deploy/release-test.sh
+      - run: deploy/shadow-test.sh
+      - run: deploy/shadow-follow-test.sh
 
   # The webhook failover Worker (ingress/worker): deployed by hand with
   # wrangler, tested here.

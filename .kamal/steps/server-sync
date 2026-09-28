@@ -7,5 +7,9 @@
 # shellcheck source=/dev/null
 . "$KIT_HOME/lib/kamal.sh"
 
-dir=${KT_DEPLOY_DIR:-/srv/kick_tracker}
-kit_kamal server exec -H -q "cd $dir && deploy/server-sync.sh ${KAMAL_VERSION:?}"
+# shellcheck source-path=SCRIPTDIR source=_machine.sh
+. "$(dirname "$0")/_machine.sh"
+
+# Every host of the config deployed: the main VPS, or the shadow machine
+# (deploy/shadow.sh), each with its own checkout.
+kit_kamal server exec -H -q "cd $kt_dir && deploy/server-sync.sh ${KAMAL_VERSION:?}"

@@ -3,6 +3,14 @@
 # ~/.config/sops/age/keys.txt`). After changing the list, run `sops
 # updatekeys` on each deploy/secrets/*.sops.env.
 creation_rules:
+  # The shadow machine's files (deploy/README.md, "The shadow machine"):
+  # the admin's key and the shadow machine's, never the main VPS's (and
+  # the rule below never the shadow machine's). sops takes the first rule
+  # that matches. Add the shadow machine's public key here when it has one,
+  # then `sops updatekeys` these files.
+  - path_regex: deploy/secrets/(shadow|shadow-db|backup-receiver)(\.sops)?\.env$
+    age: >-
+      age1z5ksk2wllnxp37pvkqdwf5m0knyvwadfmgx7x74w3dnhswjywgqq6ahcdu
   - path_regex: deploy/secrets/.*\.env$
     age: >-
       age1z5ksk2wllnxp37pvkqdwf5m0knyvwadfmgx7x74w3dnhswjywgqq6ahcdu,
