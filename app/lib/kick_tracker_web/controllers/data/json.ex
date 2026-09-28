@@ -1,7 +1,8 @@
 defmodule KickTrackerWeb.Data.JSON do
   @moduledoc """
   Sends `/data/v1` responses (project.md §13.5): JSON with an ETag, and a
-  `Cache-Control` that lets Caddy or Cloudflare serve repeats. A range
+  `Cache-Control` for the browser only (`private`: a shared cache would
+  serve it without the page token `Plugs.DataToken` checks). A range
   that reaches now (a live stream, a rolling period) is revalidated every
   time: a chart refreshing it must see each new reading, and an unchanged
   answer is a 304. A range still moving otherwise (it reaches into the
@@ -31,13 +32,13 @@ defmodule KickTrackerWeb.Data.JSON do
     cache =
       cond do
         age < @now_s and not Keyword.get(opts, :shared, false) ->
-          "public, max-age=0, must-revalidate"
+          "private, max-age=0, must-revalidate"
 
         age < @recent_s ->
-          "public, max-age=30"
+          "private, max-age=30"
 
         true ->
-          "public, max-age=86400"
+          "private, max-age=86400"
       end
 
     conn =

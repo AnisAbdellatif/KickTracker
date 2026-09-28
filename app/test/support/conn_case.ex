@@ -33,8 +33,15 @@ defmodule KickTrackerWeb.ConnCase do
 
   setup tags do
     KickTracker.DataCase.setup_sandbox(tags)
-    {:ok, conn: Phoenix.ConnTest.build_conn()}
+    {:ok, conn: Phoenix.ConnTest.build_conn() |> with_data_token()}
   end
+
+  @doc """
+  The page token our charts send to `/data/v1` (`KickTrackerWeb.DataToken`),
+  on every test conn: tests of the token itself take it off.
+  """
+  def with_data_token(conn),
+    do: Plug.Conn.put_req_header(conn, "x-data-token", KickTrackerWeb.DataToken.sign())
 
   @doc "Setup: a logged-in admin (`conn`, `admin`)."
   def log_in_admin(%{conn: conn}) do

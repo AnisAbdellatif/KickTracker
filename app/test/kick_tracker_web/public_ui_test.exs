@@ -211,7 +211,7 @@ defmodule KickTrackerWeb.PublicUITest do
 
       body = json_response(get(conn, String.replace(src, "&amp;", "&")), 200)
       assert Enum.any?(body["values"], &(&1 == 10))
-      assert get_resp_header(get(conn, src), "cache-control") == ["public, max-age=30"]
+      assert get_resp_header(get(conn, src), "cache-control") == ["private, max-age=30"]
 
       # Private channels have no sparkline.
       channel!(slug: "hiddenstreamer")

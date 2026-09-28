@@ -23,9 +23,12 @@ defmodule KickTrackerWeb.Router do
     plug :fetch_current_admin
   end
 
+  # /data/v1: our own pages' chart data, nobody else's (§13.5). Counted
+  # before the token is checked, so requests without one are limited too.
   pipeline :api do
     plug :accepts, ["json"]
     plug KickTrackerWeb.Plugs.RateLimit
+    plug KickTrackerWeb.Plugs.DataToken
   end
 
   # JSON for admin pages' charts: the admin's session, no page around it
@@ -50,7 +53,7 @@ defmodule KickTrackerWeb.Router do
     get "/about/removal", AboutController, :removal
     get "/search", AboutController, :search
 
-    live_session :public do
+    live_session :public, on_mount: [KickTrackerWeb.DataToken] do
       live "/", HomeLive
       live "/compare", CompareLive
       live "/category/:slug", CategoryLive
@@ -77,7 +80,8 @@ defmodule KickTrackerWeb.Router do
     get "/channels/:id/avatar", AvatarController, :show
   end
 
-  # History as cacheable JSON (§13.5), versioned from the start.
+  # History as JSON for our own pages' charts (§13.5); outside use goes
+  # to /api/v1 with a key.
   scope "/data/v1", KickTrackerWeb.Data do
     pipe_through :api
 

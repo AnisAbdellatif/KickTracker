@@ -1439,13 +1439,24 @@ Kicks likewise with ingress coverage.
   (the stream page), `/data/v1/streams/:id/chatters?window=5` and
   `/data/v1/compare?c=a,b&metric=…`. `res` can only ask for fewer points.
   Compact column format (`{"t":[…unix seconds…],"avg":[…],"max":[…]}`).
-  Responses get an ETag and a `Cache-Control`, so Caddy or Cloudflare can
-  serve repeat visitors without touching the app: a day for ranges ending
-  more than two days ago, 30s for ranges reaching into the last two days
-  (rollups and late events can still change them). A range that reaches
-  now (a live stream, a rolling period) is revalidated every time, so a
-  chart refreshing it (every minute while live) sees each new reading;
-  an unchanged answer is a 304. The admin's anomalies page reads a live
+  Responses get an ETag and a browser-only `Cache-Control` (`private`): a
+  day for ranges ending more than two days ago, 30s for ranges reaching
+  into the last two days (rollups and late events can still change them).
+  A range that reaches now (a live stream, a rolling period) is
+  revalidated every time, so a chart refreshing it (every minute while
+  live) sees each new reading; an unchanged answer is a 304.
+- **`/data/v1` is internal to our pages.** Every page carries a signed
+  token (`<meta name="data-token">`, `Phoenix.Token`, 6 hours); the chart
+  hook sends it in `x-data-token`, and `/data/v1` answers 403
+  `{"error":"data_token"}` without a valid one, or when the browser says
+  the request comes from another site (`Sec-Fetch-Site` other than
+  `same-origin`). A page left open longer asks its LiveView for a new
+  token and tries once more. Not a secret (anyone can load a page), so
+  not a wall: it makes `/data/v1` useless to build on, and its format
+  changes with our charts. Outside use goes through `/api/v1` with a key
+  (§13.10). Shared caches can't serve `/data/v1` past the check, hence
+  `private`; nothing caches it today anyway (Caddy has no cache,
+  Cloudflare doesn't cache JSON without a rule). The admin's anomalies page reads a live
   stream again every minute too, findings and chart.
 - **Live over LiveView:** the page subscribes to `"channel:<id>"`; new
   readings are pushed to the chart hook with `push_event` (append a point),
@@ -1474,8 +1485,6 @@ Kicks likewise with ingress coverage.
   key repeats for a minute and the cache hits. "all" starts at the
   channel's tracking start, or on pages across channels at the earliest
   public channel's.
-- The JSON endpoints are the seed of a **public read API** later; they are
-  versioned from the start (`/data/v1/...`).
 
 ### 13.6 Time, numbers, languages
 
@@ -2051,7 +2060,7 @@ Done after everything else is set up and working (§20, phase 6).
 ### 19.3 Security
 
 - Rate limits on public pages and `/data` (PlugAttack: pages 120/min,
-  `/data` 600/min, admin logins 10/min and a one-hour ban after 20 failures
+  `/data` 600/min, counted before its page token is checked, admin logins 10/min and a one-hour ban after 20 failures
   in 10 minutes), keyed on the visitor's address as our own proxies saw it.
 - Security headers (CSP with a per-request script nonce, HSTS, frame
   options), from the app and again from Caddy.
