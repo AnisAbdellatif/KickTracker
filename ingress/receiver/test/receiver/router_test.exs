@@ -212,6 +212,17 @@ defmodule Receiver.RouterTest do
     assert %{"spool_over_limit" => true, "spooled" => 2} = Jason.decode!(conn.resp_body)
   end
 
+  test "/health says which build runs", ctx do
+    Application.put_env(:receiver, :build, "0123456789abcdef0123456789abcdef01234567")
+    on_exit(fn -> Application.delete_env(:receiver, :build) end)
+    start(ctx, amqp_url: TestBroker.dead_url())
+
+    conn = Router.call(conn(:get, "/health"), Router.init([]))
+
+    assert %{"build" => "0123456789abcdef0123456789abcdef01234567"} =
+             Jason.decode!(conn.resp_body)
+  end
+
   describe "stepping aside while RabbitMQ is unreachable" do
     setup do
       Application.put_env(:receiver, :broker_grace_s, 0)

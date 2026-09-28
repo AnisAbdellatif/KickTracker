@@ -171,7 +171,8 @@ defmodule Receiver.Router do
       "spooled" => spool.count,
       "spool_bytes" => spool.bytes,
       # Nothing is ever refused for this: it is a warning to act on.
-      "spool_over_limit" => warn_bytes != nil and spool.bytes > warn_bytes
+      "spool_over_limit" => warn_bytes != nil and spool.bytes > warn_bytes,
+      "build" => Application.get_env(:receiver, :build)
     }
 
     if step_aside?,
