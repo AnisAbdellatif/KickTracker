@@ -1698,7 +1698,9 @@ our pages only (§13.5).
   the key, whatever `support_page_public` says), `categories`. A stream
   row carries only the figures of the key's scopes.
 - **Limits** per key: requests a minute (600 by default, counted per key
-  on each web node; 60 a minute per address without a valid key), how far
+  on each web node, or per key and address for a shared key, one built
+  into an app such as KickPlus; 60 a minute per address without a valid
+  key), how far
   back it reads (`from` moved forward, `"clamped": true`), the finest
   resolution (per-minute active chatters refused below it), the addresses
   it works from (CIDRs), an end date.
@@ -1707,6 +1709,9 @@ our pages only (§13.5).
   (`/channels/:slug/chat-log/messages` and `/events`, a page at a time).
   The admin page asks for them to be kept to people who could be admins,
   and suggests limiting their addresses.
+- `/streams/:id` and its chatters take `from`, so a client following a
+  live stream (KickPlus's chart polls the last 15 minutes every minute)
+  doesn't fetch the whole stream each time.
 - Endpoints reuse the site's queries (`Series`, `Reports`), which don't
   filter by visibility; the key's access decides. Same rules as the site:
   `null` is unknown, gaps are listed, at most 2 000 points a series,

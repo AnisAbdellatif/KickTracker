@@ -221,14 +221,16 @@ defmodule KickTracker.Series do
   stream, how many distinct people chatted in the `window` minutes up to
   it. Needs the per-minute detail, kept 90 days: a minute whose window
   reaches before that is `nil` (not retained), as is one chat coverage
-  says we weren't listening in. `opts[:now]` is the present, for tests.
+  says we weren't listening in. `opts[:from]` starts the minutes later
+  than the stream (its windows still reach back before it); `opts[:now]`
+  is the present, for tests.
   """
   @spec active_chatters(map(), pos_integer(), keyword()) :: map()
   def active_chatters(%{channel_id: channel_id} = stream, window, opts \\ [])
       when window in 1..60 do
     now = Keyword.get(opts, :now, DateTime.utc_now())
     to = stream.ended_at || now
-    from = stream.started_at
+    from = Enum.max([stream.started_at, opts[:from] || stream.started_at], DateTime)
     grid = minute_grid(from, to)
     periods = periods(channel_id, "chat", from, to)
 

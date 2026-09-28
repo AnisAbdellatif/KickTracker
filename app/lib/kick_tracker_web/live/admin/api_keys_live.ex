@@ -105,6 +105,7 @@ defmodule KickTrackerWeb.Admin.ApiKeysLive do
     params
     |> Map.merge(%{
       "admin" => params["admin"] == "true",
+      "per_address" => params["per_address"] == "true",
       "all_channels" => params["all_channels"] != "false",
       "scopes" => list.("scopes"),
       "channel_ids" => list.("channel_ids"),
@@ -133,6 +134,7 @@ defmodule KickTrackerWeb.Admin.ApiKeysLive do
       "group_ids" => key.group_ids,
       "scopes" => key.scopes,
       "rate_limit" => key.rate_limit,
+      "per_address" => key.per_address,
       "history_days" => key.history_days,
       "min_res" => key.min_res,
       "allowed_cidrs" => key.allowed_cidrs,
@@ -219,7 +221,11 @@ defmodule KickTrackerWeb.Admin.ApiKeysLive do
                   <% end %>
                 </td>
                 <td class="text-muted text-xs">
-                  <p>{gettext("%{n}/min", n: k.rate_limit)}</p>
+                  <p>
+                    {if k.per_address,
+                      do: gettext("%{n}/min per address", n: k.rate_limit),
+                      else: gettext("%{n}/min", n: k.rate_limit)}
+                  </p>
                   <p :if={k.history_days}>{gettext("last %{n} days", n: k.history_days)}</p>
                   <p :if={k.min_res}>{gettext("resolution ≥ %{res}", res: k.min_res)}</p>
                   <p :if={k.allowed_cidrs != []}>{Enum.join(k.allowed_cidrs, ", ")}</p>
@@ -433,6 +439,19 @@ defmodule KickTrackerWeb.Admin.ApiKeysLive do
           value={expiry_date(@form[:expires_at].value)}
         />
       </fieldset>
+      <label class="flex items-center gap-2 text-sm">
+        <input type="hidden" name="api_key[per_address]" value="false" />
+        <input
+          type="checkbox"
+          name="api_key[per_address]"
+          value="true"
+          checked={@form[:per_address].value in [true, "true"]}
+          class="checkbox checkbox-xs checkbox-primary"
+        />
+        {gettext(
+          "Shared key: count the limit per address (for a key many people use, such as one built into an app)"
+        )}
+      </label>
       <.input
         name="api_key[allowed_cidrs]"
         type="textarea"

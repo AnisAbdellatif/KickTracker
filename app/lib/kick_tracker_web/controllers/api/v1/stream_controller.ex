@@ -2,7 +2,9 @@ defmodule KickTrackerWeb.Api.V1.StreamController do
   @moduledoc """
   One stream in the public read API (project.md §13.10): its timeline,
   and the series the key's scopes include; active chatters in a rolling
-  window apart. Only streams of channels the key reaches fully.
+  window apart. Only streams of channels the key reaches fully. `from`
+  (unix seconds or ISO 8601) narrows either to the part of the stream
+  since then, for a client following a live stream.
   """
 
   use KickTrackerWeb, :controller
@@ -10,10 +12,11 @@ defmodule KickTrackerWeb.Api.V1.StreamController do
   alias KickTracker.{Annotations, ApiKeys, Channels, Reports, Series}
   alias KickTracker.ApiKeys.Access
   alias KickTrackerWeb.Api.V1.JSON
+  alias KickTrackerWeb.Period
 
   @support_markers ~w(gift kicks)
 
-  def show(conn, %{"id" => id}) do
+  def show(conn, %{"id" => id} = params) do
     key = conn.assigns.api_key
 
     with {:ok, stream, channel} <- fetch(key, id),
@@ -21,17 +24,21 @@ defmodule KickTrackerWeb.Api.V1.StreamController do
       now = DateTime.utc_now()
       to = stream.ended_at || now
       # A minute either side, so the first and last readings show.
-      {from, until, clamped} =
-        Access.clamp(key, DateTime.add(stream.started_at, -60), DateTime.add(to, 60), now)
+      start = since(params, DateTime.add(stream.started_at, -60))
+
+      {from, until, clamped} = Access.clamp(key, start, DateTime.add(to, 60), now)
 
       res = Access.resolution(key, :raw)
       timeline = Reports.timeline(stream)
       can? = &Access.can?(key, :full, &1)
 
+      {from_s, until_s} = {DateTime.to_unix(from), DateTime.to_unix(until)}
+
       markers =
         Enum.filter(
           Reports.markers(stream),
-          &(&1.kind not in @support_markers or can?.("support"))
+          &((&1.kind not in @support_markers or can?.("support")) and &1.at >= from_s and
+              &1.at <= until_s)
         )
 
       data =
@@ -83,8 +90,9 @@ defmodule KickTrackerWeb.Api.V1.StreamController do
          {:res, true} <- {:res, key.min_res in [nil, "raw"]} do
       now = DateTime.utc_now()
       to = stream.ended_at || now
-      {from, _, clamped} = Access.clamp(key, stream.started_at, to, now)
-      data = Series.active_chatters(stream, window)
+      start = since(params, stream.started_at)
+      {from, _, clamped} = Access.clamp(key, start, to, now)
+      data = Series.active_chatters(stream, window, from: from)
       since = DateTime.to_unix(from)
 
       kept =
@@ -109,6 +117,14 @@ defmodule KickTrackerWeb.Api.V1.StreamController do
 
       {:res, false} ->
         JSON.error(conn, 403, "resolution", "This key can't read per-minute figures.")
+    end
+  end
+
+  # Where the answer starts: `from` when given and later than `default`.
+  defp since(params, default) do
+    case Period.parse_time(params["from"]) do
+      {:ok, at} -> Enum.max([at, default], DateTime)
+      :error -> default
     end
   end
 

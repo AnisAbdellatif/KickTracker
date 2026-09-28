@@ -92,6 +92,10 @@ defmodule KickTrackerWeb.Period do
     Cache.fetch({:earliest_tracked_since}, 300, &Reports.earliest_tracked_since/0)
   end
 
+  @doc "A time from a query param: unix seconds or ISO 8601 (`:error` otherwise)."
+  @spec parse_time(term()) :: {:ok, DateTime.t()} | :error
+  def parse_time(value), do: time(value)
+
   defp time(nil), do: :error
   defp time(unix) when is_integer(unix), do: DateTime.from_unix(unix)
 
