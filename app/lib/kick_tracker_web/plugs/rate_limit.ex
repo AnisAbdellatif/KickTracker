@@ -5,7 +5,8 @@ defmodule KickTrackerWeb.Plugs.RateLimit do
     * pages: 120 a minute;
     * `/data`: 600 a minute (a channel page loads several series);
     * `/api`: each key its own limit (600 a minute by default), counted
-      per key; requests without a valid key 60 a minute per address;
+      per key, or per key and address for a key shared by many people;
+      requests without a valid key 60 a minute per address;
     * channels' pictures (`/img`): 600 a minute (a page shows many);
     * admin login attempts: 10 a minute per address, and after 20 failures
       in 10 minutes the address is shut out for an hour.
@@ -37,6 +38,13 @@ defmodule KickTrackerWeb.Plugs.RateLimit do
   rule "api", conn do
     if match?(["api" | _], conn.path_info) do
       case conn.assigns[:api_key] do
+        %{id: id, rate_limit: n, per_address: true} ->
+          throttle({:api_key, id, conn.remote_ip},
+            period: 60_000,
+            limit: limit(:api_key, n),
+            storage: @storage
+          )
+
         %{id: id, rate_limit: n} ->
           throttle({:api_key, id}, period: 60_000, limit: limit(:api_key, n), storage: @storage)
 

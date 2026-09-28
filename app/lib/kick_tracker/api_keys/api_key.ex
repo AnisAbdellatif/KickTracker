@@ -24,6 +24,8 @@ defmodule KickTracker.ApiKeys.ApiKey do
     field :group_ids, {:array, :integer}, default: []
     field :scopes, {:array, :string}, default: []
     field :rate_limit, :integer, default: 600
+    # A shared key: the rate limit counts per address as well as per key.
+    field :per_address, :boolean, default: false
     field :history_days, :integer
     field :min_res, :string
     field :allowed_cidrs, {:array, :string}, default: []
@@ -36,7 +38,7 @@ defmodule KickTracker.ApiKeys.ApiKey do
   end
 
   @fields ~w(name contact admin all_channels channel_ids group_ids scopes rate_limit
-             history_days min_res allowed_cidrs expires_at)a
+             per_address history_days min_res allowed_cidrs expires_at)a
 
   @doc "What an admin sets on a key."
   def changeset(key, attrs) do

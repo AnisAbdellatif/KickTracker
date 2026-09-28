@@ -38,7 +38,8 @@ Match on `code`; messages may change.
 ## Rate limits
 
 Each key has its own limit per minute (600 unless the admin set another), counted per
-key whatever the address. Requests without a valid key: 60 a minute per address.
+key whatever the address; a key shared by many people (one built into an app) counts
+per key and address, so each of them gets the limit. Requests without a valid key: 60 a minute per address.
 The site runs on two servers that count separately, so a client spreading its
 requests over several addresses may see up to twice its limit; don't rely on it.
 
@@ -197,18 +198,25 @@ hours are counted in whole UTC hours, so they can be off by up to 45 minutes.
   "airtime_s": 36000, "avg_viewers": 900.1, "switch_change": 0.05, "switches": 3}]}
 ```
 
-### `/streams/:id` (scope `channels`)
+### `/streams/:id?from=…` (scope `channels`)
 
 One stream: `stream` (`id`, `channel`, `started_at`, `ended_at`, `live`), its
-`segments` (categories over time), `titles`, `markers` (raids, hosts; gift bursts and
-big Kicks with scope `support`), public `annotations`, and the series the key's scopes
-include: `viewers`, `chat`, `support`, at the finest resolution the stream's length
-allows.
+`segments` (categories over time), `titles`, `markers` (raids and hosts: `kind`
+`raid`, `host` or `hosted_by`, `other` the other channel, `value` its viewers; gift
+bursts and big Kicks with scope `support`), public `annotations`, and the series the
+key's scopes include: `viewers`, `chat`, `support`, at the finest resolution the
+range allows.
 
-### `/streams/:id/chatters?window=5` (scope `chat`)
+`from` (optional, unix seconds or ISO 8601) keeps only the part of the stream since
+then: the series and markers start there. It is what a client following a live
+stream polls with (say the last 15 minutes, every minute) rather than fetching the
+whole stream each time. A `from` before the stream, or not a time, is ignored.
+
+### `/streams/:id/chatters?window=5&from=…` (scope `chat`)
 
 Active chatters in a rolling window (1, 5, 10, 15 or 30 minutes), one point a minute:
-`{"window", "t", "chatters"}`. `null` where we weren't listening, or where the window
+`{"window", "t", "chatters"}`. `from` as above: the minutes start there (each still
+counts its whole window, reaching back before `from`). `null` where we weren't listening, or where the window
 reaches before the 90 days per-minute detail is kept.
 
 ### `/channels/:slug/chat-log/messages` and `/chat-log/events` (admin keys)

@@ -107,6 +107,19 @@ defmodule KickTrackerWeb.ApiV1Test do
       assert get(conn, "/api/v1/channels").status == 401
       assert get(conn, "/api/v1/channels").status == 401
       assert get(conn, "/api/v1/channels").status == 429
+
+      # A shared key counts per address: each of its users gets the limit.
+      {_key, shared} = key!(scopes: ~w(channels), rate_limit: 2, per_address: true)
+      assert api(conn, shared, "/channels").status == 200
+      assert api(conn, shared, "/channels").status == 200
+      assert api(conn, shared, "/channels").status == 429
+
+      elsewhere = %{
+        conn
+        | remote_ip: {198, 51, 100, System.unique_integer([:positive]) |> rem(250)}
+      }
+
+      assert api(elsewhere, shared, "/channels").status == 200
     end
   end
 
@@ -211,6 +224,64 @@ defmodule KickTrackerWeb.ApiV1Test do
       {_key, raw} = key!(scopes: ~w(viewers))
       assert json_response(api(conn, raw, "/streams/#{id}"), 403)
       assert json_response(api(conn, raw, "/streams/#{streams["hiddenstreamer"]}"), 404)
+    end
+
+    test "from narrows a stream to what came since, for a client following it live", %{
+      conn: conn,
+      public: public,
+      streams: streams
+    } do
+      id = streams["somestreamer"]
+      now = DateTime.utc_now()
+
+      Repo.insert_all("channel_events", [
+        %{
+          channel_id: public.id,
+          occurred_at: DateTime.add(now, -3600),
+          kind: "hosted_by",
+          other_channel: "otherstreamer",
+          viewers: 50,
+          dedup_key: "h1",
+          payload: %{}
+        },
+        %{
+          channel_id: public.id,
+          occurred_at: DateTime.add(now, -300),
+          kind: "hosted_by",
+          other_channel: "otherstreamer",
+          viewers: 80,
+          dedup_key: "h2",
+          payload: %{}
+        }
+      ])
+
+      {_key, raw} = key!(scopes: ~w(channels viewers chat))
+      from = DateTime.to_unix(now) - 15 * 60
+
+      all = json_response(api(conn, raw, "/streams/#{id}"), 200)
+      assert length(all["markers"]) == 2
+      assert length(all["viewers"]["t"]) > 100
+
+      recent = json_response(api(conn, raw, "/streams/#{id}?from=#{from}"), 200)
+      assert recent["from"] == from
+      assert Enum.all?(recent["viewers"]["t"], &(&1 >= from))
+      assert length(recent["viewers"]["t"]) in 13..16
+
+      assert [%{"kind" => "hosted_by", "other" => "otherstreamer", "value" => 80}] =
+               recent["markers"]
+
+      chatters =
+        json_response(api(conn, raw, "/streams/#{id}/chatters?window=5&from=#{from}"), 200)
+
+      assert length(chatters["t"]) in 14..16
+      assert Enum.all?(chatters["t"], &(&1 >= div(from, 60) * 60))
+
+      # A from before the stream, or not a time, changes nothing.
+      assert json_response(api(conn, raw, "/streams/#{id}?from=0"), 200)["viewers"] ==
+               all["viewers"]
+
+      assert json_response(api(conn, raw, "/streams/#{id}?from=soon"), 200)["viewers"] ==
+               all["viewers"]
     end
 
     test "history and resolution are held to the key's limits", %{conn: conn, streams: streams} do
