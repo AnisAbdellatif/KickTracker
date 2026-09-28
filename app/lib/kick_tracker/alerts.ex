@@ -18,24 +18,32 @@ defmodule KickTracker.Alerts do
   Checks now: opens, reminds and resolves alerts. Returns the open ones.
   Web nodes and the leading collector both check; a transaction lock lets
   one check at a time, and a check that finds another running skips.
+
+  Notifications go out after the commit, so a slow or refusing target
+  can't roll back what was recorded (and have it sent again the next
+  minute); several of one kind at once go out as one message.
   """
   @spec run(DateTime.t(), (String.t(), Notifier.priority() -> term())) :: [map()]
   def run(now \\ DateTime.utc_now(), notify \\ &Notifier.send/2) do
-    {:ok, open} =
+    {:ok, {changes, open}} =
       Repo.transaction(
         fn ->
-          if Repo.query!("SELECT pg_try_advisory_xact_lock(4242, 1)").rows == [[true]],
-            do: check(now, notify)
+          changes =
+            if Repo.query!("SELECT pg_try_advisory_xact_lock(4242, 1)").rows == [[true]],
+              do: check(now),
+              else: []
 
-          open_alerts()
+          {changes, open_alerts()}
         end,
         timeout: 60_000
       )
 
+    for {text, priority} <- messages(changes), do: notify.(text, priority)
     open
   end
 
-  defp check(now, notify) do
+  # Records what changed; returns it as `{kind, message}`, in order.
+  defp check(now) do
     problems = snapshot(now) |> Rules.evaluate(now) |> Map.new(&{&1.key, &1})
 
     open =
@@ -47,35 +55,78 @@ defmodule KickTracker.Alerts do
 
     open_keys = MapSet.new(open, & &1.key)
 
-    for a <- open do
-      case problems[a.key] do
-        nil ->
-          Repo.update_all(from(x in "alerts", where: x.id == ^a.id), set: [resolved_at: now])
-          notify.("✅ resolved: " <> a.message, :low)
+    changed =
+      for a <- open do
+        case problems[a.key] do
+          nil ->
+            Repo.update_all(from(x in "alerts", where: x.id == ^a.id), set: [resolved_at: now])
+            {:resolved, a.message}
 
-        p ->
-          remind? = a.notified_at == nil or DateTime.diff(now, a.notified_at) > @remind_s
-          if remind?, do: notify.("🔴 still: " <> p.message, :default)
+          p ->
+            remind? = a.notified_at == nil or DateTime.diff(now, a.notified_at) > @remind_s
 
-          Repo.update_all(from(x in "alerts", where: x.id == ^a.id),
-            set:
-              [last_at: now, message: p.message] ++ if(remind?, do: [notified_at: now], else: [])
-          )
+            Repo.update_all(from(x in "alerts", where: x.id == ^a.id),
+              set:
+                [last_at: now, message: p.message] ++
+                  if(remind?, do: [notified_at: now], else: [])
+            )
+
+            remind? && {:still, p.message}
+        end
       end
-    end
 
-    for {key, p} <- problems, not MapSet.member?(open_keys, key) do
-      notify.("🔴 " <> p.message, :high)
+    started =
+      for {key, p} <- problems, not MapSet.member?(open_keys, key) do
+        Repo.insert_all(
+          "alerts",
+          [%{key: key, message: p.message, first_at: now, last_at: now, notified_at: now}],
+          on_conflict: :nothing
+        )
 
-      Repo.insert_all(
-        "alerts",
-        [%{key: key, message: p.message, first_at: now, last_at: now, notified_at: now}],
-        on_conflict: :nothing
-      )
-    end
+        {:new, p.message}
+      end
 
-    :ok
+    started ++ Enum.filter(changed, & &1)
   end
+
+  # Up to this many of a kind are sent one by one; more become one message
+  # listing the first few. An outage of Kick opens (and later resolves) an
+  # alert per channel: one message each would be dozens a minute, and ntfy
+  # refuses a burst like that.
+  @one_by_one 3
+  @listed 10
+
+  defp messages(changes) do
+    for kind <- [:new, :still, :resolved],
+        of_kind = for({^kind, m} <- changes, do: m),
+        of_kind != [],
+        message <- combine(kind, of_kind),
+        do: message
+  end
+
+  defp combine(kind, [_ | _] = messages) when length(messages) <= @one_by_one,
+    do: Enum.map(messages, &{prefix(kind) <> &1, priority(kind)})
+
+  defp combine(kind, messages) do
+    n = length(messages)
+    shown = Enum.take(messages, @listed)
+    more = if n > @listed, do: ["…and #{n - @listed} more"], else: []
+    lines = Enum.map(shown, &("• " <> String.slice(&1, 0, 150))) ++ more
+
+    [{Enum.join([heading(kind, n) | lines], "\n"), priority(kind)}]
+  end
+
+  defp prefix(:new), do: "🔴 "
+  defp prefix(:still), do: "🔴 still: "
+  defp prefix(:resolved), do: "✅ resolved: "
+
+  defp heading(:new, n), do: "🔴 #{n} new problems:"
+  defp heading(:still, n), do: "🔴 still, #{n} problems:"
+  defp heading(:resolved, n), do: "✅ #{n} resolved:"
+
+  defp priority(:new), do: :high
+  defp priority(:still), do: :default
+  defp priority(:resolved), do: :low
 
   @doc "The open alerts, oldest first."
   @spec open_alerts() :: [map()]

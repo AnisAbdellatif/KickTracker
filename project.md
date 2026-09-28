@@ -2037,7 +2037,9 @@ loses it for good.
 
 ### 18.2 Alerts
 
-Notifications (Telegram, a Discord/Slack webhook or ntfy), not just dashboards, when:
+Notifications (Telegram, a Discord/Slack webhook or ntfy), not just dashboards, sent
+after the check is recorded (a failing target never makes one repeat), with many
+problems of one kind at once combined into one message, when:
 
 - no collector is collecting, or the standby is gone (from the
   collectors' heartbeat rows, checked by the web role too: a dead
