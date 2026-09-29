@@ -14,8 +14,9 @@
 #               checked against the published fingerprint
 #   ssh         keys only, no passwords, root by key only (or not at all
 #               with --admin-user), fewer auth tries, no forwarding for
-#               the deploy user
-#   firewall    ufw: deny incoming except SSH (rate limited) and --ports
+#               the deploy user; checked with sshd -T once reloaded
+#   firewall    ufw: deny incoming except SSH (from anywhere, or only
+#               --ssh-allow-from; rate-limited with --ssh-limit) and --ports
 #   upgrades    unattended security upgrades
 #   swap        a swap file when there is none (--swap 2G; 0 to skip)
 #   fail2ban    optional (--fail2ban)
@@ -25,11 +26,16 @@
 # Note: ports Docker publishes bypass ufw (Docker writes its own iptables
 # rules). Kamal's proxy publishes 80/443 on purpose; anything else should
 # be published on 127.0.0.1 or kept on Docker's network. docs/host.md.
+#
+# How it ended: /var/lib/kit-host-setup/ok, or failed (with the error),
+# for a run nobody watched (cloud-init, on first boot).
 set -euo pipefail
 
 DEPLOY_USER=deploy
 SSH_KEYS=()
 SSH_PORT=22
+SSH_LIMIT=false
+SSH_FROM=()
 PORTS="80,443"
 TIMEZONE=""
 SWAP=2G
@@ -54,7 +60,11 @@ host/setup.sh [options]   (as root)
   --ssh-key-file FILE     public keys file for the deploy user (repeatable)
   --admin-user NAME       also create a sudo user for humans; root login is then disabled
   --admin-key "KEY"       public key for the admin user (repeatable; default: the deploy keys)
+  --admin-key-file FILE   public keys file for the admin user (repeatable)
   --ssh-port PORT         SSH port kept open in the firewall (default: 22; doesn't move sshd)
+  --ssh-allow-from CIDR   SSH only from these addresses (repeatable, or comma separated)
+  --ssh-limit             rate-limit SSH (ufw limit: an address is blocked after 6
+                          connections in 30 s, which a Kamal deploy can reach)
   --ports LIST            other TCP ports to open, comma separated (default: 80,443)
   --timezone ZONE         e.g. UTC or Europe/Paris
   --swap SIZE             swap file size when there is no swap (default: 2G; 0: none)
@@ -67,23 +77,57 @@ EOF
 
 log() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m!!  %s\033[0m\n' "$*" >&2; }
+FAILURE=""
 die() {
+  FAILURE=$*
   printf '\033[31mxx  %s\033[0m\n' "$*" >&2
   exit 1
 }
 
+# check_key KEY: an SSH public key, on one line. A private key (a key file
+# named without its .pub) is refused without being shown.
+check_key() {
+  case $1 in
+    *-----BEGIN* | *"PRIVATE KEY"*) die "a private key was given where a public key goes (the .pub file?): refused" ;;
+  esac
+  [[ $1 =~ ^(ssh-|ecdsa-|sk-)[A-Za-z0-9@._-]+[[:space:]]+AAAA[A-Za-z0-9+/]*=*([[:space:]].*)?$ ]] ||
+    die "doesn't look like an SSH public key: ${1:0:30}…"
+}
+
+# read_keys FILE: its lines, blank ones and comments left out.
+read_keys() { grep -v -e '^[[:space:]]*$' -e '^[[:space:]]*#' "$1" || true; }
+
+# need "$@": the option in $1 has a value in $2.
+need() { [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"; }
+
 while [ $# -gt 0 ]; do
+  case $1 in
+    --user | --ssh-key | --ssh-key-file | --admin-user | --admin-key | --admin-key-file | --ssh-port | \
+      --ssh-allow-from | --ports | --timezone | --swap | --dir) need "$@" ;;
+  esac
+  case $1 in
+    --ssh-key-file | --admin-key-file) [ -r "$2" ] || die "can't read $2" ;;
+  esac
   case $1 in
     --user) DEPLOY_USER=$2 && shift ;;
     --ssh-key) SSH_KEYS+=("$2") && shift ;;
     --ssh-key-file)
-      [ -r "$2" ] || die "can't read $2"
-      while IFS= read -r line; do [ -n "$line" ] && SSH_KEYS+=("$line"); done <"$2"
+      while IFS= read -r line; do [ -n "$line" ] && SSH_KEYS+=("$line"); done <<<"$(read_keys "$2")"
       shift
       ;;
     --admin-user) ADMIN_USER=$2 && shift ;;
     --admin-key) ADMIN_KEYS+=("$2") && shift ;;
+    --admin-key-file)
+      while IFS= read -r line; do [ -n "$line" ] && ADMIN_KEYS+=("$line"); done <<<"$(read_keys "$2")"
+      shift
+      ;;
     --ssh-port) SSH_PORT=$2 && shift ;;
+    --ssh-allow-from)
+      IFS=',' read -r -a from <<<"$2"
+      for cidr in ${from[@]+"${from[@]}"}; do [ -z "$cidr" ] || SSH_FROM+=("$cidr"); done
+      shift
+      ;;
+    --ssh-limit) SSH_LIMIT=true ;;
     --ports) PORTS=$2 && shift ;;
     --timezone) TIMEZONE=$2 && shift ;;
     --swap) SWAP=$2 && shift ;;
@@ -103,6 +147,22 @@ done
 # ------------------------------------------------------------- preflight
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
+
+# How it ended, for a run nobody watched: ok, or failed with the error.
+MARKS=/var/lib/kit-host-setup
+mkdir -p "$MARKS"
+rm -f "$MARKS/ok" "$MARKS/failed"
+finish() {
+  local status=$? now
+  now=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  if [ "$status" -eq 0 ]; then
+    printf '%s\n' "$now" >"$MARKS/ok"
+  else
+    printf '%s exit %s: %s\n' "$now" "$status" "${FAILURE:-see the output (cloud-init: /var/log/kit-host-setup.log)}" >"$MARKS/failed"
+  fi
+}
+trap finish EXIT
+
 [ -r /etc/os-release ] || die "no /etc/os-release: Debian or Ubuntu only"
 # shellcheck disable=SC1091
 . /etc/os-release
@@ -115,24 +175,44 @@ esac
 [[ $SSH_PORT =~ ^[0-9]+$ ]] || die "invalid SSH port: $SSH_PORT"
 [[ $PORTS =~ ^[0-9,]*$ ]] || die "--ports takes numbers separated by commas"
 for key in ${SSH_KEYS[@]+"${SSH_KEYS[@]}"} ${ADMIN_KEYS[@]+"${ADMIN_KEYS[@]}"}; do
-  [[ $key =~ ^(ssh-|ecdsa-|sk-) ]] || die "doesn't look like an SSH public key: ${key:0:30}…"
+  check_key "$key"
 done
+for cidr in ${SSH_FROM[@]+"${SSH_FROM[@]}"}; do
+  [[ $cidr =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ ]] || die "--ssh-allow-from takes addresses or ranges (CIDR): $cidr"
+done
+
+# admin_has_key: someone who can become root can still log in by key:
+# root, or a sudo user (the one running this through sudo, a cloud
+# image's default user). The deploy user doesn't count: it has no sudo.
+admin_has_key() {
+  local user home
+  [ -s /root/.ssh/authorized_keys ] && return 0
+  for user in ${SUDO_USER:-} $(getent group sudo admin wheel 2>/dev/null | cut -d: -f4 | tr ',' ' '); do
+    [ -n "$user" ] && [ "$user" != root ] || continue
+    home=$(getent passwd "$user" | cut -d: -f6)
+    [ -n "$home" ] && [ -s "$home/.ssh/authorized_keys" ] && return 0
+  done
+  return 1
+}
 
 # Never lock ourselves out: hardening SSH needs a key that will still work.
 if [ "$DO_SSH" = true ]; then
   if [ -n "$ADMIN_USER" ]; then
     [ ${#ADMIN_KEYS[@]} -gt 0 ] || [ ${#SSH_KEYS[@]} -gt 0 ] || [ -s "/home/$ADMIN_USER/.ssh/authorized_keys" ] ||
       die "--admin-user disables root login: give it a key (--admin-key or --ssh-key)"
-  elif [ ${#SSH_KEYS[@]} -eq 0 ] && [ ! -s /root/.ssh/authorized_keys ] && [ ! -s "/home/$DEPLOY_USER/.ssh/authorized_keys" ]; then
-    die "SSH hardening turns passwords off, and no SSH key is set up anywhere: pass --ssh-key"
+  elif ! admin_has_key; then
+    die "SSH hardening turns passwords off, and root has no SSH key (nor has any sudo user): --ssh-key only lets the deploy user in, without sudo. Pass --admin-user NAME (a sudo user, with --admin-key or the --ssh-key keys), or put a key in root's ~/.ssh/authorized_keys first"
   fi
 fi
 
 export DEBIAN_FRONTEND=noninteractive
-apt_install() { apt-get install -y -q --no-install-recommends "$@" >/dev/null; }
+# apt_get ARGS...: waits for the dpkg lock (on first boot, unattended-upgrades
+# often holds it) instead of failing at once.
+apt_get() { apt-get -o DPkg::Lock::Timeout=600 "$@"; }
+apt_install() { apt_get install -y -q --no-install-recommends "$@" >/dev/null; }
 
 log "packages"
-apt-get update -q >/dev/null
+apt_get update -q >/dev/null
 apt_install ca-certificates curl gnupg
 
 if [ -n "$TIMEZONE" ]; then
@@ -142,13 +222,17 @@ fi
 
 # ------------------------------------------------------------------ users
 
-# add_keys USER KEYS...: appends keys not already there.
+# add_keys USER KEYS...: appends keys not already there. Never through a
+# symlink: root would write, chown and chmod whatever it points to.
 add_keys() {
   local user=$1 home dir file key
   shift
   home=$(getent passwd "$user" | cut -d: -f6)
   dir="$home/.ssh"
   file="$dir/authorized_keys"
+  if [ -L "$home" ] || [ -L "$dir" ] || [ -L "$file" ]; then
+    die "$file, or a folder above it, is a symlink: not writing through it (make them a plain folder and file)"
+  fi
   install -d -m 700 -o "$user" -g "$user" "$dir"
   touch "$file"
   for key in "$@"; do
@@ -179,9 +263,16 @@ if [ -n "$ADMIN_USER" ]; then
     add_keys "$ADMIN_USER" "${SSH_KEYS[@]}"
   fi
   # Keys only, so sudo can't ask for a password the user doesn't have.
-  printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$ADMIN_USER" >"/etc/sudoers.d/90-kit-$ADMIN_USER"
-  chmod 440 "/etc/sudoers.d/90-kit-$ADMIN_USER"
-  visudo -cf "/etc/sudoers.d/90-kit-$ADMIN_USER" >/dev/null || die "sudoers file invalid"
+  # Checked before it's in place (a broken file there breaks all of sudo):
+  # written beside it under a name with a dot, which sudo skips, then renamed.
+  sudoers=$(mktemp /etc/sudoers.d/.kit.XXXXXX)
+  printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$ADMIN_USER" >"$sudoers"
+  chmod 440 "$sudoers"
+  if ! visudo -cf "$sudoers" >/dev/null; then
+    rm -f "$sudoers"
+    die "the sudoers file for $ADMIN_USER didn't validate: not installed"
+  fi
+  mv -f "$sudoers" "/etc/sudoers.d/90-kit-$ADMIN_USER"
 fi
 
 # ----------------------------------------------------------------- docker
@@ -190,15 +281,20 @@ if [ "$DO_DOCKER" = true ]; then
   log "docker"
   if ! command -v docker >/dev/null 2>&1; then
     install -d -m 755 /etc/apt/keyrings
-    curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o /tmp/docker.asc
-    fingerprint=$(gpg --show-keys --with-colons /tmp/docker.asc 2>/dev/null | awk -F: '/^fpr:/ { print $10; exit }')
-    [ "$fingerprint" = "$DOCKER_KEY_FINGERPRINT" ] ||
-      die "Docker's signing key has fingerprint '$fingerprint', expected $DOCKER_KEY_FINGERPRINT: not installing"
-    install -m 644 /tmp/docker.asc /etc/apt/keyrings/docker.asc
-    rm -f /tmp/docker.asc
+    key=$(mktemp)
+    curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o "$key"
+    # apt trusts every key in the file: it must hold exactly one, Docker's.
+    keys=$(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^pub:/ { n++ } END { print n + 0 }')
+    fingerprint=$(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ { print $10; exit }')
+    if [ "$keys" != 1 ] || [ "$fingerprint" != "$DOCKER_KEY_FINGERPRINT" ]; then
+      rm -f "$key"
+      die "Docker's signing key file holds $keys key(s), fingerprint '$fingerprint'; expected one, $DOCKER_KEY_FINGERPRINT: not installing"
+    fi
+    install -m 644 "$key" /etc/apt/keyrings/docker.asc
+    rm -f "$key"
     printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
       "$(dpkg --print-architecture)" "$ID" "${VERSION_CODENAME:?}" >/etc/apt/sources.list.d/docker.list
-    apt-get update -q >/dev/null
+    apt_get update -q >/dev/null
     apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin
   fi
   # Log rotation for every container, so logs can't fill the disk.
@@ -232,26 +328,43 @@ KbdInteractiveAuthentication no
 PermitEmptyPasswords no
 PermitRootLogin $root_login
 PubkeyAuthentication yes
-MaxAuthTries 3
+MaxAuthTries 6
 LoginGraceTime 30
 X11Forwarding no
 
-# The deploy user runs commands; it never needs tunnels or agents.
+# The deploy user runs commands; it needs no agent, and no tunnel but the
+# one Kamal opens back to a registry on the deploying machine (remote).
 Match User $DEPLOY_USER
-    AllowTcpForwarding no
+    AllowTcpForwarding remote
     AllowAgentForwarding no
     X11Forwarding no
     PermitTunnel no
 EOF
   mv "$conf.new" "$conf"
   install -d -m 755 /run/sshd # sshd -t needs it; absent until sshd first starts
-  if sshd -t 2>/tmp/sshd-test; then
+  errors=$(mktemp)
+  if sshd -t 2>"$errors"; then
+    rm -f "$errors"
     systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
   else
-    cat /tmp/sshd-test >&2
-    rm -f "$conf"
+    cat "$errors" >&2
+    rm -f "$errors" "$conf"
     die "the SSH configuration didn't validate: removed it, sshd unchanged"
   fi
+  # What sshd uses isn't always what was written: it keeps the first value
+  # it reads, so a line above the Include in sshd_config wins over ours.
+  effective=$(sshd -T 2>/dev/null) || die "sshd -T failed: can't tell whether passwords are off"
+  wrong=""
+  for want in "passwordauthentication no" "kbdinteractiveauthentication no" "permitrootlogin $root_login"; do
+    got=$(printf '%s\n' "$effective" | awk -v k="${want%% *}" '$1 == k { print; exit }')
+    # prohibit-password's older name, which sshd -T prints.
+    [ "$got" != "permitrootlogin without-password" ] || got="permitrootlogin prohibit-password"
+    # Not printed before OpenSSH 8.7 (challengeresponseauthentication then).
+    [ -n "$got" ] || [ "${want%% *}" != kbdinteractiveauthentication ] || continue
+    [ "$got" = "$want" ] || wrong="$wrong, ${got:-no ${want%% *}} (not ${want#* })"
+  done
+  [ -z "$wrong" ] ||
+    die "sshd doesn't use what $conf says: ${wrong#, }. Another setting wins (above the Include in /etc/ssh/sshd_config, or in an earlier file of /etc/ssh/sshd_config.d/): remove it, then run this again"
 fi
 
 # --------------------------------------------------------------- firewall
@@ -261,7 +374,35 @@ if [ "$DO_FIREWALL" = true ]; then
   apt_install ufw
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
-  ufw limit "$SSH_PORT/tcp" comment ssh >/dev/null
+  # SSH allowed, rate-limited only on request: `ufw limit` blocks an
+  # address after 6 connections in 30 s, and Kamal opens one per command
+  # (a group deploy checks health every 2 s): deploys were cut off half-way.
+  ssh_rule=allow
+  [ "$SSH_LIMIT" = true ] && ssh_rule=limit
+  [ ${#SSH_FROM[@]} -eq 0 ] ||
+    log "SSH only from ${SSH_FROM[*]}${SSH_CLIENT:+ (this connection comes from ${SSH_CLIENT%% *})}"
+  # ssh_open PORT: SSH on PORT, from anywhere or from --ssh-allow-from only
+  # (then an earlier run's rule for anywhere is removed).
+  ssh_open() {
+    local cidr rule
+    if [ ${#SSH_FROM[@]} -eq 0 ]; then
+      ufw "$ssh_rule" "$1/tcp" comment ssh >/dev/null
+      return
+    fi
+    for cidr in "${SSH_FROM[@]}"; do
+      ufw "$ssh_rule" proto tcp from "$cidr" to any port "$1" comment ssh >/dev/null
+    done
+    for rule in allow limit; do ufw delete "$rule" "$1/tcp" >/dev/null 2>&1 || true; done
+  }
+  ssh_open "$SSH_PORT"
+  # The ports sshd really listens on, so enabling the firewall can't lock
+  # you out when --ssh-port isn't one of them.
+  for port in $(sshd -T 2>/dev/null | awk '$1 == "port" { print $2 }'); do
+    if [ "$port" != "$SSH_PORT" ]; then
+      warn "sshd listens on $port, not only --ssh-port $SSH_PORT: allowing $port too"
+      ssh_open "$port"
+    fi
+  done
   IFS=',' read -r -a ports <<<"$PORTS"
   for port in ${ports[@]+"${ports[@]}"}; do
     [ -n "$port" ] && ufw allow "$port/tcp" >/dev/null

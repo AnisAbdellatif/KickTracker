@@ -97,21 +97,52 @@ _kit_notify_send() {
         _kit_curl_secret_url "$(kit_conf KIT_NTFY_URL)" "${args[@]}" --data-binary "$text"
       ;;
     command)
-      KIT_NOTIFY_LEVEL=$level KIT_NOTIFY_MESSAGE=$message KIT_NOTIFY_TEXT=$text \
-        bash -c "$(kit_conf KIT_NOTIFY_COMMAND)" </dev/null >/dev/null 2>&1
+      _kit_notify_run "$level" "$message" "$text" bash -c "$(kit_conf KIT_NOTIFY_COMMAND)"
       ;;
     *)
       # A notifier of the project's own: .kamal/notifiers/<channel> LEVEL TEXT
       script="${KIT_CONFIG_DIR:-.kamal}/notifiers/$channel"
       if [ -x "$script" ]; then
-        KIT_NOTIFY_LEVEL=$level KIT_NOTIFY_MESSAGE=$message KIT_NOTIFY_TEXT=$text \
-          "$script" "$level" "$text" </dev/null >/dev/null 2>&1
+        _kit_notify_run "$level" "$message" "$text" "$script" "$level" "$text"
       else
         kit_warn "unknown notification channel '$channel' (no $script)"
         return 1
       fi
       ;;
   esac
+}
+
+# _kit_notify_run LEVEL MESSAGE TEXT COMMAND...: a command or script
+# notifier, given the message's variables and no secrets, and at most
+# KIT_NOTIFY_TIMEOUT seconds: a hung one must not hold the deploy.
+_kit_notify_run() {
+  local level=$1 message=$2 text=$3
+  shift 3
+  kit_timeout "$(kit_conf KIT_NOTIFY_TIMEOUT 30)" _kit_without_secrets \
+    KIT_NOTIFY_LEVEL="$level" KIT_NOTIFY_MESSAGE="$message" KIT_NOTIFY_TEXT="$text" "$@" </dev/null >/dev/null 2>&1
+}
+
+# _kit_without_secrets [VAR=VALUE...] COMMAND...: COMMAND without secrets
+# in its environment. In a hook, Kamal hands its secrets to the kit in the
+# environment, and the kit's settings are exported; a notifier (a script,
+# a command) has no use for them, and may send what it has. The names are
+# those .kamal/secrets* define, the registry password, GitHub's tokens,
+# the age key, and the kit's tokens and secret URLs (any destination's).
+_kit_without_secrets() {
+  local unset=(-u KAMAL_REGISTRY_PASSWORD -u GH_TOKEN -u GITHUB_TOKEN -u SOPS_AGE_KEY) name file
+  for name in $(compgen -e); do
+    case $name in
+      KIT_*TOKEN* | KIT_WEBHOOK_URL* | KIT_PING_URL* | KIT_NTFY_URL*) unset+=(-u "$name") ;;
+    esac
+  done
+  for file in "${KIT_CONFIG_DIR:-.kamal}"/secrets-common "${KIT_CONFIG_DIR:-.kamal}"/secrets \
+    ${KIT_DESTINATION:+"${KIT_CONFIG_DIR:-.kamal}/secrets.$KIT_DESTINATION"}; do
+    [ -r "$file" ] || continue
+    while IFS= read -r name; do
+      unset+=(-u "$name")
+    done < <(sed -n 's/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)=.*/\2/p' "$file")
+  done
+  env "${unset[@]}" "$@"
 }
 
 # _kit_curl_secret_url URL CURL-ARGS...: curl with the URL (and the header

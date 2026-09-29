@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Keeps group roles (.kamal/groups/*) out of a plain deploy: `kamal deploy`
 # would put both roles of a standby group on the same build and lose the
-# fallback. A deploy, redeploy, rollback or app boot that would touch a
+# fallback. A setup, deploy, redeploy or rollback that would touch a
 # guarded role is refused unless it comes from `kit group` / `kit deploy`
 # for that role's group. KIT_GROUP_GUARD=false in a group.env opts out.
+# Kamal (2.12) gives hooks KAMAL_COMMAND=app and no subcommand for any
+# `app` command, logs and exec included: `kamal app boot` is told by its
+# pre-app-boot hook (a deploy's boot has the deploy's command there);
+# `app start/stop` can't be told apart. (An app:… subcommand, if a Kamal
+# ever gives one, is guarded.)
 . "$(dirname "$0")/_preamble.sh"
 # shellcheck source=../lib/kamal.sh
 . "$KIT_HOME/lib/kamal.sh"
@@ -11,26 +16,41 @@
 . "$KIT_HOME/lib/groups.sh"
 
 command="${KAMAL_COMMAND:-}${KAMAL_SUBCOMMAND:+:$KAMAL_SUBCOMMAND}"
+if [ "${KIT_HOOK:-}" = pre-app-boot ]; then
+  # A deploy's boot was guarded in its pre-connect already.
+  [ "$command" = app ] || exit 0
+  command=app:boot
+fi
 case $command in
-  deploy | redeploy | rollback | app:boot | app:start | app:stop) ;;
+  # setup: it deploys every role.
+  setup | deploy | redeploy | rollback | app:boot | app:start | app:stop) ;;
   *) exit 0 ;;
 esac
 
 [ -d "$KIT_CONFIG_DIR/groups" ] || exit 0
 targets=${KAMAL_ROLES:-} # empty: every role
 
-for group in $(kit_group_names_all); do
+# Read before the loop: a stop within $(...) in a for list would go
+# unnoticed, and nothing be guarded.
+groups=$(kit_group_names_all) || exit 1
+for group in $groups; do
   # Only the groups of the Kamal config this command runs with: another
-  # config's roles aren't touched (its service differs). Unknown: guarded.
-  service=$(kit_config_service "$(kit_group_config_file "$group")")
+  # config's roles aren't touched (its service differs, the destination's
+  # file over the base one). Unknown (ERB, unreadable): guarded.
+  file=$(kit_group_config_file "$group") || exit 1
+  service=$(kit_config_service "$file" "${KAMAL_DESTINATION:-}")
   if [ -n "${KAMAL_SERVICE:-}" ] && [ -n "$service" ] && [ "$service" != "$KAMAL_SERVICE" ]; then
     continue
   fi
-  guard=$(kit_env_get KIT_GROUP_GUARD "$(kit_group_dir "$group")/group.env" || true)
+  guard=$(kit_group_setting "$group" KIT_GROUP_GUARD)
   kit_is_true "${guard:-$(kit_conf KIT_GROUP_GUARD true)}" || continue
-  [ "${KIT_GROUP_DEPLOY:-}" = "$group" ] && continue
-  for role in $(kit_group_roles_of "$group"); do
+  # The group's own deploy, within a run of the kit (not a variable set by hand).
+  [ "${KIT_GROUP_DEPLOY:-}" = "$group" ] && kit_in_run && continue
+  roles=$(kit_group_roles_of "$group") || exit 1
+  [ -n "$roles" ] || kit_die "group '$group' names no roles (KIT_GROUP_ROLES in .kamal/groups/$group/group.env): nothing could be guarded"
+  for role in $roles; do
     if [ -z "$targets" ] || kit_in_list "$role" "$targets"; then
+      [ "$command" != setup ] || kit_die "'kamal setup' would deploy $role, which belongs to group '$group'. Use: kamal server bootstrap, kamal accessory boot all, then kit deploy --bootstrap"
       kit_die "'kamal ${command/:/ }' would touch $role, which belongs to group '$group'. Use: kit deploy (everything), or kit group deploy $group / kit group switch $group"
     fi
   done

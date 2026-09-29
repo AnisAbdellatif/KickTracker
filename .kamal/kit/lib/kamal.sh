@@ -3,8 +3,11 @@
 #
 # Facts about Kamal this relies on (checked against Kamal 2.12's source):
 # - `pre-connect` runs before the first command that reaches a server, for
-#   any command, so nested `kamal` calls from the kit pass -H (skip hooks)
-#   unless they are the deploy itself.
+#   any command. Nested `kamal` calls from the kit pass -H (skip hooks)
+#   unless they are the deploy itself; `app` and `lock` commands run
+#   pre-connect anyway (and `app boot` pre-app-boot): -H reaches the main
+#   command's options, not theirs. They give hooks KAMAL_COMMAND=app (or
+#   lock) and no subcommand.
 # - A role without the proxy is replaced by starting the new container,
 #   waiting until it runs (or its healthcheck passes), then stopping the old
 #   one: the two overlap. Groups stop first when that matters.
@@ -28,6 +31,7 @@ kit_require_kamal() {
 kit_kamal() {
   local kamal=() words=() globals=() file
   read -r -a kamal <<<"$(kit_conf KIT_KAMAL kamal)"
+  [ ${#kamal[@]} -gt 0 ] || kamal=(kamal) # KIT_KAMAL= set empty
 
   # Command words: the first, and a second for Kamal's subcommand groups.
   if [ $# -gt 0 ]; then
@@ -45,7 +49,7 @@ kit_kamal() {
   [ -n "$file" ] && globals+=(-c "$file")
   [ -n "${KIT_DESTINATION:-}" ] && globals+=(-d "$KIT_DESTINATION")
 
-  "${kamal[@]}" "${words[@]}" ${globals[@]+"${globals[@]}"} "$@"
+  "${kamal[@]}" ${words[@]+"${words[@]}"} ${globals[@]+"${globals[@]}"} "$@"
 }
 
 # kit_role_exec ROLE COMMAND: runs COMMAND (one string) in ROLE's running
@@ -61,15 +65,39 @@ kit_role_exec() {
 }
 
 # kit_role_version ROLE: the version ROLE's running container runs, empty
-# when none runs. With several hosts, the first; a mismatch is warned about.
-kit_role_version() {
-  local role=$1 versions first
-  versions=$(kit_kamal app version -H -q -r "$role" 2>/dev/null | sed '/^[[:space:]]*$/d; /^App Host: /d' | sort -u) || true
+# when none runs, or when Kamal couldn't be asked (kit_role_version_strict
+# tells those apart). With several hosts, the first; a mismatch is warned
+# about.
+kit_role_version() { kit_role_version_strict "$1" || true; }
+
+# kit_role_version_strict ROLE: kit_role_version, failing when Kamal
+# couldn't be asked (an SSH error): "nothing runs" is then unknown.
+kit_role_version_strict() {
+  local role=$1 out versions first
+  out=$(kit_kamal app version -H -q -r "$role" 2>/dev/null) || return 1
+  # In host order, each once: the first is the first host's.
+  versions=$(printf '%s\n' "$out" | sed '/^[[:space:]]*$/d; /^App Host: /d' | awk '!seen[$0]++')
   first=$(printf '%s\n' "$versions" | sed -n 1p)
   if [ "$(printf '%s\n' "$versions" | sed '/^$/d' | wc -l | tr -d ' ')" -gt 1 ]; then
     kit_warn "$role runs different versions on its hosts: $(printf '%s' "$versions" | tr '\n' ' ')"
   fi
   printf '%s\n' "$first"
+}
+
+# kit_kamal_config: `kamal config`'s output (empty when it fails). Within a
+# run, asked once per Kamal config and destination: each call boots Kamal.
+kit_kamal_config() {
+  local cache="" out
+  if kit_in_run; then
+    cache="$KIT_RUN_DIR/config-$(printf '%s' "$(kit_conf KIT_KAMAL_CONFIG_FILE "")@${KIT_DESTINATION:-}" | tr -c 'A-Za-z0-9._@-' '_')"
+    if [ -f "$cache" ]; then
+      cat "$cache"
+      return 0
+    fi
+  fi
+  out=$(kit_kamal config 2>/dev/null) || out=""
+  [ -z "$cache" ] || [ -z "$out" ] || printf '%s\n' "$out" >"$cache"
+  printf '%s\n' "$out"
 }
 
 # kit_kamal_config_get PATH OUTPUT: a value from `kamal config`'s OUTPUT
@@ -93,7 +121,7 @@ kit_all_roles() {
   local roles out
   roles=$(kit_conf KIT_ROLES "")
   if [ -z "$roles" ]; then
-    out=$(kit_kamal config 2>/dev/null) || out=""
+    out=$(kit_kamal_config)
     roles=$(kit_kamal_config_get roles "$out") || exit 1
   fi
   [ -n "$roles" ] || kit_die "could not tell the roles: set KIT_ROLES in .kamal/kit.env"

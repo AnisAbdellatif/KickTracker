@@ -13,7 +13,8 @@
 # Exit status: 0 found, 1 not there, 3 not readable here (anything outside
 # the subset: flow collections inside flow collections, a list or map of
 # values that aren't all plain values, an alias, a multi-line value in a
-# list or map). Never a guess: what it can't read, it refuses.
+# list or map, a map with a merge key (<<: *a) or a key given twice, when
+# the path goes through it). Never a guess: what it can't read, it refuses.
 #
 # Supported: block maps and lists (lists indented or not under their key),
 # plain, 'single' and "double" quoted scalars, folded continuation lines,
@@ -355,8 +356,32 @@ BEGIN {
 
   k = key_of(c)
   if (k == "") fail("expected a key")
+  key_seen(SPATH[depth], norm(k))
   set_value(add_child(SPATH[depth], norm(k)), ind, REST)
 }
+
+# A key of a map: a merge key (<<) marks the map as holding keys from
+# elsewhere; a key given twice (both branches of an ERB if, say), as
+# ambiguous. Either is refused only if a path goes through it.
+function key_seen(parent, k,    p) {
+  if (k == "<<") { MERGE[parent] = 1; return }
+  p = (parent == "") ? k : parent SUBSEP k
+  if (p in T) DUP[p] = 1
+}
+
+# Refuses a path that reaches P, or looks past a map with a merge key.
+function check_path(p, segs, n,    i, q) {
+  q = ""
+  for (i = 1; i <= n; i++) {
+    if (q in MERGE) refuse(path ": " (q == "" ? "the top level" : pathname(q)) " has a merge key (<<), not read here")
+    q = (q == "") ? segs[i] : q SUBSEP segs[i]
+    if (q in DUP) refuse(path ": " pathname(q) " is given twice")
+    if (!(q in T)) return
+  }
+  if ((q in MERGE) && mode != "type") refuse(path ": a map with a merge key (<<), not read here")
+}
+
+function pathname(p,    s) { s = p; gsub(SUBSEP, ".", s); return s }
 
 function out_value(p, what) {
   if (T[p] == "alias") refuse(path ": an alias (*...) where " what " was asked for")
@@ -375,8 +400,10 @@ END {
 
   # The node asked for: segments matched as normalized keys.
   p = ""
-  if (path != "" && path != ".") {
-    n = split(path, segs, ".")
+  n = 0
+  if (path != "" && path != ".") n = split(path, segs, ".")
+  check_path("", segs, n)
+  if (n > 0) {
     for (i = 1; i <= n; i++) {
       q = (p == "") ? segs[i] : p SUBSEP segs[i]
       if (!(q in T)) exit 1

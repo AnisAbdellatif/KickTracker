@@ -18,27 +18,37 @@
 # Safety: the deployer never sees .kamal/kit.local.env (the real server's
 # settings), and before anything is deployed, Kamal itself is asked where
 # the sandbox destination deploys: every host must be 127.0.0.1 on the
-# sandbox's SSH port, every image from the sandbox's registry.
+# sandbox's SSH port, reached directly (no SSH proxy), every image from
+# the sandbox's registry.
 
 KIT_SANDBOX_REGISTRY_PASSWORD_VALUE=sandbox # registry:2 without auth accepts any
 
 # ------------------------------------------------------------------ setup
 
 # kit_sandbox_load: configuration and names. KIT_SANDBOX_* settings come
-# from .kamal/sandbox/sandbox.env over the kit's (destination "sandbox").
+# from .kamal/sandbox/sandbox.env over the kit's files (destination
+# "sandbox"), and the environment over both, as for any setting.
+# KIT_SANDBOX_DEPLOYER only from the environment: a committed file saying
+# `local` would run the deployer here, with this machine's SSH agent and
+# keys, instead of in its container with the sandbox's key.
 kit_sandbox_load() {
-  kit_load_config sandbox
+  local name deployer=${KIT_SANDBOX_DEPLOYER-} deployer_set=${KIT_SANDBOX_DEPLOYER+set}
+  kit_load_config sandbox sandbox/sandbox.env
+  if [ -n "$deployer_set" ]; then KIT_SANDBOX_DEPLOYER=$deployer; else unset KIT_SANDBOX_DEPLOYER; fi
   SANDBOX_DIR="$KIT_CONFIG_DIR/sandbox"
-  if [ -f "$SANDBOX_DIR/sandbox.env" ]; then
-    set -a
-    # shellcheck disable=SC1091
-    . "$SANDBOX_DIR/sandbox.env"
-    set +a
-  fi
   SANDBOX_WORK="$SANDBOX_DIR/.work"
-  local name
+  # The folder's name alone would give two checkouts called `app` one
+  # sandbox (its server, registry, and what hooks name after it): a short
+  # hash of the path tells them apart. A sandbox made before keeps its name
+  # (.work/name) until reset.
   name=$(kit_conf KIT_SANDBOX_NAME "")
-  [ -n "$name" ] || name=$(basename "$KIT_PROJECT_DIR")
+  if [ -z "$name" ] && [ -s "$SANDBOX_WORK/name" ]; then
+    name=$(cat "$SANDBOX_WORK/name")
+  elif [ -z "$name" ] && [ -f "$SANDBOX_WORK/deployed" ]; then
+    name=$(basename "$KIT_PROJECT_DIR")
+  elif [ -z "$name" ]; then
+    name="$(basename "$KIT_PROJECT_DIR")-$(printf '%s' "$KIT_PROJECT_DIR" | cksum | awk '{ printf "%06x", $1 % 16777216 }')"
+  fi
   SANDBOX_NAME=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | sed 's/-*$//')
   SANDBOX_SERVER="kit-sandbox-$SANDBOX_NAME-server"
   SANDBOX_REGISTRY="kit-sandbox-$SANDBOX_NAME-registry"
@@ -118,20 +128,28 @@ kit_sandbox_kamal_config() {
 }
 
 # kit_sandbox_check_target CONFIG: refuses unless Kamal would deploy the
-# sandbox destination of CONFIG to this machine's sandbox server, with
-# images from the sandbox's registry.
+# sandbox destination of CONFIG to this machine's sandbox server, directly
+# (no SSH proxy: the overlay's merge keeps the config's own, and
+# "127.0.0.1" through a production bastion is the bastion's), with images
+# from the sandbox's registry.
 kit_sandbox_check_target() {
-  local config=$1 out hosts port repository host bad=""
+  local config=$1 out hosts port proxy ssh_config repository host bad=""
   out=$(kit_sandbox_kamal_config "$config") ||
     kit_die "could not read $config for the sandbox destination (kit sandbox init writes $(kit_sandbox_overlay "$config"))"
   hosts=$(kit_kamal_config_get hosts "$out") || exit 1
   port=$(kit_kamal_config_get ssh_options.port "$out") || exit 1
+  proxy=$(kit_kamal_config_get ssh_options.proxy "$out") || exit 1
+  ssh_config=$(kit_kamal_config_get ssh_options.config "$out") || exit 1
   repository=$(kit_kamal_config_get repository "$out") || exit 1
   [ -n "$hosts" ] || bad="no hosts"
   for host in $hosts; do
     [ "$host" = 127.0.0.1 ] || bad="$bad host $host"
   done
   [ "$port" = "$SANDBOX_SSH_PORT" ] || bad="$bad ssh port ${port:-22} (not $SANDBOX_SSH_PORT)"
+  # ssh: proxy / proxy_command (Kamal prints both as its proxy).
+  [ -z "$proxy" ] || bad="$bad ssh proxy ($(printf '%s' "$proxy" | tr '\n' ' ' | sed 's/ *$//'))"
+  # ssh: config naming a file, which could send 127.0.0.1 anywhere.
+  case $ssh_config in '' | true | false) ;; *) bad="$bad ssh config file $ssh_config" ;; esac
   case $repository in "$SANDBOX_REGISTRY_ADDR"/*) ;; *) bad="$bad registry of $repository" ;; esac
   if [ -n "$bad" ]; then
     kit_die "$config's sandbox destination doesn't point at this machine's sandbox (${bad# }): nothing deployed. See $(kit_sandbox_overlay "$config")"
@@ -292,6 +310,7 @@ kit_sandbox_up() {
   local config
   kit_require ssh-keygen
   mkdir -p "$SANDBOX_WORK"
+  [ -s "$SANDBOX_WORK/name" ] || printf '%s\n' "$SANDBOX_NAME" >"$SANDBOX_WORK/name"
   kit_sandbox_image
   kit_sandbox_ssh_key
   kit_sandbox_registry_up

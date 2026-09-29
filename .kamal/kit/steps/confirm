@@ -4,11 +4,7 @@
 # itself; with no terminal, KIT_CONFIRM_NONINTERACTIVE decides (fail/allow).
 . "$(dirname "$0")/_preamble.sh"
 
-# kit sandbox: local, nothing to check against GitHub, the branch or a freeze.
-if [ -n "${KIT_SANDBOX:-}" ]; then
-  kit_info "sandbox: confirm skipped"
-  exit 0
-fi
+kit_sandbox_skip
 
 kit_is_true "$(kit_conf KIT_CONFIRM false)" || exit 0
 expected=${KIT_DESTINATION:-${KAMAL_SERVICE:-deploy}}
@@ -19,8 +15,10 @@ if ! { : <"$tty"; } 2>/dev/null; then
     *) kit_die "confirmation required, but there is no terminal (KIT_CONFIRM_NONINTERACTIVE=allow to skip)" ;;
   esac
 fi
+# Appended (>>): a terminal doesn't mind, and KIT_TTY naming a file (the
+# tests' answer) keeps its answer.
 printf '%s %s (%s) to %s? Type "%s" to continue: ' \
-  "${KAMAL_COMMAND:-deploy}" "${KAMAL_SERVICE:-this app}" "${KAMAL_VERSION:-HEAD}" "${KIT_DESTINATION:-its servers}" "$expected" >"$tty"
+  "${KAMAL_COMMAND:-deploy}" "${KAMAL_SERVICE:-this app}" "${KAMAL_VERSION:-HEAD}" "${KIT_DESTINATION:-its servers}" "$expected" >>"$tty"
 IFS= read -r answer <"$tty" || answer=
 [ "$answer" = "$expected" ] || kit_die "not confirmed"
 kit_ok "confirmed"

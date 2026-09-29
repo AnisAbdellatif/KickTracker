@@ -1,0 +1,22 @@
+# Keeps the actions your workflows pin (to commit SHAs, as ci.yml and
+# build.yml do) current: Dependabot proposes the new SHA when one is
+# released, a week after (a release pulled soon after it's out never
+# reaches you). Copy to .github/dependabot.yml (docs/security.md).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+  # Your image's base (FROM in the Dockerfile), pinned by digest, likewise:
+  # - package-ecosystem: docker
+  #   directory: /
+  #   schedule:
+  #     interval: weekly
+  #   cooldown:
+  #     default-days: 7

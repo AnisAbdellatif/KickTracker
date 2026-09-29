@@ -49,26 +49,43 @@ kit_sops_get() {
 # kit_sops_decrypt_dir DIR: every DIR/*.sops.* becomes the same name without
 # ".sops" (app.sops.env -> app.env), mode 0600. All are decrypted to
 # temporary files first; only if every one worked are they moved into place.
+# However it ends (a failure, Ctrl-C, TERM), no plaintext is left behind.
+_KIT_SOPS_TMPS=""
 kit_sops_decrypt_dir() {
-  local dir=$1 file out outs="" failed=0
+  local dir=$1 file out tmp pair failed=0 outs=()
   kit_require sops "https://github.com/getsops/sops"
+  kit_at_exit _kit_sops_cleanup
   for file in "$dir"/*.sops.*; do
     [ -f "$file" ] || continue
-    out=$(printf '%s' "$file" | sed 's/\.sops\././')
-    if (umask 077 && kit_sops_env "$file" >"$out.new"); then
-      outs="$outs $out"
+    # The file's name only: a folder named *.sops.* stays as it is.
+    out="$dir/$(basename "$file" | sed 's/\.sops\././')"
+    # A new file of our own (mode 0600) in the same folder, never an
+    # existing one or a symlink put in its place; renamed over $out after.
+    tmp=$(umask 077 && mktemp "$dir/.$(basename "$out").XXXXXX") || kit_die "could not write in $dir: nothing replaced"
+    _KIT_SOPS_TMPS="$_KIT_SOPS_TMPS$tmp"$'\n'
+    if kit_sops_env "$file" >"$tmp"; then
+      outs+=("$out|$tmp")
     else
       kit_error "could not decrypt $file"
-      rm -f "$out.new"
+      rm -f "$tmp"
       failed=1
     fi
   done
   if [ "$failed" -ne 0 ]; then
-    for out in $outs; do rm -f "$out.new"; done
+    for pair in ${outs[@]+"${outs[@]}"}; do rm -f "${pair#*|}"; done
     kit_die "nothing replaced: the configuration in place is unchanged"
   fi
-  for out in $outs; do
-    mv "$out.new" "$out"
-    kit_ok "decrypted ${out#"$dir"/}"
+  for pair in ${outs[@]+"${outs[@]}"}; do
+    mv -f "${pair#*|}" "${pair%%|*}"
+    kit_ok "decrypted $(basename "${pair%%|*}")"
   done
+}
+
+# The temporary files decrypt-dir made that are still there (at exit).
+_kit_sops_cleanup() {
+  local tmp
+  while IFS= read -r tmp; do
+    [ -z "$tmp" ] || rm -f "$tmp"
+  done <<<"$_KIT_SOPS_TMPS"
+  _KIT_SOPS_TMPS=""
 }

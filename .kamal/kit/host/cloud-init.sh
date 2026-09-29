@@ -6,32 +6,27 @@
 #   kit host cloud-init --ssh-key-file ~/.ssh/id_ed25519.pub --timezone UTC > user-data.yaml
 #
 # Takes host/setup.sh's options. Key files are read here, on your machine,
-# and their keys passed on (the server can't read your files). The script
-# is embedded (base64), so what runs is exactly this checkout's version.
-# Progress on the server: /var/log/kit-host-setup.log.
+# and their keys passed on (the server can't read your files); every key
+# is checked first, so a private key never ends up in the user data. The
+# script is embedded (base64), so what runs is exactly this checkout's
+# version. On the server: progress in /var/log/kit-host-setup.log, the
+# outcome in /var/lib/kit-host-setup/ok or failed (and `cloud-init status`).
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-args=()
-while [ $# -gt 0 ]; do
-  case $1 in
-    --ssh-key-file | --admin-key-file)
-      opt=--ssh-key
-      [ "$1" = --admin-key-file ] && opt=--admin-key
-      [ -r "${2:-}" ] || {
-        echo "can't read ${2:-}" >&2
-        exit 1
-      }
-      while IFS= read -r line; do [ -n "$line" ] && args+=("$opt" "$line"); done <"$2"
-      shift 2
-      ;;
+# shellcheck source=local-args.sh
+. "$here/local-args.sh"
+for arg in "$@"; do
+  case $arg in
     -h | --help)
-      sed -n '2,12p' "$0"
+      sed -n '2,14p' "$0"
       exit 0
       ;;
-    *) args+=("$1") && shift ;;
   esac
 done
+HOST_ARGS=()
+kit_host_args "$@"
+args=(${HOST_ARGS[@]+"${HOST_ARGS[@]}"})
 
 # YAML single-quoted string: ' doubled.
 yaml_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }

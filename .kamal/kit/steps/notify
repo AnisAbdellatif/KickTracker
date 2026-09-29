@@ -4,7 +4,7 @@
 # commands, which report the whole operation themselves, it stays quiet.
 . "$(dirname "$0")/_preamble.sh"
 
-[ -z "${KIT_RUN_DIR:-}" ] || exit 0
+! kit_in_run || exit 0
 what=${KAMAL_SERVICE_VERSION:-${KAMAL_VERSION:-?}}
 who=${KAMAL_PERFORMER:-unknown}
 roles=${KAMAL_ROLES:+ (roles: $KAMAL_ROLES)}

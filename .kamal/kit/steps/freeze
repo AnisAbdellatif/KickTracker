@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 # Refuses to deploy while frozen: KIT_FREEZE=true, or a file .kamal/FREEZE
 # (all destinations) or .kamal/FREEZE.<destination>, whose content is shown
-# as the reason. Rollbacks stay allowed (KIT_FREEZE_ALLOWS_ROLLBACK).
+# as the reason. Rollbacks stay allowed (KIT_FREEZE_ALLOWS_ROLLBACK). The
+# files count here and, committed, on the remote branch (fetched): a
+# checkout from before the freeze was pushed is frozen too.
 . "$(dirname "$0")/_preamble.sh"
 
-# kit sandbox: local, nothing to check against GitHub, the branch or a freeze.
-if [ -n "${KIT_SANDBOX:-}" ]; then
-  kit_info "sandbox: freeze skipped"
-  exit 0
-fi
+kit_sandbox_skip
 
 if kit_is_rollback && kit_is_true "$(kit_conf KIT_FREEZE_ALLOWS_ROLLBACK true)"; then exit 0; fi
 for file in "$KIT_CONFIG_DIR/FREEZE" ${KIT_DESTINATION:+"$KIT_CONFIG_DIR/FREEZE.$KIT_DESTINATION"}; do
@@ -18,4 +16,32 @@ for file in "$KIT_CONFIG_DIR/FREEZE" ${KIT_DESTINATION:+"$KIT_CONFIG_DIR/FREEZE.
   fi
 done
 kit_is_true "$(kit_conf KIT_FREEZE false)" && kit_gate_die "deploys are frozen (KIT_FREEZE)"
+
+# The remote's files: on the checkout's branch, and on each deploy branch
+# (a hotfix branch allowed to deploy is frozen by a FREEZE on main). Full
+# ref names: a local branch named origin/main would shadow the remote's.
+remote=$(kit_conf KIT_GIT_REMOTE origin)
+if git -C "$KIT_PROJECT_DIR" remote get-url "$remote" >/dev/null 2>&1; then
+  branch=$(git -C "$KIT_PROJECT_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  branches=$branch
+  for b in $(kit_words "$(kit_conf KIT_DEPLOY_BRANCH main)"); do
+    kit_in_list "$b" "$branches" || branches="$branches $b"
+  done
+  rel=${KIT_CONFIG_DIR#"$KIT_PROJECT_DIR"/}
+  for b in $branches; do
+    ref="refs/remotes/$remote/$b"
+    if ! git -C "$KIT_PROJECT_DIR" fetch --quiet "$remote" "$b" 2>/dev/null; then
+      # A deploy branch the remote doesn't have is nothing to check.
+      if [ "$b" = "$branch" ] || git -C "$KIT_PROJECT_DIR" rev-parse --verify --quiet "$ref" >/dev/null; then
+        kit_warn "freeze: could not fetch $remote/$b; checking what was last fetched"
+      fi
+    fi
+    for name in FREEZE ${KIT_DESTINATION:+"FREEZE.$KIT_DESTINATION"}; do
+      if reason=$(git -C "$KIT_PROJECT_DIR" show "$ref:./$rel/$name" 2>/dev/null); then
+        reason=$(printf '%s' "$reason" | head -c 500 | tr '\n' ' ' | sed 's/ *$//')
+        kit_gate_die "deploys are frozen ($rel/$name on $remote/$b)${reason:+: $reason}"
+      fi
+    done
+  done
+fi
 exit 0
