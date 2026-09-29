@@ -4,10 +4,10 @@
 # not in the container's healthcheck). KIT_SMOKE_URLS: URL[|STATUS[|TEXT]]
 # ...; STATUS like 200, 2xx or 200-399 (default 200-399); TEXT must appear
 # in the body. Within `kit deploy`, which runs it once at the end itself,
-# the post-deploy hook skips it.
+# the post-deploy hook skips it (not within a `kit group deploy` of its own).
 . "$(dirname "$0")/_preamble.sh"
 
-if [ "${KIT_HOOK:-}" = post-deploy ] && [ -n "${KIT_RUN_DIR:-}" ]; then exit 0; fi
+if [ "${KIT_HOOK:-}" = post-deploy ] && kit_smoke_at_end; then exit 0; fi
 urls=$(kit_conf KIT_SMOKE_URLS "")
 [ -n "$urls" ] || exit 0
 # Missing, every check would fail as if the site were down.
@@ -15,6 +15,11 @@ kit_require curl "for the smoke tests"
 retries=$(kit_conf KIT_SMOKE_RETRIES 10)
 interval=$(kit_conf KIT_SMOKE_INTERVAL 3)
 timeout=$(kit_conf KIT_SMOKE_TIMEOUT 10)
+# Not numbers, the loop would never end (or a good deploy be rolled back).
+for setting in "KIT_SMOKE_RETRIES=$retries" "KIT_SMOKE_INTERVAL=$interval" "KIT_SMOKE_TIMEOUT=$timeout"; do
+  kit_is_int "${setting#*=}" || kit_die "${setting%%=*} must be a whole number (is '${setting#*=}')"
+done
+[ "$retries" -ge 1 ] || retries=1
 read -r -a curl_args <<<"$(kit_conf KIT_SMOKE_CURL_ARGS "")"
 body=$(mktemp)
 trap 'rm -f "$body"' EXIT

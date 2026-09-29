@@ -8,8 +8,11 @@
 # - the sandbox's deployer (the same, playing the machine that deploys) and
 #   its server: sshd and a Docker CLI on this machine's Docker, where the
 #   deployer's Kamal deploys to (docs/sandbox.md).
-ARG KAMAL_VERSION=v2.12.0
-FROM ghcr.io/basecamp/kamal:${KAMAL_VERSION}
+# Kamal's image by its digest (the multi-platform index of v2.12.0): a tag
+# can be moved, and this image holds your SSH agent, gh token and age key.
+# Another Kamal: --build-arg KAMAL_IMAGE=ghcr.io/basecamp/kamal:<tag>@<digest>.
+ARG KAMAL_IMAGE=ghcr.io/basecamp/kamal:v2.12.0@sha256:7b5be276aa17bbe122887f6a1ff12865f4848111989699b9786083be95d98415
+FROM ${KAMAL_IMAGE}
 RUN apk add --no-cache bash curl github-cli sops age openssh-server openssh-sftp-server \
  && ssh-keygen -A \
  && mkdir -p /root/.ssh && chmod 700 /root/.ssh \

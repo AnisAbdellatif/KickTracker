@@ -7,7 +7,7 @@
 # SSH key and network (lib/sandbox.sh). Sourced after core.sh.
 
 # The commands that run Kamal, and so run in the image with KIT_RUNNER=docker.
-KIT_RUNNER_COMMANDS="deploy group role-exec kamal doctor"
+KIT_RUNNER_COMMANDS="deploy group role-exec kamal lock doctor"
 
 # kit_docker ARGS...: Docker (KIT_DOCKER: another command, for the tests).
 kit_docker() {
@@ -54,7 +54,10 @@ kit_runner_base() {
   # the container another uid, locked out of this checkout (and refused
   # the host's network, which the sandbox uses).
   # --init: signals (Ctrl-C) reach the kit, not a shell as PID 1 ignoring them.
+  # No capabilities, and none to gain: the kit, Kamal, ssh and git need
+  # none (the entrypoint's account goes in a world-writable /etc/passwd).
   KIT_RUNNER_ARGS=(run --rm --init --userns=host --user "$(id -u):$(id -g)"
+    --security-opt no-new-privileges --cap-drop ALL
     -e HOME=/home/kit -e KIT_IN_RUNNER=1
     -e GIT_CONFIG_COUNT=3 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'
     -e GIT_CONFIG_KEY_1=user.email -e "GIT_CONFIG_VALUE_1=${email:-kit@localhost}"
@@ -75,14 +78,18 @@ kit_runner_base() {
 # kit_runner_settings: the KIT_RUNNER* settings (not per destination), and
 # the project, read in a subshell: loading the configuration here would
 # export it, and the command's own load (with its destination) would then
-# take the files' values for the environment's.
+# take the files' values for the environment's. R_KIT_GH_TOKEN_SET: the
+# project sets KIT_GH_TOKEN (to empty, too), anywhere.
 kit_runner_settings() {
   local out var vars="KIT_PROJECT_DIR KIT_RUNNER KIT_RUNNER_IMAGE KIT_RUNNER_NETWORK KIT_RUNNER_SSH_DIR
-    KIT_RUNNER_SSH_AGENT KIT_RUNNER_DOCKER_SOCKET KIT_RUNNER_ENV"
+    KIT_RUNNER_SSH_WRITABLE KIT_RUNNER_SSH_AGENT KIT_RUNNER_DOCKER_SOCKET KIT_RUNNER_ENV KIT_DEPLOY_SKIP_PUSH
+    KIT_GH_TOKEN"
   for var in $vars; do eval "R_$var="; done
+  R_KIT_GH_TOKEN_SET=""
   out=$(
     kit_load_config >/dev/null 2>&1 || exit 0
     for var in $vars; do printf 'R_%s=%q\n' "$var" "$(kit_conf "$var" "")"; done
+    printf 'R_KIT_GH_TOKEN_SET=%s\n' "${KIT_GH_TOKEN+set}"
   ) || out=""
   eval "$out"
 }
@@ -124,13 +131,24 @@ kit_runner_exec() {
 
   [ -z "$R_KIT_RUNNER_NETWORK" ] || args+=(--network "$R_KIT_RUNNER_NETWORK")
 
-  # ~/.ssh: keys, config, known_hosts (Kamal adds new hosts to it, as it
-  # would here). Also at its own path, for configs naming files by it.
+  # ~/.ssh: keys, config, known_hosts. Read-only, but for known_hosts
+  # (Kamal adds new hosts to it, as it would here). Also at its own path,
+  # for configs naming files by it.
   dir=${R_KIT_RUNNER_SSH_DIR:-$HOME/.ssh}
   if [ -d "$dir" ]; then
     dir=$(cd "$dir" && pwd)
-    args+=(-v "$dir:/home/kit/.ssh")
-    [ "$dir" = /home/kit/.ssh ] || args+=(-v "$dir:$dir")
+    if kit_is_true "${R_KIT_RUNNER_SSH_WRITABLE:-false}"; then
+      args+=(-v "$dir:/home/kit/.ssh")
+      [ "$dir" = /home/kit/.ssh ] || args+=(-v "$dir:$dir")
+    else
+      [ -e "$dir/known_hosts" ] || (umask 077 && : >>"$dir/known_hosts") 2>/dev/null || true
+      args+=(-v "$dir:/home/kit/.ssh:ro")
+      [ ! -f "$dir/known_hosts" ] || args+=(-v "$dir/known_hosts:/home/kit/.ssh/known_hosts")
+      if [ "$dir" != /home/kit/.ssh ]; then
+        args+=(-v "$dir:$dir:ro")
+        [ ! -f "$dir/known_hosts" ] || args+=(-v "$dir/known_hosts:$dir/known_hosts")
+      fi
+    fi
   fi
 
   # The SSH agent. Docker Desktop (and OrbStack) on a Mac can't mount the
@@ -145,9 +163,14 @@ kit_runner_exec() {
     args+=(-v "$sock:/run/kit/ssh-agent.sock" -e SSH_AUTH_SOCK=/run/kit/ssh-agent.sock)
   fi
 
-  # Docker, for Kamal's builds (none needed with KIT_DEPLOY_SKIP_PUSH).
-  sock=${R_KIT_RUNNER_DOCKER_SOCKET-/var/run/docker.sock}
-  [ -n "$sock" ] || sock=/var/run/docker.sock
+  # Docker, for Kamal's builds. With images built elsewhere
+  # (KIT_DEPLOY_SKIP_PUSH) nothing is built here: no socket, which would
+  # give the container root on this machine.
+  sock=${R_KIT_RUNNER_DOCKER_SOCKET:-auto}
+  if [ "$sock" = auto ]; then
+    sock=/var/run/docker.sock
+    kit_is_true "${R_KIT_DEPLOY_SKIP_PUSH:-false}" && sock=none
+  fi
   if [ "$sock" != none ] && { [ "$os" = Darwin ] || [ -S "$sock" ]; }; then
     gid=0
     [ "$os" = Darwin ] || gid=$(stat -c %g "$sock" 2>/dev/null || stat -f %g "$sock")
@@ -158,9 +181,14 @@ kit_runner_exec() {
   # need this machine's keychain won't work there: prefer SSH remotes.
   [ -f "$HOME/.gitconfig" ] && args+=(-v "$HOME/.gitconfig:/home/kit/.gitconfig:ro")
 
-  # gh's token, when gh here is logged in and none is set: gh keeps it in
-  # the system keychain, out of the container's reach.
-  if [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
+  # gh's token: KIT_GH_TOKEN (a fine-grained, read-only token of its own:
+  # the container's processes all see it), from the environment or the
+  # files (kit.local.env), else gh's here when it's logged in and none is
+  # set (gh keeps it in the system keychain, out of the container's
+  # reach). A project that sets KIT_GH_TOKEN, even empty, never gets gh's.
+  if [ -n "$R_KIT_GH_TOKEN" ]; then
+    export GH_TOKEN=$R_KIT_GH_TOKEN
+  elif [ -z "$R_KIT_GH_TOKEN_SET" ] && [ -z "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
     token=$(gh auth token 2>/dev/null || true)
     [ -z "$token" ] || export GH_TOKEN=$token
   fi
@@ -173,10 +201,25 @@ kit_runner_exec() {
   fi
   [ -f "$key" ] && args+=(-v "$key:/run/kit/age-keys.txt:ro" -e SOPS_AGE_KEY_FILE=/run/kit/age-keys.txt)
 
+  # Who holds a deploy lock taken in there: this machine and this process
+  # (alive as long as the container), and the processes running here, to
+  # tell whether a lock this machine left is still held by someone.
+  # (and when that list was made: a run started after it isn't in it).
+  export KIT_HOST_NAME KIT_HOST_PID KIT_HOST_PIDS KIT_HOST_PIDS_AT
+  KIT_HOST_NAME=$(uname -n)
+  KIT_HOST_PID=$$
+  KIT_HOST_PIDS_AT=$(date +%s)
+  # Without ps here, no list: then no lock of this machine is told dead in
+  # there (an empty list would make every one look it).
+  if ! KIT_HOST_PIDS=$(ps -A -o pid= 2>/dev/null | tr -d ' ' | tr '\n' ' ') || [ -z "$KIT_HOST_PIDS" ]; then
+    KIT_HOST_PIDS="" KIT_HOST_PIDS_AT=""
+  fi
+  args+=(-e KIT_HOST_NAME -e KIT_HOST_PID -e KIT_HOST_PIDS -e KIT_HOST_PIDS_AT)
+
   # The variables, by name (docker copies each value from its environment).
   for name in $exported $(kit_words "$R_KIT_RUNNER_ENV") GH_TOKEN GITHUB_TOKEN SOPS_AGE_KEY TERM NO_COLOR; do
     case $name in
-      KIT_BIN | KIT_HOME | KIT | KIT_LOADED | KIT_IN_RUNNER | KIT_DOCKER | KIT_SANDBOX_DOCKER) continue ;;
+      KIT_BIN | KIT_HOME | KIT | KIT_LOADED | KIT_IN_RUNNER | KIT_DOCKER | KIT_SANDBOX_DOCKER | KIT_GH_TOKEN | KIT_HOST_*) continue ;;
       GH_TOKEN | GITHUB_TOKEN | SOPS_AGE_KEY | TERM | NO_COLOR) ;;
       KIT_* | KAMAL_*) ;;
       *) kit_in_list "$name" "$R_KIT_RUNNER_ENV" || continue ;;

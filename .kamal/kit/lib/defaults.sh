@@ -14,8 +14,9 @@ KIT_RUNNER_IMAGE=               # empty: deploy-kit:<version>, built from sandbo
 KIT_RUNNER_ENV=                 # more variables to pass in (NAMES; KIT_* and KAMAL_* always are)
 KIT_RUNNER_NETWORK=             # docker run --network; empty: Docker's default
 KIT_RUNNER_SSH_DIR=             # empty: ~/.ssh
+KIT_RUNNER_SSH_WRITABLE=false   # ~/.ssh read-only in the container (but known_hosts); true: read-write
 KIT_RUNNER_SSH_AGENT=auto       # auto: $SSH_AUTH_SOCK (Docker Desktop's on a Mac); none; or a socket path
-KIT_RUNNER_DOCKER_SOCKET=       # empty: /var/run/docker.sock (for builds); none
+KIT_RUNNER_DOCKER_SOCKET=auto   # auto: /var/run/docker.sock, none with KIT_DEPLOY_SKIP_PUSH; a path; none
 
 # --- Hooks: which steps each Kamal hook runs, in order. Names are the
 # kit's steps (steps/), the project's (.kamal/steps/), or paths. The
@@ -28,7 +29,7 @@ KIT_HOOK_PRE_CONNECT="role-guard"
 KIT_HOOK_PRE_BUILD="freeze require-branch require-clean require-pushed"
 KIT_HOOK_PRE_DEPLOY="freeze role-guard require-branch require-pushed ci-green notify"
 KIT_HOOK_POST_DEPLOY="smoke notify"
-KIT_HOOK_PRE_APP_BOOT=
+KIT_HOOK_PRE_APP_BOOT="role-guard"  # `kamal app boot` of a group role
 KIT_HOOK_POST_APP_BOOT=
 KIT_HOOK_PRE_PROXY_REBOOT=
 KIT_HOOK_POST_PROXY_REBOOT=
@@ -37,7 +38,8 @@ KIT_HOOK_DOCKER_SETUP=
 KIT_SKIP=                        # steps to skip this once: KIT_SKIP=ci-green kit deploy
 KIT_SKIP_REASON=                 # why (in the warning and the notification)
 KIT_SKIP_REASON_REQUIRED=false   # refuse a skip without a reason (e.g. KIT_SKIP_REASON_REQUIRED_PRODUCTION=true)
-KIT_STEP_TIMEOUT=600             # seconds per step; 0: none
+KIT_STEP_TIMEOUT=600             # seconds per step (KIT_STEP_TIMEOUT_<STEP> for one); 0: none
+KIT_UNSKIPPABLE=                 # steps KIT_SKIP can't skip; read from the committed kit.env only
 KIT_CACHED_STEPS="require-branch require-clean require-pushed ci-green attestation confirm freeze"
 
 # --- Git gates
@@ -53,11 +55,16 @@ KIT_CI_IGNORE=                   # check names never looked at
 KIT_CI_WAIT=0                    # seconds to wait for running checks; 0: fail at once
 KIT_CI_POLL=15
 KIT_CI_ALLOW_NONE=false          # pass when the commit has no checks at all
+KIT_CI_APP=                      # only check runs of these GitHub Apps (e.g. github-actions); then statuses aren't read
 
 # --- Attestation gate (images built by CI, see docs/security.md)
-KIT_IMAGE=                       # e.g. ghcr.io/owner/app
+KIT_IMAGE=                       # empty: Kamal's (kamal config's repository), which it must be anyway
 KIT_ATTESTATION_SIGNER_WORKFLOW= # e.g. owner/app/.github/workflows/build.yml
+KIT_ATTESTATION_SOURCE_DIGEST=true  # the image was built from the commit deployed (a full commit id)
+KIT_ATTESTATION_SOURCE_REF=      # built from this ref; empty: the checkout's branch; none: any
+KIT_ATTESTATION_DENY_SELF_HOSTED=true  # built on GitHub's runners, not self-hosted ones
 KIT_ATTESTATION_ARGS=            # extra `gh attestation verify` arguments
+KIT_ATTESTATION_WITHOUT_DOCKER=refuse  # no docker to resolve the digest: refuse; tag: verify the tag, warned
 
 # --- Confirmation
 KIT_CONFIRM=false                # e.g. KIT_CONFIRM_PRODUCTION=true
@@ -76,6 +83,7 @@ KIT_SMOKE_CURL_ARGS=
 
 # --- kit deploy
 KIT_AUTO_ROLLBACK=true           # roll back when smoke tests fail after a deploy
+KIT_LOCK=true                    # hold Kamal's deploy lock for the whole kit deploy / group deploy / switch
 KIT_DEPLOY_SKIP_PUSH=false       # always -P: images are built elsewhere (by CI)
 KIT_CHECK_IMAGE=true             # with -P: check the registry has the image before deploying (docker manifest inspect)
 KIT_GROUP_ORDER=                 # groups deployed in this order; empty: alphabetical
@@ -102,10 +110,12 @@ KIT_WEBHOOK_URL=                 # Slack, Discord, Mattermost, or anything takin
 KIT_NTFY_URL=
 KIT_NTFY_TOKEN=
 KIT_NOTIFY_COMMAND=
+KIT_NOTIFY_TIMEOUT=30            # seconds for the command and .kamal/notifiers/* scripts
+KIT_PING_URL=                    # `kit ping`'s URL (a heartbeat, e.g. healthchecks.io), kept off command lines
 
 # --- kit sandbox (docs/sandbox.md; usually set in .kamal/sandbox/sandbox.env)
 KIT_SANDBOX_CONFIGS=             # Kamal configs, in order; empty: the project's
-KIT_SANDBOX_NAME=                # container names' part; empty: the project folder's name
+KIT_SANDBOX_NAME=                # container names' part; empty: the folder's name and a hash of its path
 KIT_SANDBOX_SSH_PORT=2222
 KIT_SANDBOX_REGISTRY_PORT=5555
 KIT_SANDBOX_PROXY_PORT=8080      # kamal-proxy's HTTP port, for roles behind it

@@ -5,7 +5,8 @@
 # and fill in the steps.
 #
 # Actions are pinned to commit SHAs (a tag can be moved; a SHA can't).
-# Keep them current with Dependabot or Renovate, which update the SHAs.
+# Keep them current with Dependabot (templates/github/dependabot.yml) or
+# Renovate, which update the SHAs.
 name: CI
 
 on:
@@ -21,6 +22,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30 # a hung step fails the run, rather than wait 6 hours
     permissions:
       contents: read
     steps:

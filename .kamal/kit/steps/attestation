@@ -3,36 +3,90 @@
 # repository (and, with KIT_ATTESTATION_SIGNER_WORKFLOW, from that
 # workflow). For images built by CI and deployed with --skip-push: an image
 # pushed by anything else (a leaked registry token, a compromised runner of
-# another workflow) is refused. docs/security.md. With several images,
-# KIT_IMAGE_<SERVICE> per Kamal service.
+# another workflow) is refused. And it must have been built from the commit
+# being deployed, on the branch deployed from: an attested image of another
+# commit, retagged, is refused too. docs/security.md. The image is Kamal's
+# (`kamal config`'s repository); with several images, KIT_IMAGE_<SERVICE>
+# per Kamal service. Its tag is resolved to a digest once, and the digest
+# is what's verified.
 . "$(dirname "$0")/_preamble.sh"
+# shellcheck source=../lib/kamal.sh
+. "$KIT_HOME/lib/kamal.sh"
+# shellcheck source=../lib/groups.sh
+. "$KIT_HOME/lib/groups.sh"
+# shellcheck source=../lib/runner.sh
+. "$KIT_HOME/lib/runner.sh"
 
-# kit sandbox: local, nothing to check against GitHub, the branch or a freeze.
-if [ -n "${KIT_SANDBOX:-}" ]; then
-  kit_info "sandbox: attestation skipped"
-  exit 0
-fi
+kit_sandbox_skip
 
 kit_require gh "GitHub's CLI, logged in: gh auth login"
-# Per Kamal service first (a project with several images):
-# KIT_IMAGE_<SERVICE>, e.g. KIT_IMAGE_MYAPP_WORKER for service myapp-worker.
+version=$(kit_version_being_deployed)
+# Built from this very commit (Kamal's version is the commit id).
+if kit_is_true "$(kit_conf KIT_ATTESTATION_SOURCE_DIGEST true)"; then
+  [[ $version =~ ^[0-9a-f]{40}$ ]] ||
+    kit_die "version '$version' isn't a full commit id: can't check the image was built from it (KIT_ATTESTATION_SOURCE_DIGEST=false to not check)"
+fi
+
+# The image Kamal deploys: the repository of the Kamal config the kit runs
+# with, when this hook runs for it (hooks learn Kamal's service, not its
+# config file). KIT_IMAGE, if set, must be that one: verifying an image
+# other than the one deployed would check nothing.
+repository=""
+service=$(kit_config_service "$(kit_config_file "$(kit_conf KIT_KAMAL_CONFIG_FILE "")")" "${KIT_DESTINATION:-}")
+if [ -z "${KAMAL_SERVICE:-}" ] || [ -z "$service" ] || [ "$service" = "$KAMAL_SERVICE" ]; then
+  repository=$(kit_kamal_config_get repository "$(kit_kamal_config)") || exit 1
+fi
 image=""
 [ -z "${KAMAL_SERVICE:-}" ] || image=$(kit_conf "KIT_IMAGE_$(kit_upper "$KAMAL_SERVICE")" "")
 [ -n "$image" ] || image=$(kit_conf KIT_IMAGE "")
-[ -n "$image" ] || kit_die "set KIT_IMAGE (e.g. ghcr.io/owner/app) to verify attestations"
-version=$(kit_version_being_deployed)
+if [ -z "$image" ]; then
+  image=$repository
+elif [ -n "$repository" ] && [ "$image" != "$repository" ]; then
+  kit_die "KIT_IMAGE is $image, but Kamal deploys $repository: that isn't the image being deployed. Set it to $repository, or leave it out (Kamal's is the default)"
+fi
+[ -n "$image" ] || kit_die "could not tell the image from \`kamal config\`: set KIT_IMAGE (e.g. ghcr.io/owner/app)"
 repo=$(kit_conf KIT_GITHUB_REPO "")
 [ -n "$repo" ] || repo=$(cd "$KIT_PROJECT_DIR" && gh repo view --json nameWithOwner -q .nameWithOwner) ||
   kit_die "could not tell the GitHub repository: set KIT_GITHUB_REPO=owner/repo"
 
-args=(attestation verify "oci://$image:$version" --repo "$repo")
+# The tag, resolved to a digest once (this machine's registry logins, as
+# gh uses): what's verified is that digest, not whatever the tag points to
+# by the time gh looks it up. Without Docker, refused, unless
+# KIT_ATTESTATION_WITHOUT_DOCKER=tag (the tag verified, warned).
+ref="$image:$version"
+digest=""
+read -r -a docker <<<"${KIT_DOCKER:-docker}"
+if command -v "${docker[0]:-docker}" >/dev/null 2>&1; then
+  digest=$(kit_timeout 60 kit_docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$ref" 2>/dev/null) || digest=""
+  [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    kit_die "could not resolve $ref to a digest (\`docker buildx imagetools inspect $ref\` says why; it uses this machine's registry logins): not deploying it"
+  ref="$image@$digest"
+else
+  case $(kit_conf KIT_ATTESTATION_WITHOUT_DOCKER refuse) in
+    tag) kit_warn "no docker here to resolve $ref to a digest: verifying the tag (KIT_ATTESTATION_WITHOUT_DOCKER=tag)" ;;
+    refuse) kit_die "no docker here to resolve $ref to a digest, so what's verified could be swapped before it's deployed. Install Docker (its buildx), or KIT_ATTESTATION_WITHOUT_DOCKER=tag to verify the tag" ;;
+    *) kit_die "KIT_ATTESTATION_WITHOUT_DOCKER must be refuse or tag (is '$(kit_conf KIT_ATTESTATION_WITHOUT_DOCKER refuse)')" ;;
+  esac
+fi
+
+args=(attestation verify "oci://$ref" --repo "$repo")
 signer=$(kit_conf KIT_ATTESTATION_SIGNER_WORKFLOW "")
 [ -n "$signer" ] && args+=(--signer-workflow "$signer")
+kit_is_true "$(kit_conf KIT_ATTESTATION_SOURCE_DIGEST true)" && args+=(--source-digest "$version")
+# From the branch deployed from (its ref when CI built it): the
+# checkout's, unless KIT_ATTESTATION_SOURCE_REF says (none: any).
+source_ref=$(kit_conf KIT_ATTESTATION_SOURCE_REF "")
+if [ -z "$source_ref" ]; then
+  branch=$(git -C "$KIT_PROJECT_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  [ -z "$branch" ] || source_ref="refs/heads/$branch"
+fi
+[ -z "$source_ref" ] || [ "$source_ref" = none ] || args+=(--source-ref "$source_ref")
+kit_is_true "$(kit_conf KIT_ATTESTATION_DENY_SELF_HOSTED true)" && args+=(--deny-self-hosted-runners)
 read -r -a extra <<<"$(kit_conf KIT_ATTESTATION_ARGS "")"
 args+=(${extra[@]+"${extra[@]}"})
 
 if gh "${args[@]}" >/dev/null; then
-  kit_ok "attestation verified for $image:$version"
+  kit_ok "attestation verified for $ref${digest:+ ($version)}"
 else
-  kit_die "no valid attestation for $image:$version from $repo${signer:+ ($signer)}: not deploying it"
+  kit_die "no valid attestation for $ref from $repo${signer:+ ($signer)}: not deploying it"
 fi

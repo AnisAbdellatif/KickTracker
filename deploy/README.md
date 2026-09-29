@@ -79,8 +79,10 @@ does Docker, the deploy user, SSH hardening and the firewall:
      URLs and where the kit's notifications go;
    - `secrets/deployer.sops.env` from `deployer.env.example`: a GitHub
      token (classic) with only `read:packages`, encrypted like the others;
-   - Kamal (`gem install kamal`, 2.12 or later), `sops`, and `gh` logged in
-     (for the CI and attestation checks). Or only Docker: with
+   - Kamal (`gem install kamal`, 2.12 or later), `sops`, `gh` logged in
+     (for the CI and attestation checks), and Docker with its buildx
+     plugin (the attestation gate resolves each image to a digest with
+     `docker buildx imagetools inspect`, and refuses without it). Or only Docker: with
      `KIT_RUNNER=docker` in `.kamal/kit.local.env` the kit runs Kamal, sops
      and gh in its own image, handing it your SSH keys, gh's token and age
      key (deploy-kit's `docs/runner.md`).
@@ -295,9 +297,11 @@ at that moment.
 
 ### Setting it up (once)
 
-1. **The machine**: Docker, git, `psql` (postgresql-client) and Kamal (or
-   `KIT_RUNNER=docker`), a deploy user in the `docker` group, joined to
-   the tailnet. In its firmware, power on after a power cut.
+1. **The machine**: Docker with its buildx plugin
+   (`docker-buildx-plugin`: the attestation gate resolves each image to a
+   digest with it, and refuses the deploy without it), git, `psql`
+   (postgresql-client) and Kamal (or `KIT_RUNNER=docker`), a deploy user
+   in the `docker` group, joined to the tailnet. In its firmware, power on after a power cut.
 2. **Tailscale ACLs**, only these (tag the two machines):
    the shadow machine to the main VPS's 5432 (the database, as
    `shadow_reader`) and 5672 (RabbitMQ, as the publish-only `receiver`);
