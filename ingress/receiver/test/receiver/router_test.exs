@@ -295,18 +295,30 @@ defmodule Receiver.RouterTest do
       :timeout
     end
 
+    confirm_timeout_ms = 500
+
     start_supervised!(
       {Publisher,
        url: TestBroker.receiver_url(),
        exchange: "kick.events",
-       confirm_timeout_ms: 500,
+       confirm_timeout_ms: confirm_timeout_ms,
        confirm: never}
     )
 
     assert wait_until(fn -> Publisher.connected?() end)
 
+    # Publishes go one at a time, so these queue behind each other. What is
+    # bounded is each delivery's wait on the publisher: `publish/5` gives up
+    # at the confirm timeout plus a second, and the caller spools. Unbounded,
+    # the last would wait for every confirm before it: 8 × 500 ms = 4 s.
+    count = 8
+    publish_bound_ms = confirm_timeout_ms + 1_000
+    # Spooling and signature checks on top; generous for slow CI runners,
+    # still well short of the unbounded 4 s.
+    slack_ms = 1_000
+
     deliveries =
-      for _ <- 1..4, do: Task.async(fn -> :timer.tc(fn -> deliver() end) end)
+      for _ <- 1..count, do: Task.async(fn -> :timer.tc(fn -> deliver() end) end)
 
     Process.sleep(100)
     {micros, health} = :timer.tc(fn -> Router.call(conn(:get, "/health"), Router.init([])) end)
@@ -314,14 +326,13 @@ defmodule Receiver.RouterTest do
     assert micros < 200_000
 
     for task <- deliveries do
-      {micros, {status, body, _}} = Task.await(task, 5_000)
+      {micros, {status, body, _}} = Task.await(task, 10_000)
       assert status == 200
       assert body["spooled"] == true
-      # The confirm timeout plus the second's margin, at most.
-      assert micros < 1_700_000
+      assert micros < (publish_bound_ms + slack_ms) * 1_000
     end
 
-    assert Spool.count() == 4
+    assert Spool.count() == count
   end
 
   test "headers that break the envelope schema are a 400, published nowhere", ctx do
