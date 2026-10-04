@@ -878,7 +878,11 @@ old one and retries every minute.
   it doesn't know. No message text is kept.
 - Reconnects with exponential backoff (1s up to 30s, with jitter), reset
   only after a connection stayed up for a minute, and records chat
-  coverage when connected and disconnected. A chatroom id that changes
+  coverage when connected and disconnected: disconnected at once,
+  connected through the `ChannelServer`, which journals each such mark in
+  the same write as the chat counts it vouches for (the mark's time plus
+  a minute), so counts that are lost (a crash, a journal write that
+  fails) never stay covered. A chatroom id that changes
   moves it to the new chatroom.
 - `rest_for_one`: if the `ChannelServer` restarts, the socket restarts with
   it (from the row as it is then); if only the socket crashes, the

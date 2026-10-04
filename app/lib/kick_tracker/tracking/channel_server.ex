@@ -82,6 +82,9 @@ defmodule KickTracker.Tracking.ChannelServer do
       closed_changes: nil,
       pending_meta: nil,
       chat: ChatMinutes.new(),
+      # The socket's "listening" marks, oldest first, `{at, max_gap_s}`:
+      # each is written with the chat it vouches for (`flush_chat/3`).
+      chat_covered: [],
       # Messages to log (§12.8), newest first, written with each flush.
       chat_log: [],
       unknown_events: MapSet.new()
@@ -164,6 +167,9 @@ defmodule KickTracker.Tracking.ChannelServer do
     {:noreply, %{state | channel: struct(state.channel, fields)}}
   end
 
+  def handle_info({:chat_covered, at, max_gap_s}, state),
+    do: {:noreply, %{state | chat_covered: state.chat_covered ++ [{at, max_gap_s}]}}
+
   def handle_info({:chat, message}, state) do
     {:noreply, %{state | chat: ChatMinutes.add(state.chat, message)}}
   end
@@ -212,8 +218,9 @@ defmodule KickTracker.Tracking.ChannelServer do
 
   @impl true
   def terminate(_reason, state) do
-    # Everything gathered, finished minutes or not.
-    flush_chat(state, DateTime.add(DateTime.utc_now(), 3600))
+    # Everything gathered, finished minutes or not: written through now.
+    now = DateTime.utc_now()
+    flush_chat(state, DateTime.add(now, 3600), now)
     snapshot(state)
   rescue
     _ -> :ok
@@ -311,8 +318,25 @@ defmodule KickTracker.Tracking.ChannelServer do
     end
   end
 
-  defp flush_chat(state, now) do
+  # A "listening" mark at `at` vouches for the chat of `at` to `at` plus
+  # one cadence (`Health.pad_s/1`), so it is written only with, or after,
+  # the counts for all of that: in the same journal append, so a write
+  # that fails (a full disk) or a process that dies before flushing loses
+  # the mark with them, and those minutes stay a gap instead of reading
+  # as no messages (AGENTS.md §7).
+  defp flush_chat(state, now, through \\ nil) do
     {minutes, users, chat} = ChatMinutes.take_done(state.chat, now)
+    through = through || ChatMinutes.written_through(now)
+    pad_s = KickTracker.Health.pad_s("chat")
+
+    {covered, waiting} =
+      Enum.split_with(state.chat_covered, fn {at, _} ->
+        not DateTime.after?(DateTime.add(at, pad_s), through)
+      end)
+
+    coverage =
+      for {at, max_gap_s} <- covered,
+          do: {:coverage, [state.channel.id], "chat", true, at, max_gap_s}
 
     rows =
       for m <- minutes do
@@ -328,7 +352,7 @@ defmodule KickTracker.Tracking.ChannelServer do
         do: [{:chat_messages, state.channel.id, Enum.reverse(state.chat_log)}],
         else: []
 
-    record(state, [{:chat, state.channel.id, rows}, {:kick_users, users} | logged])
+    record(state, [{:chat, state.channel.id, rows}, {:kick_users, users} | logged] ++ coverage)
 
     for m <- rows do
       broadcast(
@@ -342,7 +366,7 @@ defmodule KickTracker.Tracking.ChannelServer do
       )
     end
 
-    %{state | chat: chat, chat_log: []}
+    %{state | chat: chat, chat_log: [], chat_covered: waiting}
   end
 
   # --- readings ------------------------------------------------------------

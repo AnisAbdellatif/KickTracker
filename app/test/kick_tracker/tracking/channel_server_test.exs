@@ -359,4 +359,64 @@ defmodule KickTracker.Tracking.ChannelServerTest do
     KickTracker.Channels.announce(c.id, %{kick_channel_id: 77})
     assert %{channel: %{chatroom_id: 424_242, kick_channel_id: 77}} = ChannelServer.info(pid)
   end
+
+  describe "chat coverage" do
+    # The socket's "listening" marks reach the channel's process, which
+    # writes each with the chat it vouches for (the mark's time plus one
+    # cadence). On 2026-10-04 a full disk failed the journal write of a
+    # minute's chat; the socket had already recorded coverage over it, so
+    # that minute read as no messages instead of a gap.
+
+    defp chat(pid, sender, t),
+      do:
+        send(pid, {:chat, %{id: "m#{sender}-#{t}", sender_id: sender, username: nil, at: at(t)}})
+
+    defp chat_periods do
+      for p <- rows("coverage", ["from_at"]), p.source == "chat", do: {p.from_at, p.to_at, p.ok}
+    end
+
+    test "is written with the chat it vouches for, never ahead of it", %{channel: c} do
+      pid = start(c)
+      chat(pid, 11, 10)
+      for t <- [0, 60, 120], do: send(pid, {:chat_covered, at(t), 150})
+      chat(pid, 12, 130)
+
+      # At 2:30 the minutes before 2:00 are written (each 30s after it
+      # ends): the marks at 0:00 and 1:00 vouch for nothing later, the one
+      # at 2:00 waits for its minute.
+      ChannelServer.flush_chat_now(pid, at(150))
+      assert chat_periods() == [{at(0), at(60), true}]
+
+      # The process dies holding the 2:00 minute and the mark for it (a
+      # journal write that failed takes it down the same way).
+      ref = Process.monitor(pid)
+      Process.exit(pid, :kill)
+      assert_receive {:DOWN, ^ref, _, _, _}
+      assert chat_periods() == [{at(0), at(60), true}]
+
+      # Minute 1 was listened to and had no messages; minute 2 is unknown.
+      assert %{messages: [1, 0, nil]} = KickTracker.Series.chat(c, at(0), at(180), :raw)
+    end
+
+    test "a later flush writes a mark once its minute is written", %{channel: c} do
+      pid = start(c)
+      send(pid, {:chat_covered, at(120), 150})
+      ChannelServer.flush_chat_now(pid, at(150))
+      assert chat_periods() == []
+
+      ChannelServer.flush_chat_now(pid, at(210))
+      assert chat_periods() == [{at(120), at(120), true}]
+    end
+
+    test "a shutdown writes the chat gathered and the marks it covers", %{channel: c} do
+      pid = start(c)
+      send(pid, {:chat_covered, at(0), 150})
+      chat(pid, 11, 30)
+      ChannelServer.info(pid)
+      stop_supervised!(:cs)
+
+      assert chat_periods() == [{at(0), at(0), true}]
+      assert [%{messages: 1}] = rows("chat_minutes", ["minute"])
+    end
+  end
 end

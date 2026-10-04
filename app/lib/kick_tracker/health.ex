@@ -13,8 +13,10 @@ defmodule KickTracker.Health do
   alias KickTracker.Metrics.Coverage
 
   # How far behind a source's last outcome may be before it counts as
-  # stale: a little over two cadences.
-  @stale_s %{"api" => 150, "chat" => 150, "subscribers" => 660}
+  # stale: a little over two cadences. Chat's comes later: a "listening"
+  # mark is written once the chat it vouches for is (up to about 3.5
+  # minutes after it, `ChannelServer`).
+  @stale_s %{"api" => 150, "chat" => 300, "subscribers" => 660}
   # How much time one outcome vouches for (its cadence).
   @pad_s %{"api" => 60, "chat" => 60, "subscribers" => 300, "followers" => 900}
 

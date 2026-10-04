@@ -16,7 +16,9 @@ defmodule KickTracker.Tracking.ChatSocket do
   resets once a connection has stayed up for a minute, so a server that
   accepts and then drops at once isn't retried every second. It records
   in `coverage` (source `chat`) when chat was being received and when not,
-  so per-minute chat counts can say how complete they are. Chat is
+  so per-minute chat counts can say how complete they are: "not" at once,
+  "received" through the `ChannelServer`, which writes it with the counts
+  it vouches for (`{:chat_covered, at, max_gap_s}`). Chat is
   optional: while this is down, everything else keeps collecting.
 
   Until the channel's chatroom id is known (learnt from v2 by the first
@@ -396,9 +398,20 @@ defmodule KickTracker.Tracking.ChatSocket do
     %{state | timer: nil}
   end
 
-  defp mark(state, ok?) do
+  # Listening: the `ChannelServer` journals it with the chat it vouches
+  # for, so a mark never outlives counts that were lost (a crash, a
+  # journal that can't be written). Not listening claims nothing and is
+  # journaled at once.
+  defp mark(state, true) do
+    to_channel(
+      state,
+      {:chat_covered, KickTracker.Metrics.Sessionizer.norm(DateTime.utc_now()), @coverage_gap_s}
+    )
+  end
+
+  defp mark(state, false) do
     Journal.append([
-      {:coverage, [state.channel.id], "chat", ok?,
+      {:coverage, [state.channel.id], "chat", false,
        KickTracker.Metrics.Sessionizer.norm(DateTime.utc_now()), @coverage_gap_s}
     ])
   rescue
