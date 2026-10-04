@@ -160,6 +160,9 @@ done
 say "checking figures"
 # Every closed stream's stored hours watched must be what its samples give
 # (the rollup's formula, §14): the restored data is internally consistent.
+# Only streams whose figures were computed after they ended: a backup can
+# stop between a stream ending and its final figures being written, and
+# that stream's are then still the ones from while it was live.
 bad=$(q "
   WITH w AS (
     SELECT v.stream_id, v.viewers * LEAST(EXTRACT(EPOCH FROM v.observed_at - coalesce(
@@ -170,6 +173,7 @@ bad=$(q "
   SELECT count(*) FROM (
     SELECT w.stream_id, sum(greatest(vw, 0)) / 3600 AS hw FROM w GROUP BY 1
   ) x JOIN stream_stats st ON st.stream_id = x.stream_id
+    JOIN streams s ON s.id = x.stream_id AND st.computed_at >= s.ended_at
   WHERE abs(coalesce(st.hours_watched, 0) - x.hw) > 0.01 AND st.stream_id NOT IN (SELECT other_stream_id FROM merged_streams)
     AND st.stream_id NOT IN (SELECT stream_id FROM merged_streams)") || fail "computing figures"
 [ "$bad" = "0" ] || fail "$bad recent streams' hours watched disagree with their samples"
