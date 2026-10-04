@@ -160,7 +160,10 @@ defmodule Sim.RoundTripTest do
     body = Payloads.status_updated(big, window, @now, true)
     assert Webhooks.deliver(big.user_id, "livestream.status.updated", body, @now) == :ok
 
-    assert eventually(fn -> WebhookPolicy.deliveries(policy) != [] end)
+    # The capture plug logs the delivery in the policy before it writes the
+    # recording, so wait for the file itself, not for the policy's log.
+    assert eventually(fn -> Path.wildcard(Path.join(run, "webhook/*.json")) != [] end)
+    assert [%{status: 200}] = WebhookPolicy.deliveries(policy)
 
     [recorded] =
       run
@@ -191,7 +194,7 @@ defmodule Sim.RoundTripTest do
     assert Webhooks.deliver(big.user_id, "channel.followed", %{}, @now) == :ignored
   end
 
-  defp eventually(fun, attempts \\ 50) do
+  defp eventually(fun, attempts \\ 250) do
     Enum.reduce_while(1..attempts, false, fn _, _ ->
       if fun.(), do: {:halt, true}, else: Process.sleep(20) && {:cont, false}
     end)
