@@ -878,7 +878,11 @@ old one and retries every minute.
   it doesn't know. No message text is kept.
 - Reconnects with exponential backoff (1s up to 30s, with jitter), reset
   only after a connection stayed up for a minute, and records chat
-  coverage when connected and disconnected. A chatroom id that changes
+  coverage when connected and disconnected: disconnected at once,
+  connected through the `ChannelServer`, which journals each such mark in
+  the same write as the chat counts it vouches for (the mark's time plus
+  a minute), so counts that are lost (a crash, a journal write that
+  fails) never stay covered. A chatroom id that changes
   moves it to the new chatroom.
 - `rest_for_one`: if the `ChannelServer` restarts, the socket restarts with
   it (from the row as it is then); if only the socket crashes, the
@@ -1855,6 +1859,9 @@ change to the app beyond producer config.
   second's handover), and the next deploy updates it. The collectors'
   group finds the leader from their status ports; each collector is
   stopped before it's replaced, so two containers never share a journal.
+  Stopped builds stay stopped across a Docker daemon restart (restart
+  policy `unless-stopped`, never `always`), and a collector whose journal
+  is held by another process refuses to start (SQLite's exclusive lock).
 - Migrations run with `lock_timeout = 5s`: one that would queue behind
   the collector's writes (and hold every later write behind it) fails and
   is retried at a quieter moment; the collectors' journals absorb the wait.

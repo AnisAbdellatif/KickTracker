@@ -99,6 +99,15 @@ defmodule KickTracker.Metrics.ChatMinutes do
      }}
   end
 
+  @doc """
+  The instant up to which `take_done/2` at `now` has handed out every
+  minute: chat before it is written (or lost with what was taken), chat
+  after it is still only here.
+  """
+  @spec written_through(DateTime.t()) :: DateTime.t()
+  def written_through(%DateTime{} = now),
+    do: now |> DateTime.add(-(60 + @settle_s)) |> minute_of() |> DateTime.add(60)
+
   @doc "The start of the minute `at` falls in."
   @spec minute_of(DateTime.t()) :: DateTime.t()
   def minute_of(%DateTime{} = at) do

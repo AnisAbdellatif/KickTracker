@@ -194,6 +194,19 @@ kit's notification channels.
 Only `kit` deploys these containers: a plain `kamal deploy` that would put
 both collectors on one build is refused by the kit's role guard.
 
+Kamal keeps each role's last five builds (`retain_containers`), stopped:
+they are what a rollback starts. The collectors (and the shadow) are
+restarted `unless-stopped`, Kamal's default, never `always`: a crashed
+collector comes back, so does a running one when the Docker daemon
+restarts (a Docker upgrade, a reboot), and a build Kamal stopped stays
+stopped. Under `always`, a daemon restart started every retained build
+next to the live one, on the same journal. Should one ever start anyway,
+it finds its journal held by the live one and exits. `server-sync.sh`
+moves containers created under `always` to `unless-stopped` at each
+deploy; to do it at once on a machine:
+
+    docker ps -aq --filter label=service=kicktracker | xargs -r docker update --restart=unless-stopped
+
 One part at a time, and rollbacks:
 
     .kamal/kit/bin/kit group deploy web                  # this checkout's commit

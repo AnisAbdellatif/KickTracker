@@ -414,8 +414,15 @@ defmodule KickTracker.Tracking.ChatSimTest do
              rows("chat_minutes", ["minute"]) != []
            end)
 
-    chat = rows("coverage", ["id"]) |> Enum.filter(&(&1.source == "chat")) |> Enum.map(& &1.ok)
-    assert chat == [true, false, true]
+    assert chat_coverage() == [true, false, true]
+  end
+
+  # "Listening" is written with the chat it vouches for, at a flush, so
+  # after a "not listening" written at once: in time order.
+  defp chat_coverage do
+    rows("coverage", ["from_at", "id"])
+    |> Enum.filter(&(&1.source == "chat"))
+    |> Enum.map(& &1.ok)
   end
 
   test "a connection dropped soon after it came up doesn't start the backoff over",
@@ -464,7 +471,7 @@ defmodule KickTracker.Tracking.ChatSimTest do
     assert eventually(fn -> :sys.get_state(socket).channel.chatroom_id == c.chatroom_id + 1 end)
     assert eventually(fn -> ChatSocket.subscribed?(socket) end, 200)
 
-    chat = rows("coverage", ["id"]) |> Enum.filter(&(&1.source == "chat")) |> Enum.map(& &1.ok)
-    assert chat == [true, false, true]
+    flush(c)
+    assert chat_coverage() == [true, false, true]
   end
 end

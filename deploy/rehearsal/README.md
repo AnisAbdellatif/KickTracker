@@ -30,15 +30,25 @@ What it does:
    collecting container killed (and started again, as Docker's restart
    policy would after a real crash: it skips containers killed by hand), a
    rollback of web to v1, the collectors switched (`kit group switch`, the
-   collectors' rollback), and a whole release to v2 (both configs, with the
-   smoke tests through Caddy armed). Every kit command goes through `kit
+   collectors' rollback), a stopped collector build started on the
+   journal a running one holds (it must refuse it and exit), and a whole
+   release to v2 (both configs, with the smoke tests through Caddy armed).
+   Before and after the release it lists what a Docker daemon restart
+   would start, per journal, from the containers as the kit left them
+   (the release's prune keeps five stopped containers across the whole
+   service, not per role, so the collectors' old builds may be gone
+   after it). Last, it checks Docker's restart rule
+   with a real daemon restart in Docker in Docker (`docker:<this
+   machine's version>-dind`, privileged; `rehearse.sh daemon-rule` runs
+   only that, in about a minute). Every kit command goes through `kit
    sandbox kit`, which first checks that Kamal would deploy only to this
    machine.
 5. Writes `.work/report.md`: operations that failed, failed site requests
    and the longest outage per operation, viewer readings per channel per
    minute (gaps), chat, who collected when, the journals, webhooks
    delivered by the fake Kick against those stored (giving deliveries in
-   flight 30s to land), the cluster, open alerts, and what runs at the end.
+   flight 30s to land), what a daemon restart would start, the cluster,
+   open alerts, and what runs at the end.
    `.work/log/ops.log` has the kit's and Kamal's own output for every
    operation.
 

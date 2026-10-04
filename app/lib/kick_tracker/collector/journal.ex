@@ -21,6 +21,8 @@ defmodule KickTracker.Collector.Journal do
 
   use GenServer
 
+  require Logger
+
   alias Exqlite.Sqlite3
   alias KickTracker.Collector
 
@@ -110,30 +112,64 @@ defmodule KickTracker.Collector.Journal do
       path ->
         File.mkdir_p!(Path.dirname(path))
         {:ok, db} = Sqlite3.open(path)
-        :ok = Sqlite3.execute(db, "PRAGMA journal_mode = WAL")
-        :ok = Sqlite3.execute(db, "PRAGMA synchronous = FULL")
 
-        :ok =
-          Sqlite3.execute(db, """
-          CREATE TABLE IF NOT EXISTS ops (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            epoch INTEGER NOT NULL,
-            made_at INTEGER NOT NULL,
-            op BLOB NOT NULL
-          );
-          CREATE TABLE IF NOT EXISTS buried (
-            id INTEGER PRIMARY KEY,
-            epoch INTEGER NOT NULL,
-            made_at INTEGER NOT NULL,
-            op BLOB NOT NULL,
-            error TEXT NOT NULL,
-            buried_at INTEGER NOT NULL
-          );
-          CREATE TABLE IF NOT EXISTS kv (key BLOB PRIMARY KEY, value BLOB NOT NULL);
-          """)
+        case claim(db, Keyword.get(opts, :lock_wait_ms, 5_000)) do
+          :ok ->
+            {:ok, %{db: db, kv: nil, id: open(db)}}
 
-        {:ok, %{db: db, kv: nil, id: journal_id(db)}}
+          {:error, reason} ->
+            Sqlite3.close(db)
+
+            Logger.error(
+              "journal #{path} is held by another process (#{reason}): another " <>
+                "collector container on the same volume? Not starting"
+            )
+
+            {:stop, {:journal_in_use, path}}
+        end
     end
+  end
+
+  # Only one process may use a journal: never two containers on one
+  # journal (a restarted Docker daemon once started old, stopped builds
+  # next to the live ones, on the same volumes). In EXCLUSIVE locking mode
+  # SQLite keeps the lock it takes here until the connection closes or the
+  # process dies (the kernel drops it then, for containers sharing the
+  # volume too), and runs WAL without shared memory. Taken before anything
+  # is read; the wait covers a Journal restarted in the same node while its
+  # predecessor's connection closes.
+  defp claim(db, wait_ms) do
+    with :ok <- Sqlite3.execute(db, "PRAGMA busy_timeout = #{wait_ms}"),
+         :ok <- Sqlite3.execute(db, "PRAGMA locking_mode = EXCLUSIVE"),
+         :ok <- Sqlite3.execute(db, "BEGIN EXCLUSIVE") do
+      Sqlite3.execute(db, "COMMIT")
+    end
+  end
+
+  defp open(db) do
+    :ok = Sqlite3.execute(db, "PRAGMA journal_mode = WAL")
+    :ok = Sqlite3.execute(db, "PRAGMA synchronous = FULL")
+
+    :ok =
+      Sqlite3.execute(db, """
+      CREATE TABLE IF NOT EXISTS ops (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        epoch INTEGER NOT NULL,
+        made_at INTEGER NOT NULL,
+        op BLOB NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS buried (
+        id INTEGER PRIMARY KEY,
+        epoch INTEGER NOT NULL,
+        made_at INTEGER NOT NULL,
+        op BLOB NOT NULL,
+        error TEXT NOT NULL,
+        buried_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS kv (key BLOB PRIMARY KEY, value BLOB NOT NULL);
+      """)
+
+    journal_id(db)
   end
 
   @impl true

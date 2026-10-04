@@ -52,6 +52,21 @@ defmodule KickTracker.Collector.JournalWriterTest do
     assert %{depth: 2, oldest_at: %DateTime{}, buried: 0} = Journal.stats(:test_journal)
   end
 
+  test "a second journal on the same file refuses to start", %{path: path} do
+    :ok = Journal.append_to(:test_journal, [{:noop, 1}], 0)
+
+    assert {:error, {{:journal_in_use, ^path}, _child}} =
+             start_supervised({Journal, path: path, name: :other_journal, lock_wait_ms: 100},
+               id: :other
+             )
+
+    # The first one is untouched, and the file is free once it stops.
+    assert [{_, 0, _, {:noop, 1}}] = Journal.take(10, :test_journal)
+    stop_supervised!(Journal)
+    start_supervised!({Journal, path: path, name: :other_journal}, id: :other)
+    assert [{_, 0, _, {:noop, 1}}] = Journal.take(10, :other_journal)
+  end
+
   test "the writer applies everything and empties the journal" do
     c = channel!()
     :ok = Journal.append_to(:test_journal, [sample(c, 0, 1), sample(c, 60, 2)], 0)
