@@ -406,8 +406,9 @@ own `HEARTBEAT_URL`, so the shadow dying is noticed too.
 - `backup/offsite-sync.sh`, every 5 minutes: mirrors the `backups` volume
   to Filen with rclone, so the VPS going takes at most 5 minutes of history
   with it. Its settings are `secrets/offsite.env` (example in
-  `offsite.env.example`): a Filen account of its own, holding nothing else,
-  its password and API key rclone-obscured. A store without WAL (a new or
+  `offsite.env.example`): the Filen account, its password and API key
+  rclone-obscured, and the folder (never the drive's root, which is
+  refused). A store without WAL (a new or
   emptied volume) is never mirrored, so it can't empty Filen; what pruning
   removes goes to Filen's trash. It alerts after 3 failed runs in a row,
   then hourly while it lasts, and pings `OFFSITE_HEARTBEAT_URL` after each

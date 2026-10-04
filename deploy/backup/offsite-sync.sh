@@ -41,6 +41,11 @@ alert_on_failure "the off-site backup sync"
 [ -r "$OFFSITE_ENV" ] || fail "no $OFFSITE_ENV (copy offsite.env.example to offsite.sops.env and fill it in)"
 OFFSITE_PATH=$(setting OFFSITE_PATH "$OFFSITE_ENV")
 OFFSITE_PATH=${OFFSITE_PATH:-kicktracker-backups}
+# A mirror makes the folder match the store: pointed at the drive's root,
+# it would delete everything else in the account.
+case $(printf '%s' "$OFFSITE_PATH" | tr -d '/. ') in
+  "") fail "OFFSITE_PATH ($OFFSITE_PATH) is the drive's root: it must be a folder of its own" ;;
+esac
 OFFSITE_HEARTBEAT_URL=$(setting OFFSITE_HEARTBEAT_URL "$OFFSITE_ENV")
 docker volume inspect "$BACKUP_VOLUME" >/dev/null 2>&1 || fail "no volume $BACKUP_VOLUME"
 
