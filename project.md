@@ -2050,10 +2050,14 @@ The collected history can't be fetched again from Kick; losing the database
 loses it for good.
 
 - Continuous Postgres backups with point-in-time recovery (**WAL-G**, built
-  into the database image, `deploy/db`) to object storage off the VPS
-  (Backblaze B2, Cloudflare R2 or S3), encrypted at rest.
-- **Restore tested regularly**, scripted, into a scratch database, with a
-  check that row counts and a few metrics match.
+  into the database image, `deploy/db`), encrypted before they're written,
+  to a volume of their own on the VPS, mirrored to **Filen** every 5
+  minutes (rclone): at most a minute lost with the database, at most 5
+  with the VPS. WAL-G can write to S3-compatible storage instead.
+- **Restore tested regularly**, scripted, from the copy on Filen into a
+  scratch database, with a check that row counts and a few metrics match.
+- Archiving that falls behind is alerted (§18.2): a failing push makes
+  Postgres keep every WAL segment, until the disk is full.
 - Also backed up: RabbitMQ definitions, `deploy/` config, encrypted secrets.
   Receiver spools are short-lived and not backed up.
 

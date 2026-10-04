@@ -66,7 +66,9 @@ services:
     restart: unless-stopped
     env_file: [secrets/db.env]
     shm_size: 1g
-    volumes: [db:/var/lib/postgresql]
+    # WAL-G's store (WALG_FILE_PREFIX=/backups), copied off the VPS by
+    # backup/offsite-sync.sh: on its own volume, not in the database's.
+    volumes: [db:/var/lib/postgresql, backups:/backups]
     # The shadow collector reads the channel list here (§10.5): publish on
     # the private network's address only (loopback until one is set).
     ports: ["${PRIVATE_IP:-127.0.0.1}:5432:5432"]
@@ -83,6 +85,7 @@ volumes:
   caddy_config:
   rabbitmq:
   db:
+  backups:
 
 networks:
   default:

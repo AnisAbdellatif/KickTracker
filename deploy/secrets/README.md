@@ -15,6 +15,7 @@ git-ignored and live only on the server.
 | `receiver.env` | both receivers | see `receiver.env.example` |
 | `deployer.env` | the machine that deploys (Kamal's registry login) | see `deployer.env.example` |
 | `db.env` | the database and the backups (`backup/*.sh` also read `POSTGRES_*`, `WALG_*`, `AWS_*` and the backup heartbeat URLs here) | see `db.env.example` |
+| `offsite.env` | `backup/offsite-sync.sh` and `backup/restore-test.sh` (passed to rclone as `docker run --env-file`: no quotes) | the Filen account the backups are mirrored to, the folder, `OFFSITE_HEARTBEAT_URL`; see `offsite.env.example` |
 | `rabbitmq.env` | `rabbitmq/make-prod-definitions.sh` | the five RabbitMQ passwords |
 
 ## First time
