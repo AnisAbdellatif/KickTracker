@@ -58,9 +58,15 @@ servers:
 
   # One collects, the other stands by and takes over in about a second on
   # a deploy, or ~20s if the first dies (§10.1). Each has its own env file
-  # (no web secrets), its journal on its own volume, `always` restarted,
-  # and a minute to stop cleanly (stop collecting, release the lease,
-  # write out its journal).
+  # (no web secrets), its journal on its own volume, and a minute to stop
+  # cleanly (stop collecting, release the lease, write out its journal).
+  #
+  # Restarted `unless-stopped` (Kamal's default, said here so nobody puts
+  # back `always`): a crashed collector comes back, and so does a running
+  # one when the Docker daemon restarts, but a build Kamal stopped stays
+  # stopped. Under `always` a daemon restart (a Docker upgrade) started
+  # every retained build next to the live one, on the same journal.
+  # `kamal app start --version` (a rollback) makes a build come back again.
   collector_a:
     hosts: [<%= host %>]
     stop_timeout: 60
@@ -69,7 +75,7 @@ servers:
     options:
       env-file: <%= secrets %>/collector.env
       network-alias: app
-      restart: always
+      restart: unless-stopped
       volume:
         - <%= vol %>_journal-a:/journal
         - <%= vol %>_transfers:/transfers
@@ -81,7 +87,7 @@ servers:
     options:
       env-file: <%= secrets %>/collector.env
       network-alias: app
-      restart: always
+      restart: unless-stopped
       volume:
         - <%= vol %>_journal-b:/journal
         - <%= vol %>_transfers:/transfers

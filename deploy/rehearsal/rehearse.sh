@@ -7,11 +7,14 @@
 #
 #   web deploy (with a migration on a live hypertable), collector deploy,
 #   receiver deploy, database restart, RabbitMQ restart, a collector
-#   killed, a rollback of web and collectors, and a whole release.
+#   killed, a rollback of web and collectors, a whole release, and a
+#   stopped collector build started on a live one's journal; then what a
+#   Docker daemon restart would start.
 #
-#   deploy/rehearsal/rehearse.sh         # all of it, then a report
-#   deploy/rehearsal/rehearse.sh report  # the report again, from the running sandbox
-#   deploy/rehearsal/rehearse.sh down    # remove the sandbox and its data
+#   deploy/rehearsal/rehearse.sh              # all of it, then a report
+#   deploy/rehearsal/rehearse.sh report       # the report again, from the running sandbox
+#   deploy/rehearsal/rehearse.sh daemon-rule  # only Docker's restart rule (a minute)
+#   deploy/rehearsal/rehearse.sh down         # remove the sandbox and its data
 #
 # It starts from a fresh sandbox: one already running is reset, its data
 # with it. At the end the sandbox keeps running, to look around in
@@ -179,6 +182,84 @@ release() {
   kitd deploy -c deploy/kamal/receiver.yml --version "$1"
 }
 
+# A stopped build of a collector started next to the running one, on the
+# same journal, as a restarted Docker daemon did when the collectors were
+# `always` restarted: it must refuse the journal and exit, collection
+# untouched. Stopped again afterwards, as Kamal left it.
+start_old_collector() {
+  local role live old="" n
+  for role in collector_a collector_b; do
+    live=$(role_container "$role")
+    old=$(docker ps -aq --filter "label=role=$role" --filter label=destination=sandbox --filter status=exited | head -1)
+    [ -n "$live" ] && [ -n "$old" ] && break
+    old=""
+  done
+  [ -n "$old" ] || { echo "no stopped build of a running collector"; return 1; }
+  echo "starting $(docker inspect --format '{{.Name}}' "$old") next to $(docker inspect --format '{{.Name}}' "$live")"
+  docker start "$old"
+  for n in $(seq 1 60); do
+    docker logs "$old" 2>&1 | grep -q "is held by another process" && break
+    sleep 1
+  done
+  docker stop "$old"
+  docker logs "$old" 2>&1 | grep "is held by another process" | tail -1
+  [ "$n" -lt 60 ] || { echo "it didn't refuse the journal within 60s"; return 1; }
+  # The live one still holds it.
+  docker ps -q --no-trunc | grep -q "$(docker inspect --format '{{.Id}}' "$live")"
+}
+
+# What a restarted Docker daemon would start, per journal volume, from
+# the sandbox's collectors as the kit and Kamal left them: a running
+# container whose policy restarts it, and a stopped one under `always`
+# (Docker starts those too, `unless-stopped` doesn't: every stopped one
+# here was stopped by Kamal or this script, never died on its own). One
+# line per volume: the volume, how many, which.
+after_daemon_restart() {
+  docker ps -aq --filter label=destination=sandbox --filter label=service=kicktracker |
+    xargs -r docker inspect --format '{{.Name}} {{.State.Running}} {{.HostConfig.RestartPolicy.Name}}{{range .Mounts}}{{if eq .Destination "/journal"}} {{.Name}}{{end}}{{end}}' |
+    awk 'NF == 4 { seen[$4] = 1 }
+         NF == 4 && ($3 == "always" || ($2 == "true" && $3 == "unless-stopped")) { n[$4]++; who[$4] = who[$4] " " substr($1, 2) }
+         END { for (v in seen) print v, n[v] + 0, who[v] }' | sort
+}
+
+# Docker's own rule, on this machine's Docker version, with a real daemon
+# restart: a Docker daemon in a container of its own (docker:dind),
+# restarted as `systemctl restart docker` or a package upgrade does
+# (SIGTERM, a clean shutdown). It must start the running containers again
+# and a stopped `always` one, but not a stopped `unless-stopped` one; and
+# one stopped then started again (a rollback) comes back. Writes the
+# result to $LOG/daemon-rule.txt.
+daemon_rule() {
+  local d=kicktracker-rehearsal-dind version expected got
+  version=$(docker version --format '{{.Server.Version}}')
+  # Until the inner daemon answers.
+  ready() { for _ in $(seq 1 60); do docker exec "$d" docker info >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
+  docker rm -f "$d" >/dev/null 2>&1 || true
+  # --userns=host: privileged needs it where the daemon remaps users.
+  docker run -d -q --privileged --userns=host --name "$d" "docker:$version-dind" >/dev/null && ready || { echo "Docker in Docker didn't start" > "$LOG/daemon-rule.txt"; docker rm -f "$d" >/dev/null; return 1; }
+  docker exec "$d" sh -c '
+    set -e
+    docker pull -q busybox:1.36 >/dev/null
+    run() { docker run -d --name "$1" --restart "$2" busybox:1.36 sh -c "trap \"exit 0\" TERM; sleep 1000 & wait" >/dev/null; }
+    run always-running always
+    run always-stopped always && docker stop -t 1 always-stopped >/dev/null
+    run unless-running unless-stopped
+    run unless-stopped unless-stopped && docker stop -t 1 unless-stopped >/dev/null
+    run unless-started-again unless-stopped && docker stop -t 1 unless-started-again >/dev/null && docker start unless-started-again >/dev/null'
+  docker restart -t 60 "$d" >/dev/null
+  ready || { echo "Docker in Docker didn't come back" > "$LOG/daemon-rule.txt"; docker rm -f "$d" >/dev/null; return 1; }
+  sleep 3
+  got=$(docker exec "$d" docker ps --format '{{.Names}}' | sort | tr '\n' ' ')
+  expected="always-running always-stopped unless-running unless-started-again "
+  docker rm -f "$d" >/dev/null
+  if [ "$got" = "$expected" ]; then
+    echo "Docker $version, its daemon restarted: started again ${got% }; left stopped: unless-stopped (as expected)" > "$LOG/daemon-rule.txt"
+  else
+    echo "**Docker $version, its daemon restarted, started: ${got% }; expected: ${expected% }**" > "$LOG/daemon-rule.txt"
+    return 1
+  fi
+}
+
 operations() {
   say "baseline: two minutes of normal running"
   echo "baseline $(now)" >> "$LOG/ops.start"
@@ -195,7 +276,16 @@ operations() {
   # After the kill the other collector (still on v1) collects: this hands
   # collection back and forth, the collectors' rollback, nothing pulled.
   op "collectors switched (the rollback: a handover, nothing pulled)" kitd group switch collectors
+  # Before the release: its `kamal deploy` prunes stopped containers, five
+  # kept across the whole service (not per role), and web's are newer.
+  op "a stopped collector build started on a live one's journal (refused)" start_old_collector
+  say "== what a Docker daemon restart would start (stopped collector builds kept)"
+  after_daemon_restart > "$LOG/after-daemon-restart.txt"
   op "release (kit deploy, both configs) to v2" release "$V2"
+  say "== what a Docker daemon restart would start (after the release)"
+  after_daemon_restart >> "$LOG/after-daemon-restart.txt"
+  say "== Docker's restart rule, with a real daemon restart (Docker in Docker)"
+  daemon_rule || say "   (it failed: see $LOG/daemon-rule.txt)"
 }
 
 # --- the report ----------------------------------------------------------------------
@@ -300,6 +390,22 @@ for slug, minutes in rows.items():
     echo
     echo "Delivered by the fake Kick: $(wc -l < "$LOG/sent.txt"); stored: $(wc -l < "$LOG/stored.txt"); **missing: $missing**."
     echo
+    echo "## A Docker daemon restart"
+    echo
+    echo "What it would start, per journal volume, after the collectors were switched (their stopped builds still kept), then after the release (more than one on a journal is two collectors sharing it):"
+    echo
+    echo '```'
+    cat "$LOG/after-daemon-restart.txt" 2>/dev/null
+    echo '```'
+    echo
+    if awk '$2 > 1 { bad = 1 } END { exit !bad }' "$LOG/after-daemon-restart.txt" 2>/dev/null; then
+      echo "**Two or more collectors would start on one journal.**"
+    else
+      echo "At most one collector per journal."
+    fi
+    echo
+    echo "Docker's rule: $(cat "$LOG/daemon-rule.txt" 2>/dev/null || echo "not checked")"
+    echo
     echo "## Cluster and alerts"
     echo
     echo "web_a sees: $(docker exec "$(role_container web_a)" bin/kick_tracker rpc 'IO.puts(Enum.join(Node.list(), " "))' | tr -d '\r')"
@@ -338,6 +444,13 @@ case "${1:-all}" in
     V1=$(cat "$WORK/v1" 2>/dev/null || echo "sandbox-1")
     report
     ;;
+  daemon-rule)
+    mkdir -p "$LOG"
+    status=0
+    daemon_rule || status=$?
+    cat "$LOG/daemon-rule.txt"
+    exit "$status"
+    ;;
   down) down ;;
-  *) echo "usage: $0 [all|report|down]" >&2; exit 1 ;;
+  *) echo "usage: $0 [all|report|daemon-rule|down]" >&2; exit 1 ;;
 esac

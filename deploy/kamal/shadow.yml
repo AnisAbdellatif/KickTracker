@@ -36,7 +36,9 @@ servers:
       clear: {ROLE: collector, COLLECTOR_MODE: shadow, COLLECTOR_ID: shadow}
     options:
       env-file: <%= secrets %>/shadow.env
-      restart: always
+      # Not `always`: a build Kamal stopped must stay stopped when the
+      # Docker daemon restarts, or old builds share the journal (app.yml).
+      restart: unless-stopped
       volume: kicktracker-shadow_journal:/journal
 
 # The log driver named, not just its options: Kamal passes max-size, which

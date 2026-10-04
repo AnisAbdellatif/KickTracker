@@ -1859,6 +1859,9 @@ change to the app beyond producer config.
   second's handover), and the next deploy updates it. The collectors'
   group finds the leader from their status ports; each collector is
   stopped before it's replaced, so two containers never share a journal.
+  Stopped builds stay stopped across a Docker daemon restart (restart
+  policy `unless-stopped`, never `always`), and a collector whose journal
+  is held by another process refuses to start (SQLite's exclusive lock).
 - Migrations run with `lock_timeout = 5s`: one that would queue behind
   the collector's writes (and hold every later write behind it) fails and
   is retried at a quieter moment; the collectors' journals absorb the wait.

@@ -5,8 +5,9 @@
 #   deploy/server-sync.sh <commit being deployed>
 #
 # Brings the checkout up to that commit (compose files, Caddy's sites, the
-# cron scripts and the encrypted secrets all live there), then decrypts the
-# secrets the containers read. A deploy of an older commit (a rollback)
+# cron scripts and the encrypted secrets all live there), decrypts the
+# secrets the containers read, and moves the app's containers off the
+# `always` restart policy. A deploy of an older commit (a rollback)
 # leaves the checkout where it is: newer secrets and config serve older
 # builds too (expand-then-contract, §15.3).
 set -euo pipefail
@@ -24,3 +25,16 @@ if ! git merge-base --is-ancestor "$commit" HEAD; then
 fi
 echo "checkout at $(git rev-parse --short HEAD)"
 deploy/secrets/decrypt.sh
+
+# The app's containers (collectors, web nodes, the shadow) are restarted
+# `unless-stopped` (deploy/kamal/app.yml): a build Kamal stopped stays
+# stopped when the Docker daemon restarts. Containers created while they
+# were `always` keep that until Kamal prunes them, and are still the ones a
+# rollback starts: changed here, on every machine a deploy reaches.
+docker ps -aq --filter label=service=kicktracker |
+  xargs -r docker inspect --format '{{.Name}} {{.HostConfig.RestartPolicy.Name}}' |
+  awk '$2 == "always" { sub("^/", "", $1); print $1 }' |
+  while read -r name; do
+    docker update --restart=unless-stopped "$name" >/dev/null
+    echo "restart policy of $name: always -> unless-stopped"
+  done
