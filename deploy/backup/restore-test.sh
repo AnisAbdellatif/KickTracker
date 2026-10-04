@@ -20,7 +20,14 @@
 #                      they're compared with the stack's own `db` when it
 #                      runs on this host (through `docker compose exec`)
 #   COMPOSE_FILE       default compose.single.yml
-#   WALG_VOLUME        for WALG_FILE_PREFIX: a volume or path mounted there
+#   RESTORE_FROM       for WALG_FILE_PREFIX: `offsite` (the default when
+#                      secrets/offsite.env exists) downloads the copy on
+#                      Filen (backup/offsite-sync.sh) and restores that,
+#                      so the copy that outlives the VPS is the one tested;
+#                      `local` restores from the store on this host
+#   WALG_VOLUME        for `local`: the volume or path holding the store
+#                      (default BACKUP_VOLUME, kicktracker_backups)
+#   RCLONE_IMAGE       for `offsite` (default rclone/rclone:1.75.1)
 #   KEEP_RESTORE       set: leave the scratch container for a look
 set -eu
 
@@ -41,13 +48,16 @@ PG_DB=$(setting POSTGRES_DB "$DB_ENV")
 PG_DB=${PG_DB:-$PG_USER}
 RESTORE_HEARTBEAT_URL=$(setting RESTORE_HEARTBEAT_URL "$DB_ENV")
 NAME=kt-restore-test-$$
+STORE=kt-restore-store-$$
 ENV_FILE=$(mktemp)
+OFFSITE_ENV=$SECRETS_DIR/offsite.env
 
 say() { echo "$(date -u +%FT%TZ) $*"; }
 
 cleanup_hook() {
   rm -f "$ENV_FILE"
   [ -n "${KEEP_RESTORE:-}" ] || docker rm -f "$NAME" >/dev/null 2>&1 || true
+  docker volume rm "$STORE" >/dev/null 2>&1 || true
 }
 
 # WAL-G's settings for the scratch container: db.env's, then the
@@ -62,7 +72,27 @@ grep -qE '^WALG_(S3|FILE|GS|AZ|SWIFT|SSH)_PREFIX=.' "$ENV_FILE" ||
 
 WALG_FILE_PREFIX=${WALG_FILE_PREFIX:-$(env_get WALG_FILE_PREFIX "$ENV_FILE")}
 mount=""
-if [ -n "${WALG_VOLUME:-}" ]; then mount="-v ${WALG_VOLUME}:${WALG_FILE_PREFIX}:ro"; fi
+if [ -n "$WALG_FILE_PREFIX" ]; then
+  if [ -z "${RESTORE_FROM:-}" ]; then
+    if [ -z "${WALG_VOLUME:-}" ] && [ -r "$OFFSITE_ENV" ]; then RESTORE_FROM=offsite; else RESTORE_FROM=local; fi
+  fi
+  case $RESTORE_FROM in
+    local) WALG_VOLUME=${WALG_VOLUME:-${BACKUP_VOLUME:-kicktracker_backups}} ;;
+    offsite)
+      [ -r "$OFFSITE_ENV" ] || fail "RESTORE_FROM=offsite, but no $OFFSITE_ENV"
+      OFFSITE_PATH=$(setting OFFSITE_PATH "$OFFSITE_ENV")
+      OFFSITE_PATH=${OFFSITE_PATH:-kicktracker-backups}
+      say "downloading the store from filen:$OFFSITE_PATH"
+      docker volume create "$STORE" >/dev/null || fail "could not create the volume $STORE"
+      docker run --rm --env-file "$OFFSITE_ENV" -v "$STORE:/store" "${RCLONE_IMAGE:-rclone/rclone:1.75.1}" \
+        copy "filen:$OFFSITE_PATH" /store --exclude '*.tmp.*' --stats 0 -q ||
+        fail "downloading the store from filen:$OFFSITE_PATH"
+      WALG_VOLUME=$STORE
+      ;;
+    *) fail "RESTORE_FROM is $RESTORE_FROM: local or offsite" ;;
+  esac
+  mount="-v ${WALG_VOLUME}:${WALG_FILE_PREFIX}:ro"
+fi
 
 say "fetching the latest base backup ($DB_IMAGE)"
 # shellcheck disable=SC2086

@@ -93,10 +93,14 @@ does Docker, the deploy user, SSH hardening and the firewall:
        .kamal/kit/bin/kit deploy -c deploy/kamal/receiver.yml
 
    With the bundled Caddy: `docker compose -f compose.single.yml up -d caddy`.
-7. Take the first base backup (`./backup/base-backup.sh`) and install the
-   cron lines from `backup/base-backup.sh`, `backup/restore-test.sh` and
-   `ops/check-host.sh` in the deploy user's crontab (`crontab -e`: the
-   decrypted secrets are readable by that user only).
+7. Take the first base backup (`./backup/base-backup.sh`), copy it off the
+   VPS once by hand (`./backup/offsite-sync.sh`, with `offsite.sops.env`
+   filled in: see Backups below) and install the cron lines from
+   `backup/base-backup.sh`, `backup/offsite-sync.sh`,
+   `backup/restore-test.sh` and `ops/check-host.sh` in the deploy user's
+   crontab (`crontab -e`: the decrypted secrets are readable by that user
+   only). Without the crontab there are no base backups and no disk or
+   archiving alerts.
 8. Invite the first admin and open the link from an allowed network:
 
        docker exec $(docker ps -q --filter label=role=web_a) /app/bin/invite you@example.org
@@ -396,9 +400,21 @@ own `HEARTBEAT_URL`, so the shadow dying is noticed too.
 ## Backups (§18.1)
 
 - WAL is archived continuously by the database (`db/archive.conf`): at most
-  a minute is lost.
+  a minute is lost. WAL-G writes to the `backups` volume (`/backups` in the
+  database container), encrypted (`WALG_LIBSODIUM_KEY`) and compressed.
 - `backup/base-backup.sh`, daily: a full base backup and pruning (keeps 7).
-- `backup/restore-test.sh`, weekly: restores the latest backup into a
+- `backup/offsite-sync.sh`, every 5 minutes: mirrors the `backups` volume
+  to Filen with rclone, so the VPS going takes at most 5 minutes of history
+  with it. Its settings are `secrets/offsite.env` (example in
+  `offsite.env.example`): a Filen account of its own, holding nothing else,
+  its password and API key rclone-obscured. A store without WAL (a new or
+  emptied volume) is never mirrored, so it can't empty Filen; what pruning
+  removes goes to Filen's trash. It alerts after 3 failed runs in a row,
+  then hourly while it lasts, and pings `OFFSITE_HEARTBEAT_URL` after each
+  sync.
+- `backup/restore-test.sh`, weekly: downloads the copy on Filen (or, with
+  `RESTORE_FROM=local` or no `offsite.env`, uses the volume), restores the
+  latest backup into a
   scratch container, replays the WAL, checks row counts against the live
   database (the stack's `db`, through `docker compose exec`, when it runs
   on the same host; or `LIVE_DATABASE_URL`) and that recent streams'
@@ -410,7 +426,13 @@ own `HEARTBEAT_URL`, so the shadow dying is noticed too.
   of `secrets/collector.env` (or `app.env`). Any failure, expected or not,
   is sent to `ALERT_WEBHOOK_URL`, Telegram and/or ntfy; each success pings
   its heartbeat URL, so a job that stops running is noticed too.
-  `ops/check-host.sh` reads its settings the same way.
+  `ops/check-host.sh` reads its settings the same way; besides disk and
+  certificates it alerts when more than 30 WAL segments wait to be
+  archived (a failing `archive_command` doesn't stop Postgres: it keeps
+  every segment, and fills the disk).
+- Keep `WALG_LIBSODIUM_KEY` somewhere off the VPS too (it is in
+  `db.sops.env`, so the age key and the repo are enough): without it no
+  copy can be read.
 - Also keep: `deploy/` (in git), the RabbitMQ definitions (regenerated from
   secrets), and the age private keys (offline). Receiver spools are
   short-lived and not backed up.
@@ -440,7 +462,8 @@ set if you need a moment before a mistake).
   UptimeRobot):
   - `https://$SITE_HOST/healthz` and `https://$INGRESS_HOST/health`;
   - `HEARTBEAT_URL` (the collecting node pings it every minute: set it),
-    `BACKUP_HEARTBEAT_URL` (daily) and `RESTORE_HEARTBEAT_URL` (weekly):
+    `BACKUP_HEARTBEAT_URL` (daily), `OFFSITE_HEARTBEAT_URL` (every 5
+    minutes) and `RESTORE_HEARTBEAT_URL` (weekly):
     set each to alert when the pings stop.
 - Errors: `/admin/errors` (ErrorTracker); a new kind of error is alerted.
 
