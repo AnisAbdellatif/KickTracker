@@ -199,50 +199,51 @@ What that means:
 - **Leaderboards** are top lists, not every gift, so they can't become a
   full history; they're for display and checking.
 
-### 2.4 Pusher websocket: chat, raids and hosts (unofficial)
+### 2.4 The realtime chat feed: chat, raids and hosts (unofficial)
 
-`wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false`,
-subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
+The feed kick.com's own chat uses, read through kicksdk (`Kicksdk.Realtime`;
+KICK.md §6): Kick's **Centrifugo** server since 2026-10-13, Pusher before
+(`ws-us2.pusher.com`, app key `32cbd69e4b950bf97679`, gone since).
 
-- The same public feed kick.com's own chat uses; the app key ships to every
-  visitor. KickPlus already uses it for its active-chatters line.
-- No account or token; should work from a server.
-- `App\Events\ChatMessageEvent` carries `sender.id` and `sender.username`.
-- Also carries host/raid events (event names to confirm), and possibly other
-  events on the per-channel feed `channel.<id>` (to verify).
-- Observed (2026-09-24, from a home machine):
-  - Accepted without auth; subscribing to `chatrooms.<id>.v2` and
-    `channel.<id>` both succeed.
-  - **The server's first frame (`connection_established`) often arrives in
-    the same read as the upgrade response.** A client must process those
-    bytes or it never subscribes (the recorder had this bug; fixed and
-    tested).
-  - `App\Events\ChatMessageEvent` has `type` `message` or `reply`; a reply
-    carries `metadata.original_message` (id, content) and
-    `metadata.original_sender` (id, username), plus `thread_parent_id`.
-    Message ids are UUIDs. Senders carry `identity.badges_v2`.
-  - Nothing arrived on `channel.<id>` in 20 minutes besides the subscription
-    confirmation. No raid or host seen yet.
-- Observed in production (2026-09-25, event names only, from the logs):
-  hosts (Kick's raids) come as `App\Events\StreamHostEvent` in the
-  receiving channel's `chatrooms.<id>.v2` and
-  `App\Events\ChatMoveToSupportedChannelEvent` on the hosting channel's
-  `channel.<id>`, half a second apart for a host between two tracked
-  channels.
-- Seen in the sandbox's real-Kick mode (2026-09-26, 4 hosts, fixtures in
-  `fixtures/pusher/20260926T203429Z-pusher__*.jsonl`): `StreamHostEvent`
-  carries `chatroom_id`, `host_username` (a username, not a slug or id),
-  `number_viewers` and `optional_message` (free text, may be null);
-  `ChatMoveToSupportedChannelEvent` carries the hosted channel's `slug` and
-  a `hosted` object (`slug`, `username`, `viewers_count`, picture,
+- Ask where the chat is served (`POST
+  web.kick.com/api/v1/realtime/channels/<channel id>/chat/connection`, or
+  `…/connection` before the channel id is known), get a guest token for a
+  client id we make up (`…/auth/connection`, 45 minutes, refreshed for the
+  same id), open the websocket with `Origin: https://kick.com` (any other
+  Origin is refused, 403), connect, subscribe. No account; works from a
+  server.
+- Feeds, as Kick's page joins them: `chatrooms.<chatroom id>.v2` (chat,
+  moderation, hosts arriving), `chatrooms.<id>`, `chatroom_<id>`, and with
+  the channel id `channel.<id>` (hosts leaving, live/offline) and
+  `channel_<id>` (Kicks). `private-…` feeds need a user and are refused.
+- Inside each publication is Kick's own event, unchanged from Pusher days:
+  a name and its `data` as a JSON string.
+- `App\Events\ChatMessageEvent` carries `sender.id` and `sender.username`;
+  `type` `message` or `reply`, a reply carrying
+  `metadata.original_message` (id, content) and `metadata.original_sender`
+  (id, username), plus `thread_parent_id`. Message ids are UUIDs. Times end
+  in `+00:00`.
+- **The server's first frames can arrive in the same read as the upgrade
+  response** (seen over Pusher): a client must process those bytes.
+- Hosts (Kick's raids), seen in production and the sandbox's real-Kick mode
+  (2026-09-26, 4 hosts, fixtures in
+  `fixtures/pusher/20260926T203429Z-pusher__*.jsonl`):
+  `App\Events\StreamHostEvent` in the receiving channel's
+  `chatrooms.<id>.v2`, carrying `chatroom_id`, `host_username` (a username,
+  not a slug or id), `number_viewers` and `optional_message` (free text,
+  may be null); `App\Events\ChatMoveToSupportedChannelEvent` on the
+  hosting channel's `channel.<id>`, carrying the hosted channel's `slug`
+  and a `hosted` object (`slug`, `username`, `viewers_count`, picture,
   thumbnail, category) plus the whole hosting `channel` (with its playback
   URL and livestream). Both counts were the hosting channel's own viewers.
-  Neither carries a time.
+  Neither carries a time. Half a second apart for a host between two
+  tracked channels.
 - Chat stays here rather than on the chat webhook: a webhook is one HTTP
   request per message, heavy on busy channels, and capped at 1 000 channels
-  for an unverified app. The webhook is the official fallback if Pusher stops.
-- Unofficial: it depends on an app key Kick doesn't offer to third parties.
-  Everything else keeps collecting if it stops.
+  for an unverified app. The webhook is the official fallback if the feed
+  stops.
+- Unofficial: Kick can change it at any time, as it did on 2026-10-13; the
+  fix belongs in kicksdk. Everything else keeps collecting if it stops.
 
 ## 3. What we track
 
@@ -255,7 +256,7 @@ subscribe to `chatrooms.<chatroom id>.v2` with `auth: ''`.
 | Title changes | `livestream.metadata.updated` (+ compared on each poll) | Event |
 | Category changes | `livestream.metadata.updated` (+ compared on each poll) | Event |
 | Active chatters | unique senders per minute, per user (§12) | **Per minute** |
-| Hosts and raids | Pusher events | Event |
+| Hosts and raids | chat feed events | Event |
 | Followers (total) | v2 `followers_count` | **Every 15 min**, plus **at stream start and end** |
 | Subscribers (active, gifted, cancelled) | `GET /channels` (the safety-net poll) | **Every 5 min** |
 | Follows | `channel.followed` | Event |
@@ -325,8 +326,8 @@ per-minute table loses no long-term statistic.
 | Subscriber totals (active, gifted, cancelled) | public API `/channels` |
 | Follows | webhook |
 | Subs, resubs, gifted subs, Kicks | webhooks |
-| Chat messages (sender, time) | Pusher |
-| Hosts and raids | Pusher |
+| Chat messages (sender, time) | chat feed |
+| Hosts and raids | chat feed |
 
 ### 4.2 Derived from raw facts
 
@@ -467,7 +468,7 @@ Kick ──webhook──▶ receiver(s) ──publish──▶ RabbitMQ
   choice, changed without touching the app.
 - The app needs **no public endpoint**: it connects out to RabbitMQ. Only the
   ingress faces the internet.
-- Data the app fetches itself (polling, v2, Pusher) does not go through the
+- Data the app fetches itself (polling, v2, the chat feed) does not go through the
   queue; there is nothing to buffer.
 - `SubscriptionSync` registers the **ingress URL** with Kick. For the app it
   is a config value, nothing more.
@@ -628,8 +629,9 @@ another queue with its own Broadway producer.
 | Queue consumer | **Broadway** + **broadway_rabbitmq** | Batching, acks, back-pressure, concurrency; the queue is a swappable producer. |
 | Receiver | **Bandit + Plug + amqp**, **SQLite** spool (exqlite) | Tiny, separate, rarely redeployed. |
 | Collector journal | **SQLite** (exqlite), one file per collector | Collection outlives the database: writes wait on local disk (§10.2). |
-| HTTP client | **Req** | Public API, v2, token endpoint. Retries and backoff built in. |
-| Chat websocket | **Mint.WebSocket** inside our own GenServer (or WebSockex if simpler) | Maintained, the process owns the connection, reconnect logic is ours. |
+| Kick | **kicksdk** (sans-I/O, a Rust core as a precompiled NIF) | Builds every request to Kick, reads every answer, speaks the chat feed's protocol; one place to fix when Kick changes (decisions.md, "Kick through kicksdk"). |
+| HTTP client | **Req** | Sends kicksdk's requests: public API, v2, token and chat endpoints. Retries and backoff built in. |
+| Chat websocket | **Mint.WebSocket** inside our own GenServer, driving kicksdk's session | Maintained, the process owns the connection, reconnect logic is ours. |
 | JSON | **Jason** (or OTP's `:json`) | Chat frames, API bodies, envelopes. |
 | Database | **PostgreSQL + TimescaleDB**, one database | Hypertables, continuous aggregates, compression, retention, plain SQL. Self-hosted (see §12.1). |
 | DB access | **Ecto + Postgrex** | Schemas, migrations; Timescale features via `execute` in migrations. |
@@ -677,7 +679,7 @@ KickTracker.Supervisor (one_for_one, 20 restarts / 60s)
          ├─ Tracking.ChannelsSupervisor
          │   └─ Tracking.ChannelSup          one per channel (rest_for_one; temporary)
          │       ├─ Tracking.ChannelServer   state, stream sessions, writes, broadcasts
-         │       └─ Tracking.ChatSocket      Pusher connection for this chatroom
+         │       └─ Tracking.ChatSocket      chat feed connection for this chatroom
          ├─ Tracking.Manager       a ChannelSup per tracked channel, resynced every minute;
          │                         quarantines one that keeps crashing
          ├─ SourceRunner(Viewers), SourceRunner(Subscribers), SourceRunner(Followers)
@@ -868,10 +870,13 @@ old one and retries every minute.
 - Broadcasts readings and events on `"channel:<id>"` for LiveView pages.
 
 **ChatSocket** (one per channel)
-- Connects to Pusher, subscribes to `chatrooms.<id>.v2` and, once known,
-  `channel.<kick channel id>`; answers pings, pings after the activity
-  timeout, reconnects if no pong comes, or if the upgrade doesn't complete
-  within 15s. Waits until the chatroom id is known (from v2).
+- Connects to Kick's chat feed through kicksdk (§2.4): asks where the
+  chat is served and for a guest token, opens the websocket, and drives a
+  `Kicksdk.Realtime.Session` (which subscribes the chat's feeds, answers
+  Kick's pings, refreshes the token and closes a quiet line). Reconnects
+  if the upgrade doesn't complete within 15s. Waits until the chatroom id
+  is known (from v2); a channel id learnt later connects again with the
+  channel's feeds.
 - Sends `{:chat, message}` (sender, id, time) to its `ChannelServer`, the
   two host events with their data as sent (stored raw in `channel_events`
   until a parser is written from real ones), and the names of other events
@@ -974,12 +979,12 @@ kick_tracker/
 │  │  │  ├─ application.ex           # starts the tree for ROLE
 │  │  │  ├─ repo.ex
 │  │  │  ├─ kick/
+│  │  │  │  ├─ endpoints.ex          # our Kick settings as kicksdk's endpoints
+│  │  │  │  ├─ http.ex               # sends kicksdk's requests with Req
 │  │  │  │  ├─ token.ex              # app token GenServer
-│  │  │  │  ├─ api.ex                # public/v1 via Req, batched, 429-aware
-│  │  │  │  ├─ subscriptions.ex      # webhook subscriptions API
+│  │  │  │  ├─ api.ex                # public/v1 (incl. webhook subscriptions), batched, 429-aware
 │  │  │  │  ├─ signature.ex          # verification (pure)
-│  │  │  │  ├─ followers.ex          # v2 followers_count, isolated and replaceable
-│  │  │  │  └─ pusher.ex             # frame encoding/decoding (pure)
+│  │  │  │  └─ v2.ex                 # v2 followers_count, isolated and replaceable
 │  │  │  ├─ events/
 │  │  │  │  ├─ consumer.ex           # Broadway pipeline
 │  │  │  │  ├─ envelope.ex           # decode + validate (pure)
@@ -1220,7 +1225,8 @@ channel_events     (id, channel_id, occurred_at,
                    -- the host's username (hosted_by) or the hosted slug
                    -- (hosting), viewers: the viewers taken along; payload
                    -- {event, pusher_channel, data} with only the fields
-                   -- read (§2.4)
+                   -- read (§2.4); pusher_channel is the feed (a name
+                   -- from Pusher days, kept)
                    -- Other unknown chat-feed events are logged by name only
 ```
 
@@ -1755,7 +1761,7 @@ our pages only (§13.5).
   it is where bugs silently corrupt history.
 - **Batch and back off**: 50 channels per public API request, respect 429;
   v2 requests spread out, one channel at a time.
-- **Chat and v2 are optional**: if Pusher or v2 fails, everything else keeps
+- **Chat and v2 are optional**: if the chat feed or v2 fails, everything else keeps
   collecting.
 - **Estimates are labeled** (revenue, anything modeled).
 
@@ -1880,7 +1886,7 @@ Answered:
 - ~~Are the `channels` subscriber-count fields filled for channels that
   haven't authorized us?~~ Yes (§2.1); now tracked every 5 minutes.
 - ~~Does Pusher accept connections without auth?~~ Yes, from a home machine
-  (§2.4).
+  (§2.4). Its Centrifugo successor takes a guest token, no account.
 
 Partly answered:
 
@@ -1902,8 +1908,9 @@ Still open:
    are.
 2. ~~Does v2 answer from the VPS?~~ Yes: production has read followers
    from the VPS since 2026-09-24 without a failed reading (KICK.md §5.1).
-3. **Pusher limits** per connection or IP. From a datacenter IP it works:
-   production keeps every channel's socket up from the VPS. Host events:
+3. **Chat feed limits** per connection or IP. From a datacenter IP Pusher
+   worked: production kept every channel's socket up from the VPS; the
+   same is to be seen of Centrifugo. Host events:
    answered and parsed (§2.4).
 4. **Outgoing raids:** answered: the hosting channel's `channel.<id>` feed
    carries `ChatMoveToSupportedChannelEvent`.
@@ -1918,7 +1925,7 @@ real life.
 
 ### 17.1 Recording real payloads (once, lightly)
 
-A set of `mix` tasks in `sim/` (`record.api`, `record.v2`, `record.pusher`,
+A set of `mix` tasks in `sim/` (`record.api`, `record.v2`,
 `record.subscribe`, `record.webhooks`, `record.probe`, then
 `fixtures.anonymize`), run by hand
 against the real Kick, on one or two channels, for a limited time. The
@@ -1930,8 +1937,9 @@ runbook is `sim/README.md`. They record:
 - **Webhooks:** subscribe the recorded channels through a tunnel and keep
   every delivery **with its headers** (for signature tests), all event
   types we can trigger or wait for.
-- **Pusher:** raw frames from a chatroom: connection, subscription, pings,
-  chat messages, and raids / hosts / anything else that shows up.
+- **The chat feed:** recorded with `record.pusher` while it was Pusher
+  (`fixtures/pusher`); since the move to Centrifugo, by kicksdk's
+  `tools/record-realtime.mjs` into kicksdk's fixtures.
 
 Raw recordings go to `sim/recordings/` (git-ignored); tokens, `Authorization`
 and v2's `playback_url` are redacted before anything is written. They reach
@@ -1972,11 +1980,11 @@ protocols**, built from the fixtures:
 | `id.kick.com` token endpoint | Issues tokens, expiring, refreshable |
 | `api.kick.com/public/v1` | `/livestreams`, `/channels`, `/events/subscriptions`, with the 50-per-request limit and 429s |
 | `kick.com/api/v2/channels/<slug>` | `followers_count` and the rest of the shape |
-| Pusher websocket | The subset of the Pusher protocol we use: connect, subscribe, ping/pong, chat, raids, hosts |
+| The realtime chat feed | Kick's Centrifugo as kick.com's chat uses it: the connection and token endpoints, the websocket (Origin checked), connect, subscribe, pings, token refresh and expiry, chat; tests publish hosts |
 | Webhook deliveries | POSTs to the ingress URL with all `Kick-Event-*` headers, **signed with the simulator's own key pair** |
 
 The app and ingress point at it purely **through configuration**
-(`KICK_API_URL`, `KICK_ID_URL`, `KICK_V2_URL`, `PUSHER_URL`,
+(`KICK_API_URL`, `KICK_ID_URL`, `KICK_V2_URL`, `KICK_REALTIME_URL`,
 `KICK_PUBLIC_KEY`). No code path knows it is talking to a fake; if something
 only works against the simulator, that is a bug.
 
@@ -1988,7 +1996,7 @@ only works against the simulator, that is a bug.
   growth, sub / gift / Kicks rates, raids between channels.
 - **Fault injection**, switchable per scenario: dropped, duplicated,
   delayed and out-of-order webhooks; webhook retries; 429s, 5xx and timeouts;
-  Pusher disconnects; viewer glitches (a sudden 0, a one-reading spike);
+  chat feed disconnects; viewer glitches (a sudden 0, a one-reading spike);
   brief stream drops with the same or a new `started_at`; streams crossing
   midnight or lasting over 24h; renamed slugs; banned channels.
 - **Controls:** a small HTTP API and CLI to trigger things on demand ("start
@@ -2001,15 +2009,16 @@ public key, channels, livestreams, webhook subscriptions, v2), signed
 webhook delivery with drop and duplicate faults, and a process per channel
 that announces streams starting and ending, title and category changes, and
 the follows, subs, gifts, Kicks, bans and redemptions of each passing
-minute, and a Pusher websocket carrying each stream's chat (with the
-handshake, pings, and the disconnect codes real Pusher uses). The recorder
-drives all of it unchanged, and its payload shapes (API, webhooks, chat
+minute, and a chat feed carrying each stream's chat (Pusher until
+2026-10-13; now Kick's Centrifugo, with its endpoints, handshake, pings,
+token refresh and close codes, tested with kicksdk's session). The recorder
+drives the HTTP side unchanged, and its payload shapes (API, webhooks, chat
 frames) are checked against `fixtures/` by tests, so a shape Kick changes
 shows up when we re-record. Hosts wait for real payloads (stored raw in
 production, §16) before the simulator sends them. A control API (`/_sim`) and CLI (`mix sim.ctl`)
 drive it by hand: start or end a stream now, change title or category,
 send any event, move or speed up the clock, drop the next N webhooks, set
-faults, disconnect Pusher clients, expire tokens. Manual changes are
+faults, disconnect chat clients, expire tokens. Manual changes are
 overrides layered over the schedule, so the simulation stays a function of
 time. Still to come: bulk mode (phase 2).
 
@@ -2097,7 +2106,7 @@ token: they are scrubbed from its context, as from the logs.
 - **Kick's developer terms:** read for rules on storing and displaying data,
   and on handing it on (the read API, §13.10, gives other applications our
   data),
-  attribution and rate limits. v2 and Pusher are the grey area; both can
+  attribution and rate limits. v2 and the chat feed are the grey area; both can
   already be switched off.
 - **Public name without "Kick"** in it or its logo (trademark). The repo name
   doesn't matter.
