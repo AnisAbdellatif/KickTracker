@@ -16,6 +16,8 @@ RUN mix local.hex --force && mix local.rebar --force
 COPY mix.exs mix.lock ./
 RUN mix deps.get --only prod && mkdir config
 COPY config/config.exs config/prod.exs config/
+# kicksdk's NIF comes precompiled from its GitHub release, downloaded
+# here (checked against the package's checksums): no Rust needed.
 RUN mix deps.compile
 
 COPY assets/package.json assets/package-lock.json assets/

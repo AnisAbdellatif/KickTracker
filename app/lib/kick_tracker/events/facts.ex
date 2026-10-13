@@ -3,7 +3,8 @@ defmodule KickTracker.Events.Facts do
   What a follow, sub, gift or Kicks event says, as rows (project.md §12.5).
   Pure.
 
-  Returns the fact and the Kick users it names (id and username, for
+  The body is read by kicksdk (`Kicksdk.Webhooks.parse/2`, by the event
+  type). Returns the fact and the Kick users it names (id and username, for
   `kick_users`, the only place usernames are kept). Message text in any
   event is never read. An event whose body lacks what a fact needs gives
   `:none`: the event is still stored in `webhook_events` and marked
@@ -25,15 +26,11 @@ defmodule KickTracker.Events.Facts do
           {:follow, map()}
           | {:support, map()}
 
-  @kinds %{
-    "channel.subscription.new" => "sub",
-    "channel.subscription.renewal" => "resub",
-    "channel.subscription.gifts" => "gift",
-    "kicks.gifted" => "kicks"
-  }
+  @types ~w(channel.followed channel.subscription.new channel.subscription.renewal
+    channel.subscription.gifts kicks.gifted)
 
   @doc "Event types that become facts."
-  def types, do: ["channel.followed" | Map.keys(@kinds)]
+  def types, do: @types
 
   @doc """
   The fact in an event, for the channel `channel_id`, and the users it
@@ -44,13 +41,16 @@ defmodule KickTracker.Events.Facts do
   """
   @spec parse(Envelope.t(), integer()) :: {fact(), [user()]} | :none
   def parse(%Envelope{} = e, channel_id) do
-    case Envelope.payload(e) do
-      {:ok, body} when is_map(body) -> parse(e.event_type, body, e, channel_id)
+    # kicksdk reads the body by its type (`Kicksdk.Webhooks.parse/2`).
+    with true <- String.valid?(e.body),
+         {:ok, event} <- Kicksdk.Webhooks.parse(e.event_type, e.body) do
+      fact(event, e, channel_id)
+    else
       _ -> :none
     end
   end
 
-  defp parse("channel.followed", %{"follower" => follower}, e, channel_id) do
+  defp fact(%{"type" => "followed", "follower" => follower}, e, channel_id) do
     case user(follower) do
       nil ->
         :none
@@ -66,29 +66,26 @@ defmodule KickTracker.Events.Facts do
     end
   end
 
-  defp parse(type, body, e, channel_id)
-       when type in ["channel.subscription.new", "channel.subscription.renewal"] do
-    with %{} = u <- user(body["subscriber"]),
-         months when is_integer(months) and months > 0 <- body["duration"] do
+  defp fact(%{"type" => "subscription"} = event, e, channel_id) do
+    with %{} = u <- user(event["subscriber"]),
+         months when is_integer(months) and months > 0 <- event["duration"] do
+      kind = if event["renewal"], do: "resub", else: "sub"
+
       row =
-        support(e, channel_id, body, @kinds[type], u.id, months, nil, %{
-          "expires_at" => body["expires_at"]
+        support(e, channel_id, event, kind, u.id, months, nil, %{
+          "expires_at" => event["expires_at"]
         })
 
-      row =
-        if type == "channel.subscription.renewal",
-          do: %{row | occurred_at: e.occurred_at},
-          else: row
-
+      row = if event["renewal"], do: %{row | occurred_at: e.occurred_at}, else: row
       {{:support, row}, [u]}
     else
       _ -> :none
     end
   end
 
-  defp parse("channel.subscription.gifts", body, e, channel_id) do
-    giftees = body["giftees"] |> List.wrap() |> Enum.map(&user/1) |> Enum.reject(&is_nil/1)
-    gifter = user(body["gifter"])
+  defp fact(%{"type" => "subscription_gifts"} = event, e, channel_id) do
+    giftees = event["giftees"] |> List.wrap() |> Enum.map(&user/1) |> Enum.reject(&is_nil/1)
+    gifter = user(event["gifter"])
 
     case giftees do
       [] ->
@@ -96,27 +93,26 @@ defmodule KickTracker.Events.Facts do
 
       giftees ->
         row =
-          support(e, channel_id, body, "gift", gifter && gifter.id, length(giftees), nil, %{
+          support(e, channel_id, event, "gift", gifter && gifter.id, length(giftees), nil, %{
             "giftee_ids" => Enum.map(giftees, & &1.id),
             "anonymous" => gifter == nil,
-            "expires_at" => body["expires_at"]
+            "expires_at" => event["expires_at"]
           })
 
         {{:support, row}, Enum.reject([gifter | giftees], &is_nil/1)}
     end
   end
 
-  defp parse("kicks.gifted", body, e, channel_id) do
-    gift = body["gift"] || %{}
-    sender = user(body["sender"])
+  defp fact(%{"type" => "kicks_gifted"} = event, e, channel_id) do
+    sender = user(event["sender"])
 
-    case gift["amount"] do
+    case event["amount"] do
       amount when is_integer(amount) and amount > 0 ->
         # The gift's message is the sender's text: not kept.
         row =
-          support(e, channel_id, body, "kicks", sender && sender.id, amount, gift["tier"], %{
-            "gift_type" => gift["type"],
-            "gift_name" => gift["name"]
+          support(e, channel_id, event, "kicks", sender && sender.id, amount, event["tier"], %{
+            "gift_type" => event["kind"],
+            "gift_name" => event["name"]
           })
 
         {{:support, row}, List.wrap(sender)}
@@ -126,13 +122,13 @@ defmodule KickTracker.Events.Facts do
     end
   end
 
-  defp parse(_type, _body, _e, _channel_id), do: :none
+  defp fact(_event, _e, _channel_id), do: :none
 
-  defp support(e, channel_id, body, kind, user_id, quantity, tier, payload) do
+  defp support(e, channel_id, event, kind, user_id, quantity, tier, payload) do
     %{
       message_id: e.message_id,
       channel_id: channel_id,
-      occurred_at: time(body["created_at"]) || e.occurred_at,
+      occurred_at: time(event["created_at"]) || e.occurred_at,
       kind: kind,
       user_id: user_id,
       quantity: quantity,

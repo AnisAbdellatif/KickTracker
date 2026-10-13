@@ -3,6 +3,10 @@ defmodule Receiver.Signature do
   Kick's webhook signature: RSA, SHA-256, PKCS#1 v1.5, over
   `<message_id>.<timestamp>.<raw body>`, base64 in `Kick-Event-Signature`
   (contracts/envelope.md). Pure.
+
+  Not kicksdk's `Kicksdk.Webhooks.verify/3`, unlike the rest of what we
+  know about Kick: it takes the body as text and reads it as JSON, and the
+  envelope promises any body, byte for byte, verifies (`body_base64`).
   """
 
   @doc "The exact text Kick signs."
