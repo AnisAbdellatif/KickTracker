@@ -1,6 +1,7 @@
 defmodule KickTracker.Kick.Token do
   @moduledoc """
-  The app access token (client credentials, `POST <KICK_ID_URL>/oauth/token`).
+  The app access token (client credentials, `POST <KICK_ID_URL>/oauth/token`,
+  asked and read by kicksdk).
 
   Fetched on first use and replaced ahead of expiry (Kick's last 60
   days): at 90% of its life a new one is fetched while the old one keeps
@@ -72,24 +73,23 @@ defmodule KickTracker.Kick.Token do
   end
 
   defp fetch(state) do
-    form = [
-      grant_type: "client_credentials",
-      client_id: state.client_id,
-      client_secret: state.client_secret
-    ]
+    endpoints = KickTracker.Kick.Endpoints.get(id_url: state.id_url)
+    request = Kicksdk.PublicApi.app_token_request(state.client_id, state.client_secret, endpoints)
 
-    case Req.post(state.id_url <> "/oauth/token",
-           form: form,
-           retry: false,
-           receive_timeout: 15_000,
-           headers: KickTracker.Kick.UserAgent.headers()
-         ) do
-      {:ok, %{status: 200, body: %{"access_token" => token} = body}} when is_binary(token) ->
-        {:ok, token, body["expires_in"]}
+    case KickTracker.Kick.HTTP.send(request) do
+      {:ok, status, body} ->
+        case KickTracker.Kick.HTTP.parse(&Kicksdk.PublicApi.parse_app_token/2, status, body) do
+          {:ok, %{"access_token" => token} = parsed} ->
+            {:ok, token, parsed["expires_in"]}
 
-      {:ok, %{status: status}} ->
-        Logger.error("Kick refused the token request (HTTP #{status})")
-        {:error, {:http, status}}
+          {:error, {:status, status, _excerpt}} ->
+            Logger.error("Kick refused the token request (HTTP #{status})")
+            {:error, {:http, status}}
+
+          {:error, reason} ->
+            Logger.error("Kick's token answer could not be read: #{inspect(reason)}")
+            {:error, reason}
+        end
 
       {:error, error} ->
         Logger.warning("token request failed: #{Exception.message(error)}")
