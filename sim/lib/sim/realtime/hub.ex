@@ -1,15 +1,15 @@
-defmodule Sim.Pusher.Hub do
+defmodule Sim.Realtime.Hub do
   @moduledoc """
-  Routes Pusher frames to the sockets subscribed to a channel name such as
+  Routes realtime frames to the sockets subscribed to a feed such as
   `chatrooms.123.v2`. A thin layer over a duplicate-key `Registry`: a socket
-  registers itself under each channel it subscribes to, and a broadcast
-  goes to whoever is registered. A socket that dies leaves automatically.
+  registers itself under each feed it subscribes to, and a broadcast goes
+  to whoever is registered. A socket that dies leaves automatically.
   """
 
   @doc false
   def child_spec(_opts), do: Registry.child_spec(keys: :duplicate, name: __MODULE__)
 
-  @doc "Registers the calling socket for a channel. Subscribing twice is harmless."
+  @doc "Registers the calling socket for a feed. Subscribing twice is harmless."
   @spec join(String.t()) :: :ok
   def join(channel) do
     if not Enum.any?(Registry.lookup(__MODULE__, channel), fn {pid, _} -> pid == self() end) do
@@ -19,7 +19,7 @@ defmodule Sim.Pusher.Hub do
     :ok
   end
 
-  @doc "Unregisters the calling socket from a channel."
+  @doc "Unregisters the calling socket from a feed."
   @spec leave(String.t()) :: :ok
   def leave(channel), do: Registry.unregister(__MODULE__, channel)
 
@@ -38,7 +38,7 @@ defmodule Sim.Pusher.Hub do
   @spec count() :: non_neg_integer()
   def count, do: length(Registry.lookup(__MODULE__, @everyone))
 
-  @doc "Closes every connected socket with 4200, as if Pusher asked all clients to reconnect."
+  @doc "Closes every connected socket, as a server shutting down does (3001, reconnect)."
   @spec disconnect_all() :: non_neg_integer()
   def disconnect_all do
     sockets = Registry.lookup(__MODULE__, @everyone)
@@ -46,13 +46,16 @@ defmodule Sim.Pusher.Hub do
     length(sockets)
   end
 
-  @doc "Sends already-encoded frames to every socket subscribed to the channel."
+  @doc """
+  Sends already-encoded frames to every socket subscribed to the feed:
+  publications, usually (`Sim.Realtime.Socket.publication/3`).
+  """
   @spec broadcast(String.t(), [String.t()]) :: :ok
   def broadcast(_channel, []), do: :ok
 
   def broadcast(channel, frames) do
     Registry.dispatch(__MODULE__, channel, fn entries ->
-      for {pid, _} <- entries, do: send(pid, {:pusher_frames, frames})
+      for {pid, _} <- entries, do: send(pid, {:realtime_frames, frames})
     end)
   end
 end

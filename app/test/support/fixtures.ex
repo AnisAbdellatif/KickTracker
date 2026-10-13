@@ -106,16 +106,20 @@ defmodule KickTracker.Fixtures do
 
   @doc """
   Every recorded host (`StreamHostEvent`, `ChatMoveToSupportedChannelEvent`)
-  in the Pusher fixtures, as `{event, pusher channel, data, received at}`.
+  in the chat feed fixtures (recorded while Kick's chat was Pusher; Kick's
+  event data is the same since), as `{event, feed, data, received at}`.
   """
   def recorded_hosts do
+    hosts = ["App\\Events\\StreamHostEvent", "App\\Events\\ChatMoveToSupportedChannelEvent"]
+
     for path <- Path.wildcard(Path.join(@recordings, "pusher/*.jsonl")),
         line <- File.stream!(path),
         %{"direction" => "in", "frame" => frame, "at" => at} <- [Jason.decode!(line)],
         is_binary(frame),
-        {:raw, name, channel, data} <- [KickTracker.Kick.Pusher.decode(frame)] do
+        %{"event" => name, "channel" => channel, "data" => data} <- [Jason.decode!(frame)],
+        name in hosts do
       {:ok, at, 0} = DateTime.from_iso8601(at)
-      {name, channel, data, at}
+      {name, channel, Jason.decode!(data), at}
     end
   end
 

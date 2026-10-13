@@ -30,7 +30,11 @@ defmodule Sim.Fixtures do
     |> Enum.map(&Jason.decode!(&1["request"]["body"]))
   end
 
-  @doc "Every Pusher frame recorded coming in from the server, decoded (`data` left as it came)."
+  @doc """
+  Every frame recorded coming in from Kick's chat feed while it was Pusher
+  (until 2026-10-13), decoded (`data` left as it came). Kick's own event
+  data is the same over Centrifugo; only the envelope around it changed.
+  """
   @spec pusher_frames() :: [map()]
   def pusher_frames do
     @root

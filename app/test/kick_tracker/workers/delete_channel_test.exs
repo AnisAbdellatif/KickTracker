@@ -89,7 +89,7 @@ defmodule KickTracker.Workers.DeleteChannelTest do
     Application.put_env(
       :kick_tracker,
       :kick,
-      Keyword.put(kick, :pusher_url, "ws://127.0.0.1:1/app/test?protocol=7")
+      Keyword.put(kick, :realtime_url, "http://127.0.0.1:1/api/v1/realtime")
     )
 
     on_exit(fn -> Application.put_env(:kick_tracker, :kick, kick) end)

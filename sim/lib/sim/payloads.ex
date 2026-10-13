@@ -245,7 +245,7 @@ defmodule Sim.Payloads do
   end
 
   @doc """
-  The `data` of a Pusher `App\\Events\\ChatMessageEvent`, in the shape the
+  The `data` of a chat-feed `App\\Events\\ChatMessageEvent`, in the shape the
   recordings showed. Two things differ from the API and webhooks and are
   kept on purpose: `created_at` ends in `+00:00` rather than `Z`, and a
   reply carries its original message and sender under `metadata`.
@@ -306,7 +306,7 @@ defmodule Sim.Payloads do
     }
   end
 
-  @doc "Pusher's timestamp style: whole seconds, `+00:00` instead of `Z`."
+  @doc "The chat feed's timestamp style: whole seconds, `+00:00` instead of `Z`."
   @spec iso_offset(DateTime.t()) :: String.t()
   def iso_offset(%DateTime{} = at), do: Calendar.strftime(at, "%Y-%m-%dT%H:%M:%S+00:00")
 

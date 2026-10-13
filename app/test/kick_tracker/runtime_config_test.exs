@@ -46,7 +46,6 @@ defmodule KickTracker.RuntimeConfigTest do
       "KICK_API_URL" => "http://kick.test",
       "KICK_ID_URL" => "http://kick.test",
       "KICK_V2_URL" => "http://kick.test/api/v2",
-      "PUSHER_URL" => "ws://kick.test/app/key",
       "KICK_CLIENT_ID" => "id",
       "KICK_CLIENT_SECRET" => "secret",
       "AMQP_URL" => "amqp://user:pass@localhost:5672",
@@ -54,7 +53,10 @@ defmodule KickTracker.RuntimeConfigTest do
       "PHX_URL_PORT" => nil
     }
 
-    defp prod_url(overrides) do
+    defp prod_url(overrides),
+      do: prod_config(overrides) |> get_in([:kick_tracker, KickTrackerWeb.Endpoint, :url])
+
+    defp prod_config(overrides) do
       env = Map.merge(@prod, overrides)
       saved = Map.new(env, fn {name, _} -> {name, System.get_env(name)} end)
 
@@ -63,7 +65,6 @@ defmodule KickTracker.RuntimeConfigTest do
             do: if(value, do: System.put_env(name, value), else: System.delete_env(name))
 
         Config.Reader.read!(Path.expand("../../config/runtime.exs", __DIR__), env: :prod)
-        |> get_in([:kick_tracker, KickTrackerWeb.Endpoint, :url])
       after
         for {name, value} <- saved,
             do: if(value, do: System.put_env(name, value), else: System.delete_env(name))
@@ -83,6 +84,12 @@ defmodule KickTracker.RuntimeConfigTest do
                [host: "localhost", port: 8080, scheme: "http"]
 
       assert prod_url(%{"PHX_URL_SCHEME" => "http"})[:port] == 80
+    end
+
+    test "the chat feed's endpoints default to Kick's own, so older secrets still start" do
+      realtime = &get_in(prod_config(&1), [:kick_tracker, :kick, :realtime_url])
+      assert realtime.(%{"KICK_REALTIME_URL" => nil}) == "https://web.kick.com/api/v1/realtime"
+      assert realtime.(%{"KICK_REALTIME_URL" => "http://kick.test/rt"}) == "http://kick.test/rt"
     end
 
     test "refuses a scheme that isn't http or https" do

@@ -231,7 +231,7 @@ defmodule KickTracker.Tracking.FollowersSimTest do
 end
 
 defmodule KickTracker.Tracking.ChatSimTest do
-  @moduledoc "Chat from the fake Kick's Pusher, through the socket, into the chat tables."
+  @moduledoc "Chat from the fake Kick's realtime server, through the socket, into the chat tables."
 
   use KickTracker.SimCase
   @moduletag :capture_log
@@ -240,21 +240,33 @@ defmodule KickTracker.Tracking.ChatSimTest do
   alias KickTracker.Channels
   alias KickTracker.Tracking.{ChannelServer, ChatSocket, Manager}
 
-  setup do
-    start_sim([[slug: "livestreamer", schedule: :always]])
+  setup context do
+    start_sim([[slug: "livestreamer", schedule: :always]], Map.get(context, :sim, []))
     start_collector()
     {:ok, c} = Channels.add("livestreamer")
     sim = Sim.Scenario.channel(Sim.Server.scenario(), "livestreamer")
     Manager.sync()
     # The chatroom id arrives after the channel's processes started (in
     # production, from the first follower reading): the socket connects then.
-    c = Channels.put_ids(c, nil, sim.chatroom_id)
+    # The channel id is known already (`/livestreams`), so no poll moves the
+    # socket mid-test.
+    c =
+      Channels.put_ids(
+        c,
+        if(context[:channel_id_unknown], do: nil, else: sim.channel_id),
+        sim.chatroom_id
+      )
+
     Channels.announce(c)
     poll()
     socket = KickTracker.Tracking.whereis({:chat, c.id})
     assert eventually(fn -> ChatSocket.subscribed?(socket) end)
-    %{channel: c, socket: socket}
+    %{channel: c, socket: socket, sim: sim}
   end
+
+  # A publication on one of the channel's feeds, as Kick sends it.
+  defp publish(feed, name, data),
+    do: Sim.Realtime.Hub.broadcast(feed, [Sim.Realtime.Socket.publication(feed, name, data)])
 
   defp say(sender, text \\ "hello"),
     do: sim_ctl(:post, "/channels/livestreamer/chat", %{"content" => text, "sender_id" => sender})
@@ -322,13 +334,7 @@ defmodule KickTracker.Tracking.ChatSimTest do
 
       topic = "chatrooms.#{c.chatroom_id}.v2"
 
-      Sim.Pusher.Hub.broadcast(topic, [
-        Jason.encode!(%{
-          "event" => "App\\Events\\SomethingElse",
-          "channel" => topic,
-          "data" => ~s({"opaque":1})
-        })
-      ])
+      publish(topic, "App\\Events\\SomethingElse", ~s({"opaque":1}))
 
       assert eventually(fn ->
                flush(c)
@@ -371,10 +377,6 @@ defmodule KickTracker.Tracking.ChatSimTest do
   test "a host is stored with who and how many; other unknown events are not", %{channel: c} do
     topic = "chatrooms.#{c.chatroom_id}.v2"
 
-    frame = fn name, data ->
-      Jason.encode!(%{"event" => name, "channel" => topic, "data" => Jason.encode!(data)})
-    end
-
     host = %{
       "chatroom_id" => c.chatroom_id,
       "host_username" => "SomeHost",
@@ -382,10 +384,8 @@ defmodule KickTracker.Tracking.ChatSimTest do
       "optional_message" => "hello"
     }
 
-    Sim.Pusher.Hub.broadcast(topic, [
-      frame.("App\\Events\\StreamHostEvent", host),
-      frame.("App\\Events\\SomethingElse", %{"x" => 1})
-    ])
+    publish(topic, "App\\Events\\StreamHostEvent", Jason.encode!(host))
+    publish(topic, "App\\Events\\SomethingElse", Jason.encode!(%{"x" => 1}))
 
     assert eventually(fn -> rows("channel_events", ["id"]) != [] end)
     settle()
@@ -403,7 +403,7 @@ defmodule KickTracker.Tracking.ChatSimTest do
   end
 
   test "a dropped connection is a recorded gap, then chat resumes", %{channel: c, socket: socket} do
-    sim_ctl(:post, "/pusher/disconnect")
+    sim_ctl(:post, "/realtime/disconnect")
     assert eventually(fn -> not ChatSocket.subscribed?(socket) end)
     assert eventually(fn -> ChatSocket.subscribed?(socket) end)
 
@@ -430,7 +430,7 @@ defmodule KickTracker.Tracking.ChatSimTest do
     # Before, every successful subscription reset the backoff to 1s, so a
     # server that accepted and then dropped was retried every second or two.
     for expected <- [2_000, 4_000] do
-      sim_ctl(:post, "/pusher/disconnect")
+      sim_ctl(:post, "/realtime/disconnect")
       assert eventually(fn -> not ChatSocket.subscribed?(socket) end)
       assert eventually(fn -> ChatSocket.subscribed?(socket) end, 200)
       assert :sys.get_state(socket).backoff_ms == expected
@@ -473,5 +473,47 @@ defmodule KickTracker.Tracking.ChatSimTest do
 
     flush(c)
     assert chat_coverage() == [true, false, true]
+  end
+
+  @tag :channel_id_unknown
+  test "the channel's id, learnt from a poll, adds its feeds: a host leaving arrives there", %{
+    channel: c,
+    sim: sim,
+    socket: socket
+  } do
+    feed = "channel.#{sim.channel_id}"
+    assert eventually(fn -> Sim.Realtime.Hub.listened?(feed) end, 200)
+    assert eventually(fn -> ChatSocket.subscribed?(socket) end, 200)
+    assert :sys.get_state(socket).channel.kick_channel_id == sim.channel_id
+
+    hosting = %{
+      "slug" => "otherstreamer",
+      "hosted" => %{"id" => 1, "slug" => "otherstreamer", "username" => "OtherStreamer"}
+    }
+
+    publish(feed, "App\\Events\\ChatMoveToSupportedChannelEvent", Jason.encode!(hosting))
+    assert eventually(fn -> rows("channel_events", ["id"]) != [] end)
+    settle()
+
+    assert [%{channel_id: id, kind: "hosting", other_channel: "otherstreamer", payload: payload}] =
+             rows("channel_events", ["id"])
+
+    assert id == c.id
+    assert payload["pusher_channel"] == feed
+  end
+
+  @tag sim: [realtime: [ttl_s: 2]]
+  test "a token about to run out is refreshed, and the connection stays", %{
+    channel: c,
+    socket: socket
+  } do
+    session = :sys.get_state(socket).session
+    Process.sleep(3_500)
+
+    # The same connection: no reconnect, no gap.
+    assert :sys.get_state(socket).session == session
+    assert ChatSocket.subscribed?(socket)
+    flush(c)
+    assert chat_coverage() == [true]
   end
 end

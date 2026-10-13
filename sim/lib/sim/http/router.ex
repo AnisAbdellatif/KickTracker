@@ -1,14 +1,19 @@
 defmodule Sim.Http.Router do
   @moduledoc """
   The fake Kick's HTTP side. One port serves what the real Kick spreads over
-  three hosts, so a client points `KICK_ID_URL`, `KICK_API_URL` and
-  `KICK_V2_URL` at the same base:
+  several hosts, so a client points `KICK_ID_URL`, `KICK_API_URL`,
+  `KICK_V2_URL` and `KICK_REALTIME_URL` at the same base:
 
     * `POST /oauth/token` — app access tokens (id.kick.com)
     * `GET /public/v1/public-key`, `/channels`, `/livestreams`,
       and `/events/subscriptions` (api.kick.com)
     * `GET /api/v2/channels/:slug` — the private endpoint (kick.com)
-    * `GET /app/:key` — the Pusher websocket (ws-us2.pusher.com)
+    * `POST /api/v1/realtime/connection`,
+      `/api/v1/realtime/channels/:id/chat/connection` and
+      `/api/v1/realtime/auth/connection` — where the chat is served and a
+      guest token for it (web.kick.com)
+    * `GET /connection/websocket` — the chat's Centrifugo websocket
+      (realtime.<region>.platform.kick.com)
 
   It copies the behaviour the recordings showed, not just the happy path: a
   missing token is 401, an unknown slug fails the whole request with 400,
@@ -110,14 +115,39 @@ defmodule Sim.Http.Router do
     end)
   end
 
-  # Pusher, on the same port. The app key is checked the way Pusher does:
-  # a wrong one gets an error frame and a 4001 close, not an HTTP error.
-  get "/app/:key" do
-    conn
-    |> WebSockAdapter.upgrade(Sim.Pusher.Socket, %{key_ok?: key == Server.pusher().app_key},
-      timeout: 3_600_000
-    )
-    |> halt()
+  # Kick's realtime chat, on the same port: where to connect (the general
+  # answer and a channel's are the same here, one region), a guest token,
+  # then the websocket.
+  post "/api/v1/realtime/connection" do
+    realtime_connection(conn)
+  end
+
+  post "/api/v1/realtime/channels/:id/chat/connection" do
+    realtime_connection(conn)
+  end
+
+  post "/api/v1/realtime/auth/connection" do
+    case conn.body_params do
+      %{"client_id" => id} when is_binary(id) and id != "" ->
+        json(conn, 200, %{
+          "data" => %{"token" => Server.issue_realtime_token()},
+          "message" => "success"
+        })
+
+      _ ->
+        json(conn, 400, Payloads.error("Invalid request"))
+    end
+  end
+
+  # Kick's server refuses a handshake from anywhere but kick.com.
+  get "/connection/websocket" do
+    if get_req_header(conn, "origin") == ["https://kick.com"] do
+      conn
+      |> WebSockAdapter.upgrade(Sim.Realtime.Socket, %{}, timeout: 3_600_000)
+      |> halt()
+    else
+      conn |> send_resp(403, "") |> halt()
+    end
   end
 
   # Channels' pictures and thumbnails: a solid colour per name.
@@ -165,6 +195,18 @@ defmodule Sim.Http.Router do
       {:ok, channels} ->
         json(conn, 200, Payloads.ok(Enum.map(channels, &Payloads.channel(&1, at))))
     end
+  end
+
+  defp realtime_connection(conn) do
+    url = "ws://#{conn.host}:#{conn.port}/connection/websocket"
+
+    json(conn, 200, %{
+      "data" => %{
+        "connections" => [%{"provider" => "centrifugo", "credentials" => %{"url" => url}}],
+        "mode" => "websocket"
+      },
+      "message" => "success"
+    })
   end
 
   defp collect(keys, lookup) do

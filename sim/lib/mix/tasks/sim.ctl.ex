@@ -15,9 +15,9 @@ defmodule Mix.Tasks.Sim.Ctl do
       mix sim.ctl chat <channel> "hello chat"
       mix sim.ctl webhooks http://localhost:4040/
       mix sim.ctl webhooks --drop-next 3
-      mix sim.ctl faults --drop 0.1 --duplicate 0.05 --pusher-disconnect 30
+      mix sim.ctl faults --drop 0.1 --duplicate 0.05 --realtime-disconnect 30
       mix sim.ctl faults --clear
-      mix sim.ctl disconnect                     # close every Pusher socket (4200)
+      mix sim.ctl disconnect                     # close every chat socket (3001)
       mix sim.ctl expire-tokens
 
   `--url` points at another simulator (default `http://127.0.0.1:4050`).
@@ -42,7 +42,7 @@ defmodule Mix.Tasks.Sim.Ctl do
     drop_next: :integer,
     drop: :float,
     duplicate: :float,
-    pusher_disconnect: :float,
+    realtime_disconnect: :float,
     clear: :boolean
   ]
 
@@ -137,12 +137,12 @@ defmodule Mix.Tasks.Sim.Ctl do
         compact(%{
           "drop_webhooks" => opts[:drop],
           "duplicate_webhooks" => opts[:duplicate],
-          "pusher_disconnect_after_s" => opts[:pusher_disconnect]
+          "realtime_disconnect_after_s" => opts[:realtime_disconnect]
         })}}
     end
   end
 
-  def request(["disconnect"], _opts), do: {:ok, {:post, "/pusher/disconnect", %{}}}
+  def request(["disconnect"], _opts), do: {:ok, {:post, "/realtime/disconnect", %{}}}
   def request(["expire-tokens"], _opts), do: {:ok, {:post, "/tokens/expire", %{}}}
   def request([], _opts), do: {:error, "which command?"}
   def request(words, _opts), do: {:error, "unknown command: #{Enum.join(words, " ")}"}
@@ -204,7 +204,7 @@ defmodule Mix.Tasks.Sim.Ctl do
     )
 
     Mix.shell().info(
-      "pusher: #{state["pusher"]["sockets"]} sockets; faults: #{inspect(state["faults"])}"
+      "realtime: #{state["realtime"]["sockets"]} sockets; faults: #{inspect(state["faults"])}"
     )
   end
 

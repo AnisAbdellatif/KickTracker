@@ -15,15 +15,9 @@ defmodule Sim.Server do
   @key {__MODULE__, :state}
   @tokens __MODULE__.Tokens
 
-  # Kick's real Pusher app key, so pointing PUSHER_URL at the simulator only
-  # changes the host. `activity_timeout` is what the recording showed; the
-  # server pings on its own schedule and drops a client that misses a pong.
-  @pusher_defaults %{
-    app_key: "32cbd69e4b950bf97679",
-    activity_timeout_s: 120,
-    ping_ms: 60_000,
-    disconnect_after_ms: nil
-  }
+  # The realtime server's ping interval and token lifetime, as the
+  # recording showed (25s, 45 minutes).
+  @realtime_defaults %{ping_s: 25, ttl_s: 2_700, disconnect_after_ms: nil}
 
   @type state :: %{scenario: Scenario.t(), clock: Clock.t(), keys: Keys.t()}
 
@@ -35,10 +29,11 @@ defmodule Sim.Server do
     scenario = Keyword.get(opts, :scenario) || Scenario.new()
     clock = Keyword.get(opts, :clock) || Clock.new()
     keys = Keyword.get(opts, :keys) || Keys.generate()
-    pusher = Map.merge(@pusher_defaults, Map.new(Keyword.get(opts, :pusher, [])))
+    realtime = Map.merge(@realtime_defaults, Map.new(Keyword.get(opts, :realtime, [])))
 
     :ets.new(@tokens, [:set, :public, :named_table, read_concurrency: true])
-    :persistent_term.put(@key, %{scenario: scenario, clock: clock, keys: keys, pusher: pusher})
+
+    :persistent_term.put(@key, %{scenario: scenario, clock: clock, keys: keys, realtime: realtime})
 
     {:ok, %{}}
   end
@@ -59,9 +54,9 @@ defmodule Sim.Server do
   @spec private_key() :: :public_key.rsa_private_key()
   def private_key, do: state().keys.private
 
-  @doc "The fake Pusher's settings: app key, ping interval, disconnect fault."
-  @spec pusher() :: map()
-  def pusher, do: state().pusher
+  @doc "The fake realtime server's settings: ping interval, token lifetime, disconnect fault."
+  @spec realtime() :: map()
+  def realtime, do: state().realtime
 
   @doc "Simulated time now."
   @spec now() :: DateTime.t()
@@ -84,7 +79,20 @@ defmodule Sim.Server do
     token
   end
 
-  @doc "Expires every token issued so far, so a client has to fetch a new one."
+  @doc "Issues a realtime (chat) guest token, valid for the server's `ttl_s`."
+  @spec issue_realtime_token() :: String.t()
+  def issue_realtime_token do
+    token = 32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+    :ets.insert(@tokens, {{:realtime, token}, System.system_time(:second) + realtime().ttl_s})
+    token
+  end
+
+  @doc "Whether this realtime token was issued here and hasn't expired."
+  @spec valid_realtime_token?(term()) :: boolean()
+  def valid_realtime_token?(token) when is_binary(token), do: valid_token?({:realtime, token})
+  def valid_realtime_token?(_), do: false
+
+  @doc "Expires every token issued so far, app and realtime, so a client has to fetch a new one."
   @spec expire_tokens() :: :ok
   def expire_tokens do
     :ets.delete_all_objects(@tokens)

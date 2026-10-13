@@ -30,7 +30,8 @@ defmodule KickTracker.Kick.Endpoints do
     %{
       api: url(kick, :api_url) <> "/public/v1",
       id: url(kick, :id_url),
-      website: kick |> url(:v2_url) |> String.replace_suffix("/api/v2", ""),
+      website:
+        kick |> url(:v2_url) |> String.trim_trailing("/") |> String.replace_suffix("/api/v2", ""),
       realtime: url(kick, :realtime_url)
     }
   end

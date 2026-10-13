@@ -22,8 +22,8 @@ defmodule Mix.Tasks.Record.Subscribe do
 
   alias Sim.Recorder.{Config, Kick, Store}
 
-  # Every event type Kick documents except chat, which is recorded over
-  # Pusher instead (project.md §2.4); `--with-chat` adds it.
+  # Every event type Kick documents except chat, which the tracker reads
+  # from the chat feed instead (project.md §2.4); `--with-chat` adds it.
   @events Enum.reject(Sim.Webhooks.event_types(), &(&1 == "chat.message.sent"))
 
   @switches [slugs: :string, with_chat: :boolean, list: :boolean, delete_all: :boolean]
