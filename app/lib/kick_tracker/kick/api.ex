@@ -8,9 +8,15 @@ defmodule KickTracker.Kick.API do
   token and retries once with a new one; a 429 is retried after Kick's
   `retry-after`, capped at 10s, a couple of times at most (a poll cycle
   can't be stalled by a long wait).
+
+  The requests and the reading of the answers are kicksdk's
+  (`Kicksdk.PublicApi`); what comes back keeps Kick's own field names
+  (`viewer_count`, `started_at`, `active_subscribers_count`, …), with
+  anything Kick left out as nil.
   """
 
-  alias KickTracker.Kick.Token
+  alias KickTracker.Kick.{Endpoints, HTTP, Token}
+  alias Kicksdk.PublicApi
 
   @max_batch 50
 
@@ -19,14 +25,22 @@ defmodule KickTracker.Kick.API do
   def livestreams([]), do: {:ok, []}
 
   def livestreams(user_ids) when length(user_ids) <= @max_batch,
-    do: get("/livestreams", Enum.map(user_ids, &{"broadcaster_user_id", &1}))
+    do:
+      request(
+        &first(PublicApi.livestreams_requests(&1, user_ids, &2)),
+        &PublicApi.parse_livestreams/2
+      )
 
   @doc "Channels by broadcaster id."
   @spec channels([integer()]) :: {:ok, [map()]} | {:error, term()}
   def channels([]), do: {:ok, []}
 
   def channels(user_ids) when length(user_ids) <= @max_batch,
-    do: get("/channels", Enum.map(user_ids, &{"broadcaster_user_id", &1}))
+    do:
+      request(
+        &PublicApi.channels_by_ids_request(&1, user_ids, &2),
+        &PublicApi.parse_channels/2
+      )
 
   @doc """
   One channel by slug. An unknown slug is `{:error, :not_found}` (Kick
@@ -34,7 +48,10 @@ defmodule KickTracker.Kick.API do
   """
   @spec channel_by_slug(String.t()) :: {:ok, map()} | {:error, term()}
   def channel_by_slug(slug) do
-    case get("/channels", [{"slug", slug}]) do
+    case request(
+           &PublicApi.channels_by_slugs_request(&1, [slug], &2),
+           &PublicApi.parse_channels/2
+         ) do
       {:ok, [channel | _]} -> {:ok, channel}
       {:ok, []} -> {:error, :not_found}
       {:error, {:http, 400, _}} -> {:error, :not_found}
@@ -44,19 +61,17 @@ defmodule KickTracker.Kick.API do
 
   @doc "Every webhook subscription the app has."
   @spec subscriptions() :: {:ok, [map()]} | {:error, term()}
-  def subscriptions, do: get("/events/subscriptions", [])
+  def subscriptions,
+    do: request(&PublicApi.subscriptions_request/2, &PublicApi.parse_subscriptions/2)
 
   @doc "Subscribes one broadcaster to these event types (version 1)."
   @spec subscribe(integer(), [String.t()]) :: {:ok, [map()]} | {:error, term()}
-  def subscribe(user_id, events) do
-    body = %{
-      "broadcaster_user_id" => user_id,
-      "events" => Enum.map(events, &%{"name" => &1, "version" => 1}),
-      "method" => "webhook"
-    }
-
-    request(:post, "/events/subscriptions", json: body)
-  end
+  def subscribe(user_id, events),
+    do:
+      request(
+        &PublicApi.subscribe_request(&1, user_id, Enum.map(events, fn e -> {e, 1} end), &2),
+        &PublicApi.parse_subscriptions/2
+      )
 
   @doc """
   Removes subscriptions by id, #{@max_batch} per request: Kick answered 400
@@ -64,53 +79,63 @@ defmodule KickTracker.Kick.API do
   fails; the ones before it are removed.
   """
   @spec unsubscribe([String.t()]) :: :ok | {:error, term()}
+  def unsubscribe([]), do: :ok
+
   def unsubscribe(ids) do
     ids
     |> Enum.chunk_every(@max_batch)
     |> Enum.reduce_while(:ok, fn batch, :ok ->
-      case request(:delete, "/events/subscriptions", params: Enum.map(batch, &{"id", &1})) do
+      case request(&first(PublicApi.unsubscribe_requests(&1, batch, &2)), &accepted/2) do
         {:ok, _} -> {:cont, :ok}
         error -> {:halt, error}
       end
     end)
   end
 
-  defp get(path, params), do: request(:get, path, params: params)
+  # Kick answers a removal with nothing to read.
+  defp accepted(status, _body) when status in 200..299, do: {:ok, nil}
+  defp accepted(status, body), do: {:error, {:status, status, String.slice(body, 0, 200)}}
 
-  defp request(method, path, opts, retried? \\ false) do
-    with {:ok, token} <- Token.get() do
-      url = Application.fetch_env!(:kick_tracker, :kick)[:api_url] <> "/public/v1" <> path
-
+  # `build` makes the request from the token and the endpoints; `parse`
+  # reads the answer (both kicksdk's).
+  defp request(build, parse, retried? \\ false) do
+    with {:ok, token} <- Token.get(),
+         {:ok, request} <- built(build.(token, Endpoints.get())) do
       result =
-        Req.request(
-          [
-            method: method,
-            url: url,
-            auth: {:bearer, token},
-            headers: KickTracker.Kick.UserAgent.headers(),
-            receive_timeout: 15_000,
-            retry: &retry?/2,
-            max_retries: 2,
-            retry_log_level: :warning
-          ] ++ opts
+        HTTP.send(request,
+          retry: &retry?/2,
+          max_retries: 2,
+          retry_log_level: :warning
         )
 
       case result do
-        {:ok, %{status: status, body: body}} when status in 200..299 ->
-          {:ok, data(body)}
-
-        {:ok, %{status: 401}} when not retried? ->
+        {:ok, 401, _body} when not retried? ->
           Token.invalidate(token)
-          request(method, path, opts, true)
+          request(build, parse, true)
 
-        {:ok, %{status: status, body: body}} ->
-          {:error, {:http, status, body}}
+        {:ok, status, body} ->
+          case parse.(status, body) do
+            {:ok, data} -> {:ok, data}
+            # Kept as before kicksdk: callers and logs know `{:http, …}`.
+            {:error, {:status, status, excerpt}} -> {:error, {:http, status, excerpt}}
+            {:error, reason} -> {:error, reason}
+          end
 
         {:error, error} ->
           {:error, error}
       end
     end
   end
+
+  # A builder that can refuse its arguments returns a result; the others,
+  # the request itself.
+  defp built({:ok, request}), do: {:ok, request}
+  defp built({:error, reason}), do: {:error, reason}
+  defp built(%{} = request), do: {:ok, request}
+
+  # The one request of a batched builder given at most one batch of ids.
+  defp first({:ok, [request | _]}), do: {:ok, request}
+  defp first({:error, reason}), do: {:error, reason}
 
   # 429 and transient network errors are worth a retry; anything else is
   # answered at once.
@@ -128,8 +153,4 @@ defmodule KickTracker.Kick.API do
 
   defp retry?(_request, %Req.Response{}), do: false
   defp retry?(_request, %{__exception__: true}), do: true
-
-  defp data(%{"data" => data}), do: data
-  defp data(""), do: nil
-  defp data(other), do: other
 end

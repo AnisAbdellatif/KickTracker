@@ -2,7 +2,8 @@ defmodule KickTracker.Kick.PublicKey do
   @moduledoc """
   Kick's webhook signing key, for checking each envelope again: given in
   configuration (`KICK_PUBLIC_KEY`), or fetched from
-  `GET <KICK_API_URL>/public/v1/public-key` and kept.
+  `GET <KICK_API_URL>/public/v1/public-key` (asked and read by kicksdk) and
+  kept.
 
   Reading the key never waits: it lives in `:persistent_term`, so a slow
   or unreachable Kick API can't hold up the consumer. Fetches run in a
@@ -93,9 +94,11 @@ defmodule KickTracker.Kick.PublicKey do
   defp start_fetch(%{api_url: nil} = state), do: state
 
   defp start_fetch(state) do
-    url = state.api_url <> "/public/v1/public-key"
+    request =
+      Kicksdk.PublicApi.public_key_request(KickTracker.Kick.Endpoints.get(api_url: state.api_url))
+
     timeout = state.fetch_timeout_ms
-    task = Task.async(fn -> fetch(url, timeout) end)
+    task = Task.async(fn -> fetch(request, timeout) end)
     %{state | task: task, fetched_at: System.monotonic_time(:millisecond)}
   end
 
@@ -113,21 +116,20 @@ defmodule KickTracker.Kick.PublicKey do
   end
 
   # Linked to this process: it must not raise.
-  defp fetch(url, timeout) do
-    case Req.get(url,
-           retry: false,
-           receive_timeout: timeout,
-           connect_options: [timeout: timeout],
-           headers: KickTracker.Kick.UserAgent.headers()
-         ) do
-      {:ok, %{status: 200, body: %{"data" => %{"public_key" => pem}}}} when is_binary(pem) ->
-        {:ok, pem}
-
-      other ->
-        {:error, {url, other}}
+  defp fetch(%{"url" => url} = request, timeout) do
+    with {:ok, status, body} <-
+           KickTracker.Kick.HTTP.send(request,
+             receive_timeout: timeout,
+             connect_options: [timeout: timeout]
+           ),
+         {:ok, pem} <-
+           Kicksdk.PublicApi.parse_public_key(status, body) do
+      {:ok, pem}
+    else
+      other -> {:error, {url, other}}
     end
   rescue
-    error -> {:error, {url, Exception.message(error)}}
+    error -> {:error, {request["url"], Exception.message(error)}}
   end
 
   defp recently_fetched?(%{fetched_at: nil}), do: false

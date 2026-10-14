@@ -130,7 +130,7 @@ load_kick_env() {
   . "$KICK_ENV"
   set +a
   local var
-  for var in KICK_API_URL KICK_ID_URL KICK_V2_URL PUSHER_URL KICK_CLIENT_ID KICK_CLIENT_SECRET; do
+  for var in KICK_API_URL KICK_ID_URL KICK_V2_URL KICK_REALTIME_URL KICK_CLIENT_ID KICK_CLIENT_SECRET; do
     case ${!var:-CHANGE_ME} in *CHANGE_ME*) echo "$KICK_ENV: $var isn't filled in" >&2 && return 1 ;; esac
   done
   local production=""

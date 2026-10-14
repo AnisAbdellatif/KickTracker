@@ -11,12 +11,10 @@ defmodule Sim.Recorder.Config do
   @defaults %{
     "KICK_API_URL" => "https://api.kick.com",
     "KICK_ID_URL" => "https://id.kick.com",
-    "KICK_V2_URL" => "https://kick.com/api/v2",
-    "PUSHER_URL" =>
-      "wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false"
+    "KICK_V2_URL" => "https://kick.com/api/v2"
   }
 
-  defstruct [:api_url, :id_url, :v2_url, :pusher_url, :client_id, :client_secret, :contact]
+  defstruct [:api_url, :id_url, :v2_url, :client_id, :client_secret, :contact]
 
   @type t :: %__MODULE__{}
 
@@ -29,7 +27,6 @@ defmodule Sim.Recorder.Config do
       api_url: get("KICK_API_URL"),
       id_url: get("KICK_ID_URL"),
       v2_url: get("KICK_V2_URL"),
-      pusher_url: get("PUSHER_URL"),
       client_id: System.get_env("KICK_CLIENT_ID"),
       client_secret: System.get_env("KICK_CLIENT_SECRET"),
       contact: System.get_env("KICK_CONTACT")

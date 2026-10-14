@@ -13,7 +13,7 @@ defmodule Sim.Channel.Server do
 
   alias Sim.Channel.Timeline
   alias Sim.{Chat, Payloads, Server, Webhooks}
-  alias Sim.Pusher.{Hub, Socket}
+  alias Sim.Realtime.{Hub, Socket}
 
   # A fast clock can cover a lot of chat in one tick; past this, the rest is
   # dropped rather than flooding the sockets (like a client falling behind).
@@ -101,7 +101,7 @@ defmodule Sim.Channel.Server do
     {%{state | timeline: timeline, chat_at: now, delivered: Enum.take(delivered, 500)}, emitted}
   end
 
-  # The minute's chat goes to Pusher subscribers, and as `chat.message.sent`
+  # The minute's chat goes to the chat feed's subscribers, and as `chat.message.sent`
   # webhooks to an app that subscribed to those instead.
   defp chat(_channel, nil, _from, _now), do: :ok
 
@@ -116,7 +116,7 @@ defmodule Sim.Channel.Server do
         frames =
           Enum.map(messages, fn message ->
             data = channel |> Payloads.chat_message(message) |> Jason.encode!()
-            Socket.frame("App\\Events\\ChatMessageEvent", data, topic)
+            Socket.publication(topic, "App\\Events\\ChatMessageEvent", data)
           end)
 
         Hub.broadcast(topic, frames)

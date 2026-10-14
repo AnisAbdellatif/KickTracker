@@ -13,7 +13,7 @@ defmodule Sim.Control do
   alias Sim.{Payloads, Scenario, Schedule}
   alias Sim.Scenario.Channel
 
-  @known_faults ~w(drop_webhooks duplicate_webhooks pusher_disconnect_after_s)a
+  @known_faults ~w(drop_webhooks duplicate_webhooks realtime_disconnect_after_s)a
 
   @type error :: {:error, atom() | {atom(), term()}}
 

@@ -1,20 +1,34 @@
 defmodule KickTracker.Tracking.ChatSocket do
   @moduledoc """
-  One channel's connection to Kick's chat feed (Pusher, project.md §2.4,
-  §10).
+  One channel's connection to Kick's chat feed (Kick's realtime server,
+  Centrifugo since 2026-10-13; project.md §2.4, §10).
 
-  Subscribes to the chatroom (and to the channel's own topic once its id is
-  known, where raids and hosts may appear), answers pings, pings when the
-  line has been quiet for Pusher's activity timeout, and hands each
-  message's sender and time to the `ChannelServer`. No text is kept.
+  kicksdk knows the protocol (KICK.md): this process asks where the
+  channel's chat is served and for a guest token (`Kicksdk.Realtime`, sent
+  with Req), opens the websocket with the Origin Kick requires, and drives
+  a `Kicksdk.Realtime.Session` with what arrives, doing what it says: send
+  a frame, refresh the token, close, hand an event on. The session answers
+  Kick's pings and says when the line has gone quiet.
+
+  It subscribes to the feeds kicksdk lists for the chatroom (and for the
+  channel once its id is known, where hosts leaving appear), and hands
+  each message's sender and time to the `ChannelServer`. No text is kept.
 
   A connection that doesn't complete its upgrade within 15s is dropped
   and retried, like any other failure.
 
-  It reconnects on its own with backoff (1s doubling to 30s, with jitter so
-  sockets dropped together don't come back together); the backoff only
+  It reconnects on its own, never giving up, each time as a new client (a
+  new client id, so a new guest token and connection request). An
+  ordinary drop waits with backoff (1s doubling to 30s, with jitter so
+  sockets dropped together don't come back together); that backoff only
   resets once a connection has stayed up for a minute, so a server that
-  accepts and then drops at once isn't retried every second. It records
+  accepts and then drops at once isn't retried every second. A terminal
+  close (Kick doesn't want this client back as it was: a refused token, a
+  limit, a ban; a session `close` that says so, or a socket close code
+  kicksdk says it of) waits what kicksdk's `Kicksdk.Realtime.Backoff`
+  says, 5 minutes, then 10, 20 and 30 for terminal closes in a row, each
+  plus up to a quarter; the chat feed subscribing ends the streak (KICK.md
+  §6.1). It records
   in `coverage` (source `chat`) when chat was being received and when not,
   so per-minute chat counts can say how complete they are: "not" at once,
   "received" through the `ChannelServer`, which writes it with the counts
@@ -23,8 +37,9 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   Until the channel's chatroom id is known (learnt from v2 by the first
   follower reading), it waits. It starts from the channel's row as it is
-  then (`ChannelSup.current/1`), and follows changes to it: an id learnt,
-  or a chatroom id that changed (it reconnects to the new chatroom).
+  then (`ChannelSup.current/1`), and follows changes to it: a chatroom id
+  that changed, or a channel id learnt, connects again with the feeds that
+  go with it (a session subscribes once, when it connects).
   """
 
   use GenServer
@@ -32,15 +47,21 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   alias KickTracker.Channels.Channel
   alias KickTracker.Collector.Journal
-  alias KickTracker.Kick.Pusher
+  alias KickTracker.Kick.{Endpoints, HTTP, UserAgent}
   alias KickTracker.Tracking.ChannelServer
+  alias Kicksdk.Realtime
+  alias Kicksdk.Realtime.{Backoff, Session}
 
   @max_backoff_ms 30_000
   @coverage_every_ms 60_000
   @coverage_gap_s 150
-  @pong_timeout_s 30
   @connect_timeout_ms 15_000
   @stable_ms 60_000
+
+  @chat_message "App\\Events\\ChatMessageEvent"
+  # Hosts (Kick's raids), kept as sent for their channel's `channel_events`
+  # (KICK.md §6.3).
+  @raw ["App\\Events\\StreamHostEvent", "App\\Events\\ChatMoveToSupportedChannelEvent"]
 
   @spec start_link(Channel.t()) :: GenServer.on_start()
   def start_link(%Channel{} = channel),
@@ -71,20 +92,23 @@ defmodule KickTracker.Tracking.ChatSocket do
        ref: nil,
        ws: nil,
        upgrade: %{},
-       subscribed: MapSet.new(),
+       # The connection's client id, and its first token until the session
+       # opens with it; the session, and the feeds it subscribes to.
+       client_id: nil,
+       token: nil,
+       session: nil,
+       feeds: [],
        backoff_ms: 1_000,
+       # kicksdk's backoff, for terminal closes only: the streak of them.
+       terminal_backoff: Backoff.new(),
        subscribed_at: nil,
-       activity_timeout_s: 120,
-       last_in: now_s(),
-       ping_sent_at: nil,
        timer: nil,
-       activity_timer: nil
+       tick_at: nil
      }}
   end
 
   @impl true
-  def handle_call(:subscribed?, _from, state),
-    do: {:reply, MapSet.member?(state.subscribed, chatroom_topic(state)), state}
+  def handle_call(:subscribed?, _from, state), do: {:reply, listening?(state), state}
 
   @impl true
   def handle_info(:connect, %{channel: %{chatroom_id: nil}} = state) do
@@ -94,29 +118,29 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   def handle_info(:connect, state) do
     state = %{state | timer: nil}
-    url = URI.parse(Application.fetch_env!(:kick_tracker, :kick)[:pusher_url])
-    {http, ws} = if url.scheme == "wss", do: {:https, :wss}, else: {:http, :ws}
-    path = (url.path || "/") <> if(url.query, do: "?" <> url.query, else: "")
+    client_id = Ecto.UUID.generate()
+    endpoints = Endpoints.get()
+    feeds = Realtime.chat_channels(state.channel.chatroom_id, state.channel.kick_channel_id)
 
-    with {:ok, conn} <-
-           Mint.HTTP.connect(http, url.host, url.port,
-             protocols: [:http1],
-             transport_opts: [timeout: 10_000]
-           ),
-         {:ok, conn, ref} <-
-           Mint.WebSocket.upgrade(ws, conn, path, KickTracker.Kick.UserAgent.headers()) do
+    with {:ok, url} <- server(state.channel, client_id, endpoints),
+         {:ok, token} <- token(client_id, endpoints),
+         {:ok, conn, ref} <- open(URI.parse(url)) do
       timeout = KickTracker.Collector.config(:chat_connect_timeout_ms, @connect_timeout_ms)
       Process.send_after(self(), {:connect_timeout, ref}, timeout)
-      {:noreply, %{state | conn: conn, ref: ref, ws: nil, upgrade: %{}, last_in: now_s()}}
-    else
-      {:error, reason} ->
-        {:noreply, reconnect(state, reason)}
 
-      # Connected, but the upgrade request couldn't be sent: the
-      # connection is ours to close.
-      {:error, conn, reason} ->
-        Mint.HTTP.close(conn)
-        {:noreply, reconnect(state, reason)}
+      {:noreply,
+       %{
+         state
+         | conn: conn,
+           ref: ref,
+           ws: nil,
+           upgrade: %{},
+           client_id: client_id,
+           token: token,
+           feeds: feeds
+       }}
+    else
+      {:error, reason} -> {:noreply, reconnect(state, reason)}
     end
   end
 
@@ -133,19 +157,13 @@ defmodule KickTracker.Tracking.ChatSocket do
       # The chatroom changed: the subscription is to the wrong room. Drop
       # it (recording the gap under the old room) and connect again now.
       old.chatroom_id != nil and channel.chatroom_id != old.chatroom_id ->
-        state =
-          if state.conn,
-            do: reconnect(%{state | channel: old}, :chatroom_changed),
-            else: state
+        {:noreply, again(state, old, :chatroom_changed)}
 
-        {:noreply,
-         %{state | channel: channel, backoff_ms: 1_000}
-         |> cancel_timer()
-         |> tap(fn _ -> send(self(), :connect) end)}
-
-      # Just learnt the channel's own topic: add it.
-      old.kick_channel_id == nil and channel.kick_channel_id != nil and state.ws != nil ->
-        {:noreply, send_text(state, Pusher.subscribe(Pusher.channel(channel.kick_channel_id)))}
+      # Just learnt the channel's id: its feeds join the subscription,
+      # which a connection can't add to. Connect again now, through the
+      # channel's own server.
+      old.kick_channel_id == nil and channel.kick_channel_id != nil and state.conn != nil ->
+        {:noreply, again(state, old, :channel_id_learnt)}
 
       true ->
         {:noreply, state}
@@ -154,7 +172,7 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   def handle_info(:coverage, state) do
     Process.send_after(self(), :coverage, @coverage_every_ms)
-    if MapSet.member?(state.subscribed, chatroom_topic(state)), do: mark(state, true)
+    if listening?(state), do: mark(state, true)
     {:noreply, state}
   end
 
@@ -165,23 +183,12 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   def handle_info({:connect_timeout, _ref}, state), do: {:noreply, state}
 
-  # Quiet line: ping, and give up on the connection if no answer comes.
-  def handle_info(:activity, %{ws: nil} = state), do: {:noreply, state}
+  # The session's clock: a quiet line, a token to refresh.
+  def handle_info(:tick, %{session: nil} = state), do: {:noreply, %{state | tick_at: nil}}
 
-  def handle_info(:activity, state) do
-    state = %{state | activity_timer: Process.send_after(self(), :activity, 10_000)}
-    quiet = now_s() - state.last_in
-
-    cond do
-      state.ping_sent_at && now_s() - state.ping_sent_at > @pong_timeout_s ->
-        {:noreply, reconnect(state, :pong_timeout)}
-
-      quiet >= state.activity_timeout_s and state.ping_sent_at == nil ->
-        {:noreply, %{send_text(state, Pusher.ping()) | ping_sent_at: now_s()}}
-
-      true ->
-        {:noreply, state}
-    end
+  def handle_info(:tick, state) do
+    state = %{state | tick_at: nil}
+    {:noreply, act(state, Session.tick(state.session, now_ms()))}
   end
 
   # Trapping exits: a linked process going down still takes this one down
@@ -208,9 +215,59 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   # --- the connection ----------------------------------------------------------
 
+  # Where the chat is served: the channel's own server once its id is
+  # known, else Kick's general one (which carries every channel's chat).
+  defp server(channel, client_id, endpoints) do
+    request =
+      if channel.kick_channel_id,
+        do: Realtime.chat_connection_request(channel.kick_channel_id, client_id, endpoints),
+        else: Realtime.connection_request(client_id, endpoints)
+
+    with {:ok, status, body} <- HTTP.send(request, receive_timeout: 10_000),
+         {:ok, connections} <- Realtime.parse_connection(status, body) do
+      case Enum.find(connections, &(&1["provider"] == "centrifugo")) do
+        %{"url" => url} when is_binary(url) -> {:ok, url}
+        _ -> {:error, :no_centrifugo_server}
+      end
+    end
+  end
+
+  # A guest token for this client id; a refresh asks for the same id.
+  defp token(client_id, endpoints) do
+    with {:ok, status, body} <-
+           HTTP.send(Realtime.token_request(client_id, endpoints), receive_timeout: 10_000) do
+      Realtime.parse_token(status, body)
+    end
+  end
+
+  # Kick refuses a handshake whose Origin isn't kick.com's.
+  defp open(%URI{} = url) do
+    {http, ws} = if url.scheme == "wss", do: {:https, :wss}, else: {:http, :ws}
+    path = (url.path || "/") <> if(url.query, do: "?" <> url.query, else: "")
+    headers = [{"origin", Realtime.required_origin()} | UserAgent.headers()]
+
+    with {:ok, conn} <-
+           Mint.HTTP.connect(http, url.host, url.port,
+             protocols: [:http1],
+             transport_opts: [timeout: 10_000]
+           ) do
+      case Mint.WebSocket.upgrade(ws, conn, path, headers) do
+        {:ok, conn, ref} ->
+          {:ok, conn, ref}
+
+        # Connected, but the upgrade request couldn't be sent: the
+        # connection is ours to close.
+        {:error, conn, reason} ->
+          Mint.HTTP.close(conn)
+          {:error, reason}
+      end
+    end
+  end
+
   # Until the upgrade is done, responses are the HTTP answer; the first
   # websocket frames can arrive in the same read as the 101 (seen on the
-  # real Kick), so whatever follows `:done` is decoded too.
+  # real Kick), so whatever follows `:done` is decoded too, once the
+  # session is open.
   defp handle_responses(%{ws: nil, ref: ref} = state, responses) do
     {upgrade, rest} = Enum.split_while(responses, &(not match?({:done, ^ref}, &1)))
 
@@ -230,8 +287,10 @@ defmodule KickTracker.Tracking.ChatSocket do
         case Mint.WebSocket.new(state.conn, ref, acc[:status], acc[:headers] || []) do
           {:ok, conn, ws} ->
             early = acc |> Map.get(:data, []) |> Enum.reverse() |> Enum.map(&{:data, ref, &1})
-            timer = Process.send_after(self(), :activity, 10_000)
-            state = %{state | conn: conn, ws: ws, upgrade: %{}, activity_timer: timer}
+            session = Session.new(state.feeds)
+            token = state.token
+            state = %{state | conn: conn, ws: ws, upgrade: %{}, session: session, token: nil}
+            state = act(state, Session.open(session, token, now_ms()))
             handle_responses(state, early ++ leftover)
 
           {:error, conn, reason} ->
@@ -254,53 +313,169 @@ defmodule KickTracker.Tracking.ChatSocket do
   end
 
   defp frame(_frame, %{conn: nil} = state), do: state
+  defp frame({:text, text}, state), do: act(state, Session.receive(state.session, text, now_ms()))
+  defp frame({:ping, data}, state), do: send_frame(state, {:pong, data})
+  defp frame({:close, code, reason}, state), do: reconnect(state, {:closed, code, reason})
+  defp frame(_other, state), do: state
 
-  defp frame({:text, text}, state) do
-    state = %{state | last_in: now_s()}
+  # What the session says to do, in order. A close ends the connection:
+  # what came after it in the same list is moot.
+  defp act(state, actions) do
+    actions
+    |> Enum.reduce(state, fn
+      _action, %{session: nil} = state -> state
+      action, state -> action(state, action)
+    end)
+    |> schedule_tick()
+  end
 
-    case Pusher.decode(text) do
-      {:connected, timeout} ->
-        state = %{state | activity_timeout_s: timeout}
-        Enum.reduce(topics(state), state, &send_text(&2, Pusher.subscribe(&1)))
+  defp action(state, %{"action" => "send", "text" => text}), do: send_frame(state, {:text, text})
 
-      {:subscribed, topic} ->
-        state = %{state | subscribed: MapSet.put(state.subscribed, topic)}
+  defp action(state, %{"action" => "close"} = close), do: reconnect(state, {:kick, close})
 
-        if topic == chatroom_topic(state) do
-          mark(state, true)
-          %{state | subscribed_at: System.monotonic_time(:millisecond)}
-        else
-          state
-        end
+  defp action(state, %{"action" => "refresh_token"}), do: refresh(state)
 
-      :ping ->
-        send_text(state, Pusher.pong())
+  defp action(state, %{"action" => "subscribed", "channel" => feed}) do
+    if feed == chat_feed(state) do
+      mark(state, true)
 
-      :pong ->
-        %{state | ping_sent_at: nil}
+      %{
+        state
+        | subscribed_at: System.monotonic_time(:millisecond),
+          terminal_backoff: Backoff.reset(state.terminal_backoff)
+      }
+    else
+      state
+    end
+  end
 
-      {:chat, _message, _text} = chat ->
-        forward(state, chat)
+  # Kick took the chat feed away, or refused it: no chat comes on this
+  # connection, and the gap is recorded now (the session no longer counts
+  # the feed as subscribed). With a code from 2500 to 2999 Kick asks for a
+  # new subscribe, which the session has already sent: "subscribed" or
+  # "subscribe_failed" follows. Another feed refused is only worth a line.
+  defp action(state, %{"action" => action, "channel" => feed} = a)
+       when action in ["unsubscribed", "subscribe_failed"] do
+    why = {a["code"], a["reason"] || a["message"]}
 
-      {:error, code, message} ->
-        Logger.warning("chat feed error for channel #{state.channel.id}: #{code} #{message}")
+    cond do
+      feed != chat_feed(state) ->
+        Logger.info(
+          "chat feed for channel #{state.channel.id}: #{feed} #{action} #{inspect(why)}"
+        )
+
         state
 
-      {:raw, name, topic, data} ->
-        to_channel(state, {:pusher_raw, name, topic, data, DateTime.utc_now()})
-        state
+      action == "unsubscribed" and a["code"] in 2500..2999 ->
+        Logger.info(
+          "chat feed for channel #{state.channel.id}: subscribing again (#{inspect(why)})"
+        )
 
-      {:other, _name, _topic, _data} = other ->
-        forward(state, other)
+        mark(state, false)
+        %{state | subscribed_at: nil}
 
-      :invalid ->
+      action == "unsubscribed" ->
+        mark(state, false)
+        reconnect(state, {:unsubscribed, why})
+
+      true ->
+        reconnect(state, {:subscribe_failed, why})
+    end
+  end
+
+  defp action(state, %{"action" => "event"} = event), do: event(state, event)
+  defp action(state, _connected), do: state
+
+  # If no new token can be had, nothing: Kick ends the connection when the
+  # old one runs out, and the reconnect gets a new one.
+  defp refresh(state) do
+    case token(state.client_id, Endpoints.get()) do
+      {:ok, token} ->
+        Session.refresh(state.session, token, now_ms())
+        |> Enum.reduce(state, fn
+          _action, %{session: nil} = state -> state
+          action, state -> action(state, action)
+        end)
+
+      {:error, reason} ->
+        Logger.warning(
+          "chat feed for channel #{state.channel.id}: no new token (#{inspect(reason)})"
+        )
+
         state
     end
   end
 
-  defp frame({:ping, data}, state), do: send_frame(%{state | last_in: now_s()}, {:pong, data})
-  defp frame({:close, code, reason}, state), do: reconnect(state, {:closed, code, reason})
-  defp frame(_other, state), do: %{state | last_in: now_s()}
+  # --- events -----------------------------------------------------------------
+
+  # A chat message on the chatroom's chat feed, read by kicksdk. One that
+  # can't be counted (no sender id or time) is dropped.
+  defp event(state, %{"name" => @chat_message, "channel" => feed, "event" => message} = event) do
+    if feed == chat_feed(state) do
+      case chat(message) do
+        {:ok, counted, text} -> forward(state, {:chat, counted, text})
+        :invalid -> state
+      end
+    else
+      other(state, event)
+    end
+  end
+
+  defp event(state, %{"name" => name, "channel" => feed, "data" => data}) when name in @raw do
+    to_channel(state, {:pusher_raw, name, feed, data(data), DateTime.utc_now()})
+    state
+  end
+
+  defp event(state, event), do: other(state, event)
+
+  defp other(state, %{"name" => name, "channel" => feed, "data" => data}),
+    do: forward(state, {:other, name, feed, data(data)})
+
+  # The counted part (sender, message id, time), which is all that goes
+  # further for most channels, and the text and reply target, which only a
+  # channel with chat logging on keeps (§12.8, AGENTS.md §7). Chat times
+  # end in `+00:00`, not `Z`.
+  defp chat(%{"type" => "chat_message"} = m) do
+    with %{"id" => sender_id} = sender when is_integer(sender_id) <- m["sender"],
+         created_at when is_binary(created_at) <- m["created_at"],
+         {:ok, at, _} <- DateTime.from_iso8601(created_at) do
+      reply = m["reply_to"] || %{}
+
+      {:ok,
+       %{
+         id: m["id"],
+         sender_id: sender_id,
+         username: sender["username"],
+         at: KickTracker.Metrics.Sessionizer.norm(at)
+       },
+       %{
+         content: string(m["content"]),
+         type: string(m["kind"]),
+         reply_to_message_id: string(reply["message_id"]),
+         reply_to_user_id: integer(reply["sender_id"])
+       }}
+    else
+      _ -> :invalid
+    end
+  end
+
+  defp chat(_unknown), do: :invalid
+
+  defp string(v) when is_binary(v), do: v
+  defp string(_), do: nil
+  defp integer(v) when is_integer(v), do: v
+  defp integer(_), do: nil
+
+  # Kick's event data as Kick sent it: a JSON string, decoded (or, the odd
+  # time, already an object). What doesn't decode is kept as it came.
+  defp data(data) when is_binary(data) do
+    case Jason.decode(data) do
+      {:ok, value} when value not in [nil, false] -> value
+      _ -> data
+    end
+  end
+
+  defp data(data), do: data
 
   # A message's text, and the data of events we don't parse, go further
   # only for a channel with chat logging on (§12.8); for the rest they end
@@ -310,27 +485,22 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   defp forward(state, {:chat, message, _text}), do: tap(state, &to_channel(&1, {:chat, message}))
 
-  defp forward(%{channel: %{chat_log: true}} = state, {:other, name, topic, data}),
-    do: tap(state, &to_channel(&1, {:pusher_other, name, topic, data, DateTime.utc_now()}))
+  defp forward(%{channel: %{chat_log: true}} = state, {:other, name, feed, data}),
+    do: tap(state, &to_channel(&1, {:pusher_other, name, feed, data, DateTime.utc_now()}))
 
-  defp forward(state, {:other, name, topic, _data}),
-    do: tap(state, &to_channel(&1, {:pusher_other, name, topic}))
+  defp forward(state, {:other, name, feed, _data}),
+    do: tap(state, &to_channel(&1, {:pusher_other, name, feed}))
 
-  defp topics(state) do
-    [chatroom_topic(state)] ++
-      if state.channel.kick_channel_id,
-        do: [Pusher.channel(state.channel.kick_channel_id)],
-        else: []
-  end
+  # The chat feed comes first in kicksdk's list.
+  defp chat_feed(%{feeds: [feed | _]}), do: feed
+  defp chat_feed(_state), do: nil
 
-  defp chatroom_topic(%{channel: %{chatroom_id: nil}}), do: nil
-  defp chatroom_topic(state), do: Pusher.chatroom(state.channel.chatroom_id)
+  defp listening?(%{session: nil}), do: false
+  defp listening?(state), do: Session.subscribed?(state.session, chat_feed(state))
 
   defp to_channel(state, message) do
     if pid = ChannelServer.whereis(state.channel.kick_user_id), do: send(pid, message)
   end
-
-  defp send_text(state, text), do: send_frame(state, {:text, text})
 
   defp send_frame(%{ws: nil} = state, _frame), do: state
 
@@ -347,22 +517,54 @@ defmodule KickTracker.Tracking.ChatSocket do
     end
   end
 
+  # When the session next needs the clock. A timer due sooner is kept: the
+  # session's deadlines only move later with traffic, and a tick before
+  # one is harmless.
+  defp schedule_tick(%{session: nil} = state), do: state
+
+  defp schedule_tick(state) do
+    case Session.deadline(state.session) do
+      at when is_integer(at) and (state.tick_at == nil or at < state.tick_at) ->
+        Process.send_after(self(), :tick, max(at - now_ms(), 0))
+        %{state | tick_at: at}
+
+      _none_or_later ->
+        state
+    end
+  end
+
+  # Drop the connection and connect again at once, with the channel as it
+  # is now; the gap is recorded under the channel as it was.
+  defp again(state, old, reason) do
+    state =
+      if state.conn,
+        do: %{reconnect(%{state | channel: old}, reason) | channel: state.channel},
+        else: state
+
+    %{state | backoff_ms: 1_000}
+    |> cancel_timer()
+    |> tap(fn _ -> send(self(), :connect) end)
+  end
+
   # Drop the connection, record the gap, try again after the backoff.
   defp reconnect(%{conn: nil, timer: timer} = state, _reason) when timer != nil, do: state
 
   defp reconnect(state, reason) do
     if state.conn, do: Mint.HTTP.close(state.conn)
-    if state.activity_timer, do: Process.cancel_timer(state.activity_timer)
-    was_subscribed = MapSet.member?(state.subscribed, chatroom_topic(state))
-    if was_subscribed, do: mark(state, false)
+    if listening?(state), do: mark(state, false)
 
-    # Only a connection that stayed up a while starts the backoff over.
-    backoff_ms = if stable?(state), do: 1_000, else: state.backoff_ms
-    delay_ms = jitter(backoff_ms)
+    retry_after_ms = retry_after_ms(reason)
+    {delay_ms, state} = delay(state, retry_after_ms)
 
-    Logger.info(
-      "chat feed for channel #{state.channel.id} disconnected (#{inspect(reason)}), retrying in #{delay_ms}ms"
-    )
+    if retry_after_ms > 0 do
+      Logger.warning(
+        "chat feed for channel #{state.channel.id}: Kick won't take this client back (#{inspect(reason)}), connecting as a new one in #{delay_ms}ms"
+      )
+    else
+      Logger.info(
+        "chat feed for channel #{state.channel.id} disconnected (#{inspect(reason)}), retrying in #{delay_ms}ms"
+      )
+    end
 
     %{
       state
@@ -370,14 +572,38 @@ defmodule KickTracker.Tracking.ChatSocket do
         ref: nil,
         ws: nil,
         upgrade: %{},
-        subscribed: MapSet.new(),
+        client_id: nil,
+        token: nil,
+        session: nil,
         subscribed_at: nil,
-        ping_sent_at: nil,
-        activity_timer: nil,
-        backoff_ms: min(backoff_ms * 2, @max_backoff_ms)
+        tick_at: nil
     }
     |> cancel_timer()
     |> schedule(:connect, delay_ms)
+  end
+
+  # The least kicksdk says to wait: more than 0 is a terminal close.
+  defp retry_after_ms({:kick, %{"retry_after_ms" => ms}}) when is_integer(ms) and ms >= 0, do: ms
+
+  defp retry_after_ms({:closed, code, _reason}) when is_integer(code) and code in 0..65_535,
+    do: Realtime.retry_after_ms(code)
+
+  defp retry_after_ms(_reason), do: 0
+
+  # Only a connection that stayed up a while starts the ordinary backoff
+  # over. A terminal close waits on kicksdk's backoff, whose streak only
+  # the chat feed subscribing ends; the ordinary backoff is left as it was.
+  defp delay(state, retry_after_ms) do
+    backoff_ms = if stable?(state), do: 1_000, else: state.backoff_ms
+
+    if retry_after_ms == 0 do
+      {jitter(backoff_ms), %{state | backoff_ms: min(backoff_ms * 2, @max_backoff_ms)}}
+    else
+      {delay_ms, terminal} =
+        Backoff.next_delay_for(state.terminal_backoff, retry_after_ms, :rand.uniform())
+
+      {delay_ms, %{state | backoff_ms: backoff_ms, terminal_backoff: terminal}}
+    end
   end
 
   defp stable?(%{subscribed_at: nil}), do: false
@@ -421,5 +647,6 @@ defmodule KickTracker.Tracking.ChatSocket do
     :exit, reason -> Logger.warning("could not record chat coverage: #{inspect(reason)}")
   end
 
-  defp now_s, do: System.monotonic_time(:second)
+  # kicksdk's clock: any integer milliseconds, the same throughout.
+  defp now_ms, do: System.monotonic_time(:millisecond)
 end

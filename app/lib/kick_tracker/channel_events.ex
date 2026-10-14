@@ -16,7 +16,9 @@ defmodule KickTracker.ChannelEvents do
 
   Anything missing or of another type stays unknown (`nil`).
 
-  `payload` keeps the event, its Pusher channel and only the fields read
+  `payload` keeps the event, the feed it came on (`pusher_channel`, named
+  when Kick's chat was Pusher and kept so stored rows and their keys don't
+  change) and only the fields read
   from it: the hosting side's data also carries the hosting channel itself
   (with its playback URL), its livestream, thumbnails and pictures, and the
   receiving side's the host's free-text `optional_message`; none of that is
