@@ -87,7 +87,9 @@ It also does what the real server does to misbehaving clients: a handshake
 whose Origin isn't `https://kick.com` gets 403, an unknown token is closed
 with 3500, a client that misses a ping with 3012, and one whose token runs
 out with 3005. The `realtime_disconnect_after_s` fault closes every socket
-(3001, "shutdown") after that long, to test reconnecting.
+(3001, "shutdown") after that long, to test reconnecting; `mix sim.ctl
+disconnect` closes them now, with another code if asked (`--code 3501` for
+a terminal close, `--push` to send it as a disconnect push first).
 
 Three of those ten have been captured from the real Kick; the rest follow
 Kick's documented field lists and must be re-checked once recorded
@@ -113,6 +115,7 @@ mix sim.ctl webhooks http://localhost:4040/  # where to deliver
 mix sim.ctl webhooks --drop-next 3           # lose the next three on purpose
 mix sim.ctl faults --drop 0.1 --realtime-disconnect 30
 mix sim.ctl disconnect                       # close every chat socket
+mix sim.ctl disconnect --code 3501 --push    # ... with a terminal close
 mix sim.ctl expire-tokens                    # force the app to re-authenticate
 ```
 

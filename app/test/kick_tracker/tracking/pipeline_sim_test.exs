@@ -236,6 +236,7 @@ defmodule KickTracker.Tracking.ChatSimTest do
   use KickTracker.SimCase
   @moduletag :capture_log
 
+  import ExUnit.CaptureLog
   import KickTracker.Fixtures
   alias KickTracker.Channels
   alias KickTracker.Tracking.{ChannelServer, ChatSocket, Manager}
@@ -440,6 +441,78 @@ defmodule KickTracker.Tracking.ChatSimTest do
       delay = ChatSocket.jitter(8_000)
       assert delay >= 6_000 and delay <= 8_000
     end
+  end
+
+  # KICK.md §6.1: a terminal close is never the end.
+  for {how, push} <- [{"the socket's close code", false}, {"a disconnect push", true}] do
+    test "a terminal close (#{how}) waits kicksdk's long wait and comes back as a new client; subscribing ends the streak",
+         %{channel: c, socket: socket} do
+      client_id = :sys.get_state(socket).client_id
+
+      {state, log} =
+        with_log(fn ->
+          sim_ctl(:post, "/realtime/disconnect", %{
+            "code" => 3501,
+            "reason" => "banned",
+            "push" => unquote(push)
+          })
+
+          assert eventually(fn -> not ChatSocket.subscribed?(socket) end)
+          :sys.get_state(socket)
+        end)
+
+      assert log =~ "Kick won't take this client back"
+
+      assert log =~
+               if(unquote(push),
+                 do: "Kick disconnected: 3501 banned",
+                 else: ~s({:closed, 3501, "banned"})
+               )
+
+      # Five minutes, plus up to a quarter; the ordinary backoff is left as it was.
+      assert state.terminal_backoff.terminal_closes == 1
+      wait = Process.read_timer(state.timer)
+      assert wait > 290_000 and wait <= 375_000
+      assert state.backoff_ms == 1_000
+
+      # The wait, cut short.
+      Process.cancel_timer(state.timer)
+      send(socket, :connect)
+      assert eventually(fn -> ChatSocket.subscribed?(socket) end)
+
+      state = :sys.get_state(socket)
+      assert state.client_id not in [nil, client_id]
+      assert state.terminal_backoff.terminal_closes == 0
+
+      flush(c)
+      assert chat_coverage() == [true, false, true]
+    end
+  end
+
+  test "an ordinary drop leaves the terminal streak alone", %{socket: socket} do
+    sim_ctl(:post, "/realtime/disconnect")
+    assert eventually(fn -> not ChatSocket.subscribed?(socket) end)
+    state = :sys.get_state(socket)
+    assert state.terminal_backoff.terminal_closes == 0
+    assert Process.read_timer(state.timer) <= 1_000
+  end
+
+  test "Kick asking to subscribe again is a recorded gap on the same connection", %{
+    channel: c,
+    socket: socket
+  } do
+    feed = "chatrooms.#{c.chatroom_id}.v2"
+    client_id = :sys.get_state(socket).client_id
+    unsub = %{"push" => %{"channel" => feed, "unsub" => %{"code" => 2500, "reason" => "again"}}}
+    Sim.Realtime.Hub.broadcast(feed, [Jason.encode!(unsub)])
+
+    assert eventually(fn ->
+             flush(c)
+             chat_coverage() == [true, false, true]
+           end)
+
+    assert ChatSocket.subscribed?(socket)
+    assert :sys.get_state(socket).client_id == client_id
   end
 
   test "when the channel's process restarts, the socket restarts knowing the chatroom", %{

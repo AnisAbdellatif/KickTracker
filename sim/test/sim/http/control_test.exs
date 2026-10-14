@@ -216,7 +216,19 @@ defmodule Sim.Http.ControlTest do
     {200, result} = call(:post, base <> "/realtime/disconnect")
 
     assert result["disconnected"] == 1
-    assert_receive :fault_disconnect, 1_000
+    assert_receive {:disconnect, 3001, "shutdown", false}, 1_000
+
+    {200, _} =
+      call(:post, base <> "/realtime/disconnect", %{
+        "code" => 3501,
+        "reason" => "banned",
+        "push" => true
+      })
+
+    assert_receive {:disconnect, 3501, "banned", true}, 1_000
+
+    assert {400, %{"error" => "code: 3000 to 4999"}} =
+             call(:post, base <> "/realtime/disconnect", %{"code" => 1000})
   end
 
   test "an unknown control is a 404", %{base: base} do

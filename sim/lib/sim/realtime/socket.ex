@@ -18,9 +18,11 @@ defmodule Sim.Realtime.Socket do
 
   Several commands can share a frame, a line each. The handshake itself is
   checked by the router (Origin). The close codes are Centrifugo's own;
-  the `realtime_disconnect_after_s` fault and `Hub.disconnect_all/0` close
+  the `realtime_disconnect_after_s` fault and `Hub.disconnect_all/1` close
   sockets as a server shutting down does (3001), so a client's reconnect
-  can be tested.
+  can be tested; `Hub.disconnect_all/1` also takes another code, a terminal
+  one (3500-3999, 4500-4999) included, and can send it as a disconnect push
+  before the close frame.
   """
 
   @behaviour WebSock
@@ -144,7 +146,18 @@ defmodule Sim.Realtime.Socket do
   def handle_info({:expired, ref}, %{expires: ref} = state),
     do: {:stop, :normal, {3005, "token expired"}, state}
 
-  def handle_info(:fault_disconnect, state), do: {:stop, :normal, {3001, "shutdown"}, state}
+  def handle_info(:fault_disconnect, state),
+    do: handle_info({:disconnect, 3001, "shutdown", false}, state)
+
+  # The close frame carries the code; with `push`, a disconnect push says
+  # it first (the form kicksdk's session reads as its own "close").
+  def handle_info({:disconnect, code, reason, false}, state),
+    do: {:stop, :normal, {code, reason}, state}
+
+  def handle_info({:disconnect, code, reason, true}, state) do
+    push = %{"push" => %{"disconnect" => %{"code" => code, "reason" => reason}}}
+    {:stop, :normal, {code, reason}, [{:text, Jason.encode!(push)}], state}
+  end
 
   def handle_info(_message, state), do: {:ok, state}
 

@@ -38,11 +38,20 @@ defmodule Sim.Realtime.Hub do
   @spec count() :: non_neg_integer()
   def count, do: length(Registry.lookup(__MODULE__, @everyone))
 
-  @doc "Closes every connected socket, as a server shutting down does (3001, reconnect)."
-  @spec disconnect_all() :: non_neg_integer()
-  def disconnect_all do
+  @doc """
+  Closes every connected socket, by default as a server shutting down does
+  (3001, reconnect). Options: `:code` and `:reason` for the close frame
+  (3500-3999 and 4500-4999 are terminal), `:push` to send them as a
+  disconnect push first.
+  """
+  @spec disconnect_all(keyword()) :: non_neg_integer()
+  def disconnect_all(opts \\ []) do
+    message =
+      {:disconnect, Keyword.get(opts, :code, 3001), Keyword.get(opts, :reason, "shutdown"),
+       Keyword.get(opts, :push, false)}
+
     sockets = Registry.lookup(__MODULE__, @everyone)
-    for {pid, _} <- sockets, do: send(pid, :fault_disconnect)
+    for {pid, _} <- sockets, do: send(pid, message)
     length(sockets)
   end
 

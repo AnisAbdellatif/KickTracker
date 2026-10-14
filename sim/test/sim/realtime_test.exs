@@ -134,6 +134,36 @@ defmodule Sim.RealtimeTest do
     assert %{closed: {3001, "shutdown"}} = RealtimeClient.run(["chatrooms.1.v2"], 1_000)
   end
 
+  test "a terminal disconnect reaches kicksdk as one, by close frame or by push" do
+    channel = start()
+    feed = "chatrooms.#{channel.chatroom_id}.v2"
+
+    disconnect = fn opts ->
+      Task.start_link(fn ->
+        Enum.find(1..100, fn _ ->
+          Process.sleep(20)
+          Hub.listened?(feed)
+        end)
+
+        Hub.disconnect_all([code: 3501, reason: "banned"] ++ opts)
+      end)
+    end
+
+    # The socket's close code: the client asks kicksdk what it means.
+    disconnect.([])
+    assert %{closed: {3501, "banned"}} = RealtimeClient.run([feed], 3_000)
+    assert Kicksdk.Realtime.retry_after_ms(3501) == 300_000
+
+    # A disconnect push: kicksdk's session says close, terminal. (Once the
+    # first socket has gone.)
+    Enum.find(1..100, fn _ -> not Hub.listened?(feed) or Process.sleep(10) end)
+    disconnect.(push: true)
+    result = RealtimeClient.run([feed], 3_000)
+
+    assert [%{"code" => 3501, "terminal" => true, "retry_after_ms" => 300_000}] =
+             actions(result, "close")
+  end
+
   test "a connection asked for in general or for a channel is served here" do
     start()
 

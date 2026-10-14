@@ -174,9 +174,6 @@ defmodule Sim.RealtimeClient do
     parse.(status, body)
   end
 
-  # kicksdk's clock: milliseconds since this VM started (never negative).
-  defp now,
-    do:
-      System.monotonic_time(:millisecond) -
-        System.convert_time_unit(:erlang.system_info(:start_time), :native, :millisecond)
+  # kicksdk's clock: any integer milliseconds, the same throughout.
+  defp now, do: System.monotonic_time(:millisecond)
 end

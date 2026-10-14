@@ -18,6 +18,7 @@ defmodule Mix.Tasks.Sim.Ctl do
       mix sim.ctl faults --drop 0.1 --duplicate 0.05 --realtime-disconnect 30
       mix sim.ctl faults --clear
       mix sim.ctl disconnect                     # close every chat socket (3001)
+      mix sim.ctl disconnect --code 3501 --push  # a terminal close, as a disconnect push too
       mix sim.ctl expire-tokens
 
   `--url` points at another simulator (default `http://127.0.0.1:4050`).
@@ -43,6 +44,8 @@ defmodule Mix.Tasks.Sim.Ctl do
     drop: :float,
     duplicate: :float,
     realtime_disconnect: :float,
+    code: :integer,
+    push: :boolean,
     clear: :boolean
   ]
 
@@ -142,7 +145,11 @@ defmodule Mix.Tasks.Sim.Ctl do
     end
   end
 
-  def request(["disconnect"], _opts), do: {:ok, {:post, "/realtime/disconnect", %{}}}
+  def request(["disconnect"], opts),
+    do:
+      {:ok,
+       {:post, "/realtime/disconnect", compact(%{"code" => opts[:code], "push" => opts[:push]})}}
+
   def request(["expire-tokens"], _opts), do: {:ok, {:post, "/tokens/expire", %{}}}
   def request([], _opts), do: {:error, "which command?"}
   def request(words, _opts), do: {:error, "unknown command: #{Enum.join(words, " ")}"}

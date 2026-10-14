@@ -14,7 +14,7 @@ defmodule Sim.Http.Control do
       GET  /_sim/webhooks
       PUT  /_sim/webhooks     {url?, drop_next?}
       PUT  /_sim/faults       {drop_webhooks?, duplicate_webhooks?, realtime_disconnect_after_s?}
-      POST /_sim/realtime/disconnect
+      POST /_sim/realtime/disconnect          {code?, reason?, push?}
       POST /_sim/tokens/expire
 
   Changes to a channel take effect at once: the channel's process is
@@ -167,8 +167,23 @@ defmodule Sim.Http.Control do
     end
   end
 
+  # Centrifugo's disconnect codes: 3000-4999 (3500-3999 and 4500-4999
+  # terminal). Without a code, a shutdown (3001).
   post "/realtime/disconnect" do
-    json(conn, 200, %{"disconnected" => Hub.disconnect_all()})
+    case conn.body_params do
+      %{"code" => code} when not (is_integer(code) and code in 3000..4999) ->
+        error(conn, {:code, "3000 to 4999"})
+
+      %{"reason" => reason} when not is_binary(reason) ->
+        error(conn, {:reason, "a string"})
+
+      %{"push" => push} when not is_boolean(push) ->
+        error(conn, {:push, "true or false"})
+
+      params ->
+        opts = for {k, v} <- params, k in ~w(code reason push), do: {String.to_atom(k), v}
+        json(conn, 200, %{"disconnected" => Hub.disconnect_all(opts)})
+    end
   end
 
   post "/tokens/expire" do

@@ -17,10 +17,18 @@ defmodule KickTracker.Tracking.ChatSocket do
   A connection that doesn't complete its upgrade within 15s is dropped
   and retried, like any other failure.
 
-  It reconnects on its own with backoff (1s doubling to 30s, with jitter so
-  sockets dropped together don't come back together); the backoff only
+  It reconnects on its own, never giving up, each time as a new client (a
+  new client id, so a new guest token and connection request). An
+  ordinary drop waits with backoff (1s doubling to 30s, with jitter so
+  sockets dropped together don't come back together); that backoff only
   resets once a connection has stayed up for a minute, so a server that
-  accepts and then drops at once isn't retried every second. It records
+  accepts and then drops at once isn't retried every second. A terminal
+  close (Kick doesn't want this client back as it was: a refused token, a
+  limit, a ban; a session `close` that says so, or a socket close code
+  kicksdk says it of) waits what kicksdk's `Kicksdk.Realtime.Backoff`
+  says, 5 minutes, then 10, 20 and 30 for terminal closes in a row, each
+  plus up to a quarter; the chat feed subscribing ends the streak (KICK.md
+  §6.1). It records
   in `coverage` (source `chat`) when chat was being received and when not,
   so per-minute chat counts can say how complete they are: "not" at once,
   "received" through the `ChannelServer`, which writes it with the counts
@@ -42,7 +50,7 @@ defmodule KickTracker.Tracking.ChatSocket do
   alias KickTracker.Kick.{Endpoints, HTTP, UserAgent}
   alias KickTracker.Tracking.ChannelServer
   alias Kicksdk.Realtime
-  alias Kicksdk.Realtime.Session
+  alias Kicksdk.Realtime.{Backoff, Session}
 
   @max_backoff_ms 30_000
   @coverage_every_ms 60_000
@@ -91,6 +99,8 @@ defmodule KickTracker.Tracking.ChatSocket do
        session: nil,
        feeds: [],
        backoff_ms: 1_000,
+       # kicksdk's backoff, for terminal closes only: the streak of them.
+       terminal_backoff: Backoff.new(),
        subscribed_at: nil,
        timer: nil,
        tick_at: nil
@@ -321,22 +331,29 @@ defmodule KickTracker.Tracking.ChatSocket do
 
   defp action(state, %{"action" => "send", "text" => text}), do: send_frame(state, {:text, text})
 
-  defp action(state, %{"action" => "close", "reason" => reason}),
-    do: reconnect(state, {:kick, reason})
+  defp action(state, %{"action" => "close"} = close), do: reconnect(state, {:kick, close})
 
   defp action(state, %{"action" => "refresh_token"}), do: refresh(state)
 
   defp action(state, %{"action" => "subscribed", "channel" => feed}) do
     if feed == chat_feed(state) do
       mark(state, true)
-      %{state | subscribed_at: System.monotonic_time(:millisecond)}
+
+      %{
+        state
+        | subscribed_at: System.monotonic_time(:millisecond),
+          terminal_backoff: Backoff.reset(state.terminal_backoff)
+      }
     else
       state
     end
   end
 
   # Kick took the chat feed away, or refused it: no chat comes on this
-  # connection. Another feed refused is only worth a line.
+  # connection, and the gap is recorded now (the session no longer counts
+  # the feed as subscribed). With a code from 2500 to 2999 Kick asks for a
+  # new subscribe, which the session has already sent: "subscribed" or
+  # "subscribe_failed" follows. Another feed refused is only worth a line.
   defp action(state, %{"action" => action, "channel" => feed} = a)
        when action in ["unsubscribed", "subscribe_failed"] do
     why = {a["code"], a["reason"] || a["message"]}
@@ -349,7 +366,16 @@ defmodule KickTracker.Tracking.ChatSocket do
 
         state
 
+      action == "unsubscribed" and a["code"] in 2500..2999 ->
+        Logger.info(
+          "chat feed for channel #{state.channel.id}: subscribing again (#{inspect(why)})"
+        )
+
+        mark(state, false)
+        %{state | subscribed_at: nil}
+
       action == "unsubscribed" ->
+        mark(state, false)
         reconnect(state, {:unsubscribed, why})
 
       true ->
@@ -527,13 +553,18 @@ defmodule KickTracker.Tracking.ChatSocket do
     if state.conn, do: Mint.HTTP.close(state.conn)
     if listening?(state), do: mark(state, false)
 
-    # Only a connection that stayed up a while starts the backoff over.
-    backoff_ms = if stable?(state), do: 1_000, else: state.backoff_ms
-    delay_ms = jitter(backoff_ms)
+    retry_after_ms = retry_after_ms(reason)
+    {delay_ms, state} = delay(state, retry_after_ms)
 
-    Logger.info(
-      "chat feed for channel #{state.channel.id} disconnected (#{inspect(reason)}), retrying in #{delay_ms}ms"
-    )
+    if retry_after_ms > 0 do
+      Logger.warning(
+        "chat feed for channel #{state.channel.id}: Kick won't take this client back (#{inspect(reason)}), connecting as a new one in #{delay_ms}ms"
+      )
+    else
+      Logger.info(
+        "chat feed for channel #{state.channel.id} disconnected (#{inspect(reason)}), retrying in #{delay_ms}ms"
+      )
+    end
 
     %{
       state
@@ -545,11 +576,34 @@ defmodule KickTracker.Tracking.ChatSocket do
         token: nil,
         session: nil,
         subscribed_at: nil,
-        tick_at: nil,
-        backoff_ms: min(backoff_ms * 2, @max_backoff_ms)
+        tick_at: nil
     }
     |> cancel_timer()
     |> schedule(:connect, delay_ms)
+  end
+
+  # The least kicksdk says to wait: more than 0 is a terminal close.
+  defp retry_after_ms({:kick, %{"retry_after_ms" => ms}}) when is_integer(ms) and ms >= 0, do: ms
+
+  defp retry_after_ms({:closed, code, _reason}) when is_integer(code) and code in 0..65_535,
+    do: Realtime.retry_after_ms(code)
+
+  defp retry_after_ms(_reason), do: 0
+
+  # Only a connection that stayed up a while starts the ordinary backoff
+  # over. A terminal close waits on kicksdk's backoff, whose streak only
+  # the chat feed subscribing ends; the ordinary backoff is left as it was.
+  defp delay(state, retry_after_ms) do
+    backoff_ms = if stable?(state), do: 1_000, else: state.backoff_ms
+
+    if retry_after_ms == 0 do
+      {jitter(backoff_ms), %{state | backoff_ms: min(backoff_ms * 2, @max_backoff_ms)}}
+    else
+      {delay_ms, terminal} =
+        Backoff.next_delay_for(state.terminal_backoff, retry_after_ms, :rand.uniform())
+
+      {delay_ms, %{state | backoff_ms: backoff_ms, terminal_backoff: terminal}}
+    end
   end
 
   defp stable?(%{subscribed_at: nil}), do: false
@@ -593,9 +647,6 @@ defmodule KickTracker.Tracking.ChatSocket do
     :exit, reason -> Logger.warning("could not record chat coverage: #{inspect(reason)}")
   end
 
-  # kicksdk's clock: milliseconds, never negative (since this VM started).
-  defp now_ms,
-    do:
-      System.monotonic_time(:millisecond) -
-        System.convert_time_unit(:erlang.system_info(:start_time), :native, :millisecond)
+  # kicksdk's clock: any integer milliseconds, the same throughout.
+  defp now_ms, do: System.monotonic_time(:millisecond)
 end
