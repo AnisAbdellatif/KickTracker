@@ -22,8 +22,8 @@ defmodule KickTracker.Workers.SubscriptionSync do
   alias KickTracker.Kick.API
   alias KickTracker.Stats.Coverage
 
-  # What the tracker reads. Bans, redemptions and chat (read over Pusher
-  # instead) aren't subscribed to.
+  # What the tracker reads. Bans, redemptions and chat (read from the chat
+  # feed instead) aren't subscribed to.
   @events ~w(
     livestream.status.updated livestream.metadata.updated
     channel.followed

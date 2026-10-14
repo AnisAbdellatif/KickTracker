@@ -26,7 +26,7 @@ defmodule Sim.Webhooks do
   end
 
   # Every event type Kick documents (docs.kick.com/events/event-types).
-  # `chat.message.sent` is served over Pusher instead, so the simulator
+  # `chat.message.sent` is served over the chat feed instead, so the simulator
   # accepts a subscription to it but sends nothing.
   @event_types ~w(
     livestream.status.updated livestream.metadata.updated

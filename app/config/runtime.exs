@@ -54,8 +54,7 @@ kick_defaults =
       "KICK_ID_URL" => sim,
       "KICK_V2_URL" => sim <> "/api/v2",
       "KICK_FILES_URL" => sim,
-      "PUSHER_URL" =>
-        "ws://127.0.0.1:4050/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false",
+      "KICK_REALTIME_URL" => sim <> "/api/v1/realtime",
       "KICK_CLIENT_ID" => "dev-client",
       "KICK_CLIENT_SECRET" => "dev-secret",
       # The consume-only user from deploy/rabbitmq (local development only).
@@ -74,7 +73,6 @@ config :kick_tracker, :kick,
   api_url: setting.("KICK_API_URL"),
   id_url: setting.("KICK_ID_URL"),
   v2_url: setting.("KICK_V2_URL"),
-  pusher_url: setting.("PUSHER_URL"),
   client_id: setting.("KICK_CLIENT_ID"),
   client_secret: setting.("KICK_CLIENT_SECRET"),
   # Optional: fetched from the API when unset.
@@ -84,7 +82,14 @@ config :kick_tracker, :kick,
   # and a deploy that predates it must still start.
   files_url:
     System.get_env("KICK_FILES_URL") || Map.get(kick_defaults, "KICK_FILES_URL") ||
-      "https://files.kick.com"
+      "https://files.kick.com",
+  # Kick's realtime (chat) endpoints: where a channel's chat is served and
+  # its guest tokens. Optional too, with the real Kick's as the default
+  # outside development: deploys whose secrets predate it (they named
+  # PUSHER_URL, dead since Kick left Pusher on 2026-10-13) still start.
+  realtime_url:
+    System.get_env("KICK_REALTIME_URL") || Map.get(kick_defaults, "KICK_REALTIME_URL") ||
+      "https://web.kick.com/api/v1/realtime"
 
 # A shadow collector (§10.5) takes no webhooks: no queue to read.
 config :kick_tracker,

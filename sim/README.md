@@ -13,16 +13,17 @@ phase 5 (`AGENTS.md` §6). Keep runs short and on one or two channels.
 mix sim
 ```
 
-Serves, on one port, what the real Kick spreads over three hosts: the token
-endpoint, `/public/v1/*` (channels, livestreams, public key, webhook
-subscriptions), `/api/v2/channels/{slug}`, and webhook delivery signed with
+Serves, on one port, what the real Kick spreads over several hosts: the
+token endpoint, `/public/v1/*` (channels, livestreams, public key, webhook
+subscriptions), `/api/v2/channels/{slug}`, the realtime chat
+(`/api/v1/realtime/*` and its websocket), and webhook delivery signed with
 its own key. Point the code under test at it:
 
 ```
 KICK_API_URL=http://127.0.0.1:4050
 KICK_ID_URL=http://127.0.0.1:4050
 KICK_V2_URL=http://127.0.0.1:4050/api/v2
-PUSHER_URL=ws://127.0.0.1:4050/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false
+KICK_REALTIME_URL=http://127.0.0.1:4050/api/v1/realtime
 ```
 
 Useful options:
@@ -70,23 +71,32 @@ and channel-point redemptions its audience produced. That is all ten event
 types Kick documents, chat included (`chat.message.sent` goes to an app
 that subscribed to it).
 
-**Pusher** runs on the same port (`/app/<key>`). It speaks what Kick's chat
-uses: `pusher:connection_established` on connect, `pusher:subscribe` with
-an empty `auth`, pings both ways, and `App\Events\ChatMessageEvent`
-frames for each subscribed `chatrooms.<id>.v2`, their `data` a JSON string
-as Pusher sends it. Chat follows the audience: more viewers, more messages,
-from a pool of chatters who come back, about one in twenty a reply to an
-earlier message. It also does what real Pusher does to misbehaving
-clients: a wrong app key gets `pusher:error` 4001, and a client that
-misses a pong is dropped with 4201. The `pusher_disconnect_after_s` fault
-closes every socket with 4200 after that long, to test reconnecting.
+**The realtime chat** (Kick's Centrifugo, since 2026-10-13) runs on the
+same port, the way kick.com's chat reaches it: `POST
+/api/v1/realtime/connection` (or `/channels/<id>/chat/connection`) says
+where the websocket is, `POST /api/v1/realtime/auth/connection` gives a
+guest token, and `/connection/websocket` speaks Centrifugo's JSON protocol
+as recorded: `connect` with that token (answered with a 45-minute `ttl` and
+a 25s ping), `subscribe` per feed (a `private-…` feed is refused, 103),
+`{}` pings the client answers with `{}`, `refresh` with a new token, and
+publications carrying Kick's own event, `App\Events\ChatMessageEvent` on
+each subscribed `chatrooms.<id>.v2`, its `data` a JSON string as Kick sends
+it. Chat follows the audience: more viewers, more messages, from a pool of
+chatters who come back, about one in twenty a reply to an earlier message.
+It also does what the real server does to misbehaving clients: a handshake
+whose Origin isn't `https://kick.com` gets 403, an unknown token is closed
+with 3500, a client that misses a ping with 3012, and one whose token runs
+out with 3005. The `realtime_disconnect_after_s` fault closes every socket
+(3001, "shutdown") after that long, to test reconnecting; `mix sim.ctl
+disconnect` closes them now, with another code if asked (`--code 3501` for
+a terminal close, `--push` to send it as a disconnect push first).
 
 Three of those ten have been captured from the real Kick; the rest follow
 Kick's documented field lists and must be re-checked once recorded
 (project.md §16).
 
-Raids and hosts aren't simulated yet: none has been recorded, so their
-Pusher event names are unknown (project.md §16).
+Raids and hosts aren't simulated on their own; tests publish them
+(`Sim.Realtime.Hub.broadcast/2` with `Sim.Realtime.Socket.publication/3`).
 
 ### Driving it by hand: `mix sim.ctl`
 
@@ -103,8 +113,9 @@ mix sim.ctl chat <channel> "hello chat"
 mix sim.ctl clock --advance 2h               # or --at <ISO time>, --speed 60
 mix sim.ctl webhooks http://localhost:4040/  # where to deliver
 mix sim.ctl webhooks --drop-next 3           # lose the next three on purpose
-mix sim.ctl faults --drop 0.1 --pusher-disconnect 30
-mix sim.ctl disconnect                       # close every Pusher socket
+mix sim.ctl faults --drop 0.1 --realtime-disconnect 30
+mix sim.ctl disconnect                       # close every chat socket
+mix sim.ctl disconnect --code 3501 --push    # ... with a terminal close
 mix sim.ctl expire-tokens                    # force the app to re-authenticate
 ```
 
@@ -161,14 +172,14 @@ mix record.v2 --slugs <channel>
 Run it at home **and on the VPS**: whether v2 answers from a datacenter IP is
 an open question (§16).
 
-### 3. Pusher chat feed
+### 3. The realtime chat feed
 
-```bash
-mix record.pusher --slug <channel> --minutes 20
-```
-
-Records every frame from the chatroom and the channel feed, to learn the
-exact event names for chat, raids, hosts, subs.
+Not recorded here any more. Kick's chat moved from Pusher to Centrifugo on
+2026-10-13, and what we know about Kick now lives in kicksdk
+(KICK.md): its `tools/record-realtime.mjs` records the feed and its
+anonymized recordings are kicksdk's `fixtures/realtime`. The Pusher
+recordings in `fixtures/pusher` stay: Kick's event data inside the feed is
+the same, only the envelope changed.
 
 ### 4. Undocumented website endpoints
 
@@ -253,5 +264,6 @@ mix test
 ```
 
 Nothing in the tests talks to Kick: signatures use a generated key, the
-webhook capture runs through `Plug.Test`, and the Pusher recorder is tested
-against a local fake Pusher server.
+webhook capture runs through `Plug.Test`, and the fake realtime server is
+driven by kicksdk's own session (`Sim.RealtimeClient`), the client the app
+uses.

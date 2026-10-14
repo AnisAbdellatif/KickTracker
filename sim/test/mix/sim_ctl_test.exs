@@ -44,7 +44,11 @@ defmodule Mix.Tasks.Sim.CtlTest do
                {:ok, {:put, "/faults", %{"drop_webhooks" => 0.1}}}
 
       assert Ctl.request(["faults"], clear: true) == {:ok, {:put, "/faults", %{}}}
-      assert Ctl.request(["disconnect"], []) == {:ok, {:post, "/pusher/disconnect", %{}}}
+      assert Ctl.request(["disconnect"], []) == {:ok, {:post, "/realtime/disconnect", %{}}}
+
+      assert Ctl.request(["disconnect"], code: 3501, push: true) ==
+               {:ok, {:post, "/realtime/disconnect", %{"code" => 3501, "push" => true}}}
+
       assert Ctl.request(["expire-tokens"], []) == {:ok, {:post, "/tokens/expire", %{}}}
     end
 

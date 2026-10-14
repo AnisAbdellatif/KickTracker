@@ -1,6 +1,32 @@
 defmodule KickTracker.Tracking.ChatSocketTest do
   @moduledoc "A chat server that accepts the connection but never answers the upgrade isn't waited on forever."
 
+  defmodule Realtime do
+    @moduledoc "Where the chat is and a token, as Kick answers them; the chat itself is elsewhere."
+    @behaviour Plug
+    import Plug.Conn
+
+    @impl true
+    def init(ws_port), do: ws_port
+
+    @impl true
+    def call(conn, ws_port) do
+      data =
+        if String.ends_with?(conn.request_path, "/auth/connection"),
+          do: %{"token" => "t"},
+          else: %{
+            "connections" => [
+              %{
+                "provider" => "centrifugo",
+                "credentials" => %{"url" => "ws://127.0.0.1:#{ws_port}/connection/websocket"}
+              }
+            ]
+          }
+
+      send_resp(conn, 200, Jason.encode!(%{"data" => data, "message" => "success"}))
+    end
+  end
+
   use ExUnit.Case, async: false
   @moduletag :capture_log
 
@@ -25,10 +51,17 @@ defmodule KickTracker.Tracking.ChatSocketTest do
     kick = Application.get_env(:kick_tracker, :kick)
     collector = Application.get_env(:kick_tracker, :collector, [])
 
+    http =
+      start_supervised!(
+        {Bandit, plug: {Realtime, port}, port: 0, ip: :loopback, startup_log: false}
+      )
+
+    {:ok, {_ip, http_port}} = ThousandIsland.listener_info(http)
+
     Application.put_env(
       :kick_tracker,
       :kick,
-      Keyword.put(kick, :pusher_url, "ws://127.0.0.1:#{port}/app/test?protocol=7")
+      Keyword.put(kick, :realtime_url, "http://127.0.0.1:#{http_port}/api/v1/realtime")
     )
 
     Application.put_env(

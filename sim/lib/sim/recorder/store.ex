@@ -49,7 +49,7 @@ defmodule Sim.Recorder.Store do
     path
   end
 
-  @doc "Appends one JSON line to `<run>/<source>/<name>.jsonl` (for streams like Pusher)."
+  @doc "Appends one JSON line to `<run>/<source>/<name>.jsonl` (for streams like a websocket's frames)."
   @spec append_line(Path.t(), String.t(), String.t(), map()) :: :ok
   def append_line(run, source, name, entry) do
     dir = Path.join(run, source)

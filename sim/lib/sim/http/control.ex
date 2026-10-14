@@ -4,7 +4,7 @@ defmodule Sim.Http.Control do
   Kick by hand or from tests. It is not part of Kick, and serves on the same
   loopback-only port as the rest of the simulator.
 
-      GET  /_sim/state                        clock, channels, webhooks, Pusher
+      GET  /_sim/state                        clock, channels, webhooks, realtime
       PUT  /_sim/clock        {at?, speed?, advance_s?}
       POST /_sim/channels/:slug/live          {minutes?}
       POST /_sim/channels/:slug/offline
@@ -13,8 +13,8 @@ defmodule Sim.Http.Control do
       POST /_sim/channels/:slug/chat          {content, sender_id?}
       GET  /_sim/webhooks
       PUT  /_sim/webhooks     {url?, drop_next?}
-      PUT  /_sim/faults       {drop_webhooks?, duplicate_webhooks?, pusher_disconnect_after_s?}
-      POST /_sim/pusher/disconnect
+      PUT  /_sim/faults       {drop_webhooks?, duplicate_webhooks?, realtime_disconnect_after_s?}
+      POST /_sim/realtime/disconnect          {code?, reason?, push?}
       POST /_sim/tokens/expire
 
   Changes to a channel take effect at once: the channel's process is
@@ -28,7 +28,7 @@ defmodule Sim.Http.Control do
 
   alias Sim.Channel.Server, as: ChannelServer
   alias Sim.{Channels, Clock, Control, Payloads, Scenario, Schedule, Server, Webhooks}
-  alias Sim.Pusher.{Hub, Socket}
+  alias Sim.Realtime.{Hub, Socket}
 
   plug(:match)
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason, pass: ["*/*"])
@@ -117,7 +117,7 @@ defmodule Sim.Http.Control do
       {:ok, {channel, message}} ->
         topic = "chatrooms.#{channel.chatroom_id}.v2"
         data = channel |> Payloads.chat_message(message) |> Jason.encode!()
-        Hub.broadcast(topic, [Socket.frame("App\\Events\\ChatMessageEvent", data, topic)])
+        Hub.broadcast(topic, [Socket.publication(topic, "App\\Events\\ChatMessageEvent", data)])
 
         Webhooks.deliver(
           channel.user_id,
@@ -167,8 +167,23 @@ defmodule Sim.Http.Control do
     end
   end
 
-  post "/pusher/disconnect" do
-    json(conn, 200, %{"disconnected" => Hub.disconnect_all()})
+  # Centrifugo's disconnect codes: 3000-4999 (3500-3999 and 4500-4999
+  # terminal). Without a code, a shutdown (3001).
+  post "/realtime/disconnect" do
+    case conn.body_params do
+      %{"code" => code} when not (is_integer(code) and code in 3000..4999) ->
+        error(conn, {:code, "3000 to 4999"})
+
+      %{"reason" => reason} when not is_binary(reason) ->
+        error(conn, {:reason, "a string"})
+
+      %{"push" => push} when not is_boolean(push) ->
+        error(conn, {:push, "true or false"})
+
+      params ->
+        opts = for {k, v} <- params, k in ~w(code reason push), do: {String.to_atom(k), v}
+        json(conn, 200, %{"disconnected" => Hub.disconnect_all(opts)})
+    end
   end
 
   post "/tokens/expire" do
@@ -236,7 +251,7 @@ defmodule Sim.Http.Control do
       "channels" => Enum.map(scenario.channels, &channel_state/1),
       "faults" => scenario.faults,
       "webhooks" => webhooks(),
-      "pusher" => %{"app_key" => Server.pusher().app_key, "sockets" => Hub.count()}
+      "realtime" => %{"sockets" => Hub.count()}
     }
   end
 

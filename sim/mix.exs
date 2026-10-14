@@ -30,7 +30,10 @@ defmodule Sim.MixProject do
       {:plug, "~> 1.20"},
       {:mint_web_socket, "~> 1.0"},
       {:websock_adapter, "~> 0.6"},
-      {:stream_data, "~> 1.4", only: :test}
+      {:stream_data, "~> 1.4", only: :test},
+      # The client the app uses (KICK.md): tests drive the fake realtime
+      # server with it, so the fake answers what kicksdk expects of Kick.
+      {:kicksdk, "~> 0.2.0", only: :test}
     ]
   end
 end

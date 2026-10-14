@@ -25,7 +25,8 @@ defmodule KickTracker.SimCase do
        scenario: scenario,
        port: 0,
        tick_ms: Keyword.get(opts, :tick_ms, 60_000),
-       webhook_url: opts[:webhook_url]}
+       webhook_url: opts[:webhook_url],
+       realtime: Keyword.get(opts, :realtime, [])}
     )
 
     base = Sim.Instance.base_url()
@@ -38,7 +39,7 @@ defmodule KickTracker.SimCase do
         api_url: base,
         id_url: base,
         v2_url: base <> "/api/v2",
-        pusher_url: Sim.Instance.pusher_url(),
+        realtime_url: Sim.Instance.realtime_url(),
         public_key: Sim.Server.public_key_pem()
       )
     )

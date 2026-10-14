@@ -488,7 +488,7 @@ questions in project.md §16 that need the VPS are answered (v2 and Pusher
 from a datacenter IP):
 
 1. Run `mix record.probe` and `mix record.v2` from the VPS (sim/README.md).
-2. Fill the real `KICK_*` values and `PUSHER_URL` in `secrets/app.env`,
+2. Fill the real `KICK_*` values in `secrets/app.env`,
    `secrets/collector.env` and `secrets/receiver.env`; set `SITE_NAME` (no "Kick" in it) and
    `CONTACT_EMAIL`.
 3. Add the first channels from `/admin/channels` and watch `/admin` for a

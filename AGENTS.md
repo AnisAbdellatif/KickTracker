@@ -96,7 +96,7 @@ understanding their intent first.
 | Path | What | Notes |
 |---|---|---|
 | `project.md` | The design | Keep in sync with reality |
-| `KICK.md` | Everything known about Kick as a source: API, webhooks, website endpoints, Pusher, each fact with where it was seen | Correct it first when Kick behaves differently; new facts go here |
+| `KICK.md` | Points to kicksdk's `docs/KICK.md`, the one record of everything known about Kick as a source (API, webhooks, website endpoints, the realtime chat feed), and maps where each part lives here | When Kick behaves differently, correct kicksdk's KICK.md first, then kicksdk, then update the dependency here |
 | `app/` | Phoenix app, roles `collector` and `web` (§10) | One image, role chosen by `ROLE`. `app/AGENTS.md` holds Phoenix's own framework guidelines: follow them in `app/`; this file wins on conflict |
 | `ingress/receiver/` | Webhook receiver (§8.4) | Separate deployable, rarely changed, **never touches the database** |
 | `ingress/worker/` | Cloudflare Worker on the webhook hostname: each delivery to the main VPS, else the backup receiver (§15.2) | No dependencies; tested with `node --test`, deployed by hand with wrangler (its README) |
@@ -121,9 +121,17 @@ Follow the phase order in §20. Don't build ahead of the current phase without a
   `kick.env`, and never weaken the secrets hook's check against production's client id.
   Tests and the deploy rehearsal always use the fake Kick.
 - Every Kick URL and key comes from **configuration** (`KICK_API_URL`, `KICK_ID_URL`,
-  `KICK_V2_URL`, `PUSHER_URL`, `KICK_PUBLIC_KEY`, `KICK_FILES_URL`). No code path may know or check whether
+  `KICK_V2_URL`, `KICK_REALTIME_URL`, `KICK_PUBLIC_KEY`, `KICK_FILES_URL`). No code path may know or check whether
   it is talking to the simulator; something that only works against the simulator is a
   bug.
+- **We talk to Kick only through kicksdk** (the `kicksdk` package): it builds every
+  request and reads every answer, and speaks the chat feed's protocol; we send with Req
+  and Mint, given kicksdk's endpoints built from that configuration
+  (`KickTracker.Kick.Endpoints`), never its defaults. Knowledge of Kick goes into kicksdk,
+  not here, so a change on Kick's side is fixed once. The exception, for now, is webhook
+  signature checks, ours since before kicksdk could verify any body byte for byte
+  (decisions.md, "Kick through kicksdk"). The chat socket reconnects as kicksdk's
+  KICK.md §6.1 says: a terminal close is never a reason to stop.
 - When new real payloads are needed, ask the owner to run the recorder; don't write
   fixtures by hand from memory or from the docs.
 - Recordings are **anonymized** before they enter `fixtures/` (ids, usernames, avatars,

@@ -103,7 +103,7 @@ defmodule Sim.ChatTest do
     end
   end
 
-  test "chat timestamps use Pusher's +00:00 form, unlike the API's Z" do
+  test "chat timestamps use the chat feed's +00:00 form, unlike the API's Z" do
     [message | _] = Chat.minute(@channel, @window, 5)
     data = Payloads.chat_message(@channel, message)
 

@@ -2,7 +2,7 @@ defmodule Sim.Http.ControlTest do
   use ExUnit.Case, async: false
 
   alias Sim.{Clock, Instance, Scenario, Server, Webhooks}
-  alias Sim.Pusher.Hub
+  alias Sim.Realtime.Hub
 
   @monday_morning ~U[2026-01-05 10:00:00Z]
 
@@ -57,7 +57,7 @@ defmodule Sim.Http.ControlTest do
     {response.status, response.body}
   end
 
-  test "state shows the clock, channels, webhooks and Pusher", %{base: base} do
+  test "state shows the clock, channels, webhooks and the realtime server", %{base: base} do
     {200, state} = call(:get, base <> "/state")
 
     assert state["now"] == "2026-01-05T10:00:00Z"
@@ -66,7 +66,7 @@ defmodule Sim.Http.ControlTest do
              state["channels"]
 
     assert state["webhooks"]["subscriptions"] == length(Webhooks.event_types())
-    assert state["pusher"]["sockets"] == 0
+    assert state["realtime"]["sockets"] == 0
   end
 
   test "going live and offline by hand delivers the webhooks before answering", %{base: base} do
@@ -157,7 +157,7 @@ defmodule Sim.Http.ControlTest do
              call(:post, base <> "/channels/nobody/events", %{"type" => "follow"})
   end
 
-  test "a chat message reaches Pusher subscribers and chat webhooks", %{
+  test "a chat message reaches the chat feed's subscribers and chat webhooks", %{
     base: base,
     channel: channel
   } do
@@ -170,8 +170,10 @@ defmodule Sim.Http.ControlTest do
 
     assert sent["listening"] == true
 
-    assert_receive {:pusher_frames, [frame]}, 2_000
-    assert Jason.decode!(Jason.decode!(frame)["data"])["content"] == "hello from the test"
+    assert_receive {:realtime_frames, [frame]}, 2_000
+    assert %{"push" => %{"channel" => ^topic, "pub" => %{"data" => kick}}} = Jason.decode!(frame)
+    assert kick["event"] == "App\\Events\\ChatMessageEvent"
+    assert Jason.decode!(kick["data"])["content"] == "hello from the test"
     assert_receive {:webhook, "chat.message.sent", %{"content" => "hello from the test"}}, 2_000
   end
 
@@ -209,12 +211,24 @@ defmodule Sim.Http.ControlTest do
     refute Server.valid_token?(token)
   end
 
-  test "disconnect closes every Pusher socket", %{base: base} do
+  test "disconnect closes every chat socket", %{base: base} do
     :ok = Hub.connected()
-    {200, result} = call(:post, base <> "/pusher/disconnect")
+    {200, result} = call(:post, base <> "/realtime/disconnect")
 
     assert result["disconnected"] == 1
-    assert_receive :fault_disconnect, 1_000
+    assert_receive {:disconnect, 3001, "shutdown", false}, 1_000
+
+    {200, _} =
+      call(:post, base <> "/realtime/disconnect", %{
+        "code" => 3501,
+        "reason" => "banned",
+        "push" => true
+      })
+
+    assert_receive {:disconnect, 3501, "banned", true}, 1_000
+
+    assert {400, %{"error" => "code: 3000 to 4999"}} =
+             call(:post, base <> "/realtime/disconnect", %{"code" => 1000})
   end
 
   test "an unknown control is a 404", %{base: base} do

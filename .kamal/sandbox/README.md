@@ -43,9 +43,9 @@ meanwhile are gone for good).
 
 1. Create a second app in Kick's developer settings, for the sandbox.
 2. `cp .kamal/sandbox/kick.env.example .kamal/sandbox/kick.env` (git-ignored)
-   and fill it in: that app's client id and secret, `PUSHER_URL` (the same
-   as production's: `kit sops get deploy/secrets/collector.sops.env PUSHER_URL`),
-   and the channels to track (`KT_SANDBOX_CHANNELS`), or leave that empty and
+   and fill it in: that app's client id and secret (the endpoints, chat's
+   `KICK_REALTIME_URL` among them, are Kick's own already), and the
+   channels to track (`KT_SANDBOX_CHANNELS`), or leave that empty and
    add them in the admin.
 3. Create the sandbox in that mode (the choice is made at creation and
    kept; switching needs a reset):
