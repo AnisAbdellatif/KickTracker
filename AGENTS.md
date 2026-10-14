@@ -128,9 +128,10 @@ Follow the phase order in §20. Don't build ahead of the current phase without a
   request and reads every answer, and speaks the chat feed's protocol; we send with Req
   and Mint, given kicksdk's endpoints built from that configuration
   (`KickTracker.Kick.Endpoints`), never its defaults. Knowledge of Kick goes into kicksdk,
-  not here, so a change on Kick's side is fixed once. The exception is webhook signature
-  checks, ours because the envelope must verify any body byte for byte (decisions.md,
-  "Kick through kicksdk").
+  not here, so a change on Kick's side is fixed once. The exception, for now, is webhook
+  signature checks, ours since before kicksdk could verify any body byte for byte
+  (decisions.md, "Kick through kicksdk"). The chat socket reconnects as kicksdk's
+  KICK.md §6.1 says: a terminal close is never a reason to stop.
 - When new real payloads are needed, ask the owner to run the recorder; don't write
   fixtures by hand from memory or from the docs.
 - Recordings are **anonymized** before they enter `fixtures/` (ids, usernames, avatars,

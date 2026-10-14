@@ -881,8 +881,14 @@ old one and retries every minute.
   two host events with their data as sent (stored raw in `channel_events`
   until a parser is written from real ones), and the names of other events
   it doesn't know. No message text is kept.
-- Reconnects with exponential backoff (1s up to 30s, with jitter), reset
-  only after a connection stayed up for a minute, and records chat
+- Reconnects, never giving up, each time as a new client (new client id
+  and guest token): after an ordinary drop with exponential backoff (1s
+  up to 30s, with jitter), reset only after a connection stayed up for a
+  minute; after a terminal close (Kick refusing this client as it was: a
+  token, a limit, a ban) after kicksdk's long wait, 5 minutes rising to
+  30 for terminal closes in a row, until the chat feed subscribes again
+  (KICK.md §6.1). Kick asking to subscribe again (an unsubscribe coded
+  2500-2999) keeps the connection; the session resubscribes. It records chat
   coverage when connected and disconnected: disconnected at once,
   connected through the `ChannelServer`, which journals each such mark in
   the same write as the chat counts it vouches for (the mark's time plus

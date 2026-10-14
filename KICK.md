@@ -26,9 +26,9 @@ the reasons for each choice are in [decisions.md](decisions.md).
 | Sending what kicksdk builds | `app/lib/kick_tracker/kick/http.ex` (Req, our User-Agent) |
 | Public API, token, public key | `app/lib/kick_tracker/kick/` (`api.ex`, `token.ex`, `public_key.ex`) |
 | v2 (followers, chatroom id) | `app/lib/kick_tracker/kick/v2.ex` |
-| Webhook signature | `app/lib/kick_tracker/kick/signature.ex`, `ingress/receiver/lib/receiver/signature.ex` (our own: the envelope verifies any body byte for byte, which kicksdk's verify doesn't take) |
+| Webhook signature | `app/lib/kick_tracker/kick/signature.ex`, `ingress/receiver/lib/receiver/signature.ex` (our own, from before kicksdk 0.2.0's verify took raw bytes; decisions.md, "Kick through kicksdk") |
 | Webhook bodies into facts | `app/lib/kick_tracker/events/facts.ex` |
-| The chat feed (Centrifugo) | `app/lib/kick_tracker/tracking/chat_socket.ex` |
+| The chat feed (Centrifugo) | `app/lib/kick_tracker/tracking/chat_socket.ex`; reconnects as kicksdk's §6.1 table says (terminal closes wait on `Kicksdk.Realtime.Backoff`) |
 | Hosts | `app/lib/kick_tracker/channel_events.ex` |
 | Emotes in the chat log | `app/lib/kick_tracker/chat_log.ex` |
 | Webhook subscriptions | `app/lib/kick_tracker/workers/subscription_sync.ex` |

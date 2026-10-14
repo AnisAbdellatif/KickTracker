@@ -4,9 +4,11 @@ defmodule Receiver.Signature do
   `<message_id>.<timestamp>.<raw body>`, base64 in `Kick-Event-Signature`
   (contracts/envelope.md). Pure.
 
-  Not kicksdk's `Kicksdk.Webhooks.verify/3`, unlike the rest of what we
-  know about Kick: it takes the body as text and reads it as JSON, and the
-  envelope promises any body, byte for byte, verifies (`body_base64`).
+  Not kicksdk's `Kicksdk.Webhooks.verify/4`, unlike the rest of what we
+  know about Kick: this predates kicksdk 0.2.0, whose verify takes the raw
+  bytes too (and checks freshness); the envelope promises any body, byte
+  for byte, verifies (`body_base64`). Moving to it is a follow-up
+  (decisions.md, "Kick through kicksdk").
   """
 
   @doc "The exact text Kick signs."
