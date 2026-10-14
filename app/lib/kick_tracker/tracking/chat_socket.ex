@@ -214,7 +214,7 @@ defmodule KickTracker.Tracking.ChatSocket do
         else: Realtime.connection_request(client_id, endpoints)
 
     with {:ok, status, body} <- HTTP.send(request, receive_timeout: 10_000),
-         {:ok, connections} <- HTTP.parse(&Realtime.parse_connection/2, status, body) do
+         {:ok, connections} <- Realtime.parse_connection(status, body) do
       case Enum.find(connections, &(&1["provider"] == "centrifugo")) do
         %{"url" => url} when is_binary(url) -> {:ok, url}
         _ -> {:error, :no_centrifugo_server}
@@ -226,7 +226,7 @@ defmodule KickTracker.Tracking.ChatSocket do
   defp token(client_id, endpoints) do
     with {:ok, status, body} <-
            HTTP.send(Realtime.token_request(client_id, endpoints), receive_timeout: 10_000) do
-      HTTP.parse(&Realtime.parse_token/2, status, body)
+      Realtime.parse_token(status, body)
     end
   end
 

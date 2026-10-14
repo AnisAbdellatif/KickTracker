@@ -21,16 +21,16 @@ defmodule KickTracker.Kick.V2 do
   @spec channel(String.t()) ::
           {:ok, %{followers: non_neg_integer(), chatroom_id: integer()}} | {:error, term()}
   def channel(slug) do
-    case HTTP.send(Kicksdk.Website.channel_request(slug, Endpoints.get())) do
-      {:ok, status, body} -> extract(status, body)
-      {:error, error} -> {:error, error}
+    with {:ok, request} <- Kicksdk.Website.channel_request(slug, Endpoints.get()),
+         {:ok, status, body} <- HTTP.send(request) do
+      extract(status, body)
     end
   end
 
   @doc false
   # Public for tests: what is kept from an answer.
   def extract(status, body) do
-    case HTTP.parse(&Kicksdk.Website.parse_channel/2, status, body) do
+    case Kicksdk.Website.parse_channel(status, body) do
       {:ok, %{"followers_count" => followers, "chatroom_id" => chatroom_id}}
       when is_integer(followers) and followers >= 0 ->
         {:ok, %{followers: followers, chatroom_id: chatroom_id}}

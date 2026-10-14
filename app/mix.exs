@@ -89,7 +89,7 @@ defmodule KickTracker.MixProject do
       {:mint_web_socket, "~> 1.0"},
       # Everything known about talking to Kick: requests, parsers, the
       # realtime chat protocol, webhook verification (KICK.md).
-      {:kicksdk, "~> 0.1.1"},
+      {:kicksdk, "~> 0.2.0"},
       # The collector's local journal (project.md §10.2), as the receiver's spool.
       {:exqlite, "~> 0.41.0"},
       # Errors kept in our own database, with a dashboard under /admin (§18.2).

@@ -41,12 +41,11 @@ defmodule KickTracker.Events.Facts do
   """
   @spec parse(Envelope.t(), integer()) :: {fact(), [user()]} | :none
   def parse(%Envelope{} = e, channel_id) do
-    # kicksdk reads the body by its type (`Kicksdk.Webhooks.parse/2`).
-    with true <- String.valid?(e.body),
-         {:ok, event} <- Kicksdk.Webhooks.parse(e.event_type, e.body) do
-      fact(event, e, channel_id)
-    else
-      _ -> :none
+    # kicksdk reads the body by its type (`Kicksdk.Webhooks.parse/2`); one
+    # that isn't UTF-8, or isn't the type's shape, is an error.
+    case Kicksdk.Webhooks.parse(e.event_type, e.body) do
+      {:ok, event} -> fact(event, e, channel_id)
+      {:error, _} -> :none
     end
   end
 

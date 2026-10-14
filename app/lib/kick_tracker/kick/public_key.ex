@@ -123,7 +123,7 @@ defmodule KickTracker.Kick.PublicKey do
              connect_options: [timeout: timeout]
            ),
          {:ok, pem} <-
-           KickTracker.Kick.HTTP.parse(&Kicksdk.PublicApi.parse_public_key/2, status, body) do
+           Kicksdk.PublicApi.parse_public_key(status, body) do
       {:ok, pem}
     else
       other -> {:error, {url, other}}

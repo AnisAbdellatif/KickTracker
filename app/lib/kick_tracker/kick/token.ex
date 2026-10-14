@@ -78,7 +78,7 @@ defmodule KickTracker.Kick.Token do
 
     case KickTracker.Kick.HTTP.send(request) do
       {:ok, status, body} ->
-        case KickTracker.Kick.HTTP.parse(&Kicksdk.PublicApi.parse_app_token/2, status, body) do
+        case Kicksdk.PublicApi.parse_app_token(status, body) do
           {:ok, %{"access_token" => token} = parsed} ->
             {:ok, token, parsed["expires_in"]}
 

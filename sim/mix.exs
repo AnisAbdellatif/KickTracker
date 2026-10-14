@@ -33,7 +33,7 @@ defmodule Sim.MixProject do
       {:stream_data, "~> 1.4", only: :test},
       # The client the app uses (KICK.md): tests drive the fake realtime
       # server with it, so the fake answers what kicksdk expects of Kick.
-      {:kicksdk, "~> 0.1.1", only: :test}
+      {:kicksdk, "~> 0.2.0", only: :test}
     ]
   end
 end

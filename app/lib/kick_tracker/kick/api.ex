@@ -27,7 +27,7 @@ defmodule KickTracker.Kick.API do
   def livestreams(user_ids) when length(user_ids) <= @max_batch,
     do:
       request(
-        &hd(PublicApi.livestreams_requests(&1, user_ids, &2)),
+        &first(PublicApi.livestreams_requests(&1, user_ids, &2)),
         &PublicApi.parse_livestreams/2
       )
 
@@ -85,7 +85,7 @@ defmodule KickTracker.Kick.API do
     ids
     |> Enum.chunk_every(@max_batch)
     |> Enum.reduce_while(:ok, fn batch, :ok ->
-      case request(&hd(PublicApi.unsubscribe_requests(&1, batch, &2)), &accepted/2) do
+      case request(&first(PublicApi.unsubscribe_requests(&1, batch, &2)), &accepted/2) do
         {:ok, _} -> {:cont, :ok}
         error -> {:halt, error}
       end
@@ -114,7 +114,7 @@ defmodule KickTracker.Kick.API do
           request(build, parse, true)
 
         {:ok, status, body} ->
-          case HTTP.parse(parse, status, body) do
+          case parse.(status, body) do
             {:ok, data} -> {:ok, data}
             # Kept as before kicksdk: callers and logs know `{:http, …}`.
             {:error, {:status, status, excerpt}} -> {:error, {:http, status, excerpt}}
@@ -132,6 +132,10 @@ defmodule KickTracker.Kick.API do
   defp built({:ok, request}), do: {:ok, request}
   defp built({:error, reason}), do: {:error, reason}
   defp built(%{} = request), do: {:ok, request}
+
+  # The one request of a batched builder given at most one batch of ids.
+  defp first({:ok, [request | _]}), do: {:ok, request}
+  defp first({:error, reason}), do: {:error, reason}
 
   # 429 and transient network errors are worth a retry; anything else is
   # answered at once.
